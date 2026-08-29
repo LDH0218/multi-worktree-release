@@ -84,7 +84,7 @@ tasks:
     expected_head: <full-sha>
     acceptance_digest: <sha256-digest>
     authorization_envelope_digest: <sha256-digest>
-    dispatch_status: READY | GATED | PUBLISHED | BLOCKED | INTEGRATED | SUPERSEDED
+    dispatch_status: READY | GATED | PUBLISHED | BLOCKED | INTEGRATED | SUPERSEDED | CANCELLED
     dispatch_wave: <positive-integer>
     blocked_by: [<task-id>]
     parallel_with: [<task-id>]
@@ -289,6 +289,8 @@ Worker card:
 
 ```yaml
 state: IDLE | ACTIVE | AWAITING_INTEGRATION | BLOCKED
+record_revision: <positive-integer>
+updated_at: <rfc3339-timestamp>
 task_id: <id-or-null>
 task_spec_revision: <integer-or-null>
 task_spec_digest: <sha256-digest-or-null>
@@ -328,16 +330,23 @@ blocker: <text-or-null>
 worker_commit_sha: <full-sha-or-null>
 integrated_as_sha: <full-sha-or-null>
 release_head_sha: <full-sha-or-null>
-outcome: completed | cancelled | superseded | null
+last_task:
+  task_id: <id-or-null>
+  task_spec_revision: <integer-or-null>
+  task_spec_digest: <sha256-digest-or-null>
+  outcome: COMPLETED | CANCELLED | SUPERSEDED | null
+  worker_commit_sha: <full-sha-or-null>
+  integrated_as_sha: <full-sha-or-null>
 ```
 
 Master card uses a list; never concatenate multiple SHAs into one field:
 
 ```yaml
 state: IDLE | ACTIVE | BLOCKED
+record_revision: <positive-integer>
+updated_at: <rfc3339-timestamp>
 release_task_id: <id-or-null>
 plan_revision: <integer-or-null>
-record_revision: <integer-or-null>
 dispatch_plan_path: <absolute-path-or-null>
 dispatch_plan_digest: <sha256-digest-or-null>
 frozen_baseline_sha: <full-sha-or-null>
@@ -346,14 +355,67 @@ worker_handoffs:
     task_spec_revision: <positive-integer>
     task_spec_digest: <sha256-digest>
     plan_revision: <positive-integer>
+    dispatch_wave: <positive-integer>
     source_thread_id: <thread-id>
     role: <role>
+    frozen_baseline_sha: <full-sha>
+    authorization_envelope_digest: <sha256-digest>
+    acceptance_digest: <sha256-digest>
     worker_commit_sha: <full-sha>
     integrated_as_sha: <full-sha-or-null>
     state: RECEIVED | INTEGRATED | REWORK_REQUESTED
 release_head_sha: <full-sha-or-null>
 blocker: <text-or-null>
 ```
+
+## State transitions
+
+Only Master changes Dispatch status. Allowed transitions are:
+
+| From | To | Required evidence |
+| --- | --- | --- |
+| `GATED` | `READY` | All blockers resolved; dependency and worktree preflight pass |
+| `READY` | `PUBLISHED` | Task spec and plan persisted atomically; digests and preflight pass; message sent |
+| `GATED` or `READY` | `CANCELLED` or `SUPERSEDED` | Master decision and preserved-state check |
+| `PUBLISHED` | `BLOCKED` | Worker exception report or Master-verified blocker |
+| `BLOCKED` | `PUBLISHED` | Explicit Master recovery; unchanged digest or valid higher task revision |
+| `PUBLISHED` | `INTEGRATED` | Accepted handoff and `worker_commit_sha → integrated_as_sha` mapping |
+| `PUBLISHED` or `BLOCKED` | `CANCELLED` or `SUPERSEDED` | Master reconciliation and preserved-state outcome |
+
+`INTEGRATED`, `CANCELLED`, and `SUPERSEDED` are terminal for that task ID. A later status-only transition increments plan
+`record_revision` and `updated_at`, but not `plan_revision` or `task_spec_revision`. An executable-content change follows the
+revision and supersession rules instead of being hidden in a status transition.
+
+Only the bound Worker updates its Worker card, except that Master may do so during an explicitly recorded takeover after a
+read-only inspection. Allowed Worker transitions are:
+
+| From | To | Required evidence |
+| --- | --- | --- |
+| `IDLE` | `ACTIVE` | Matching persisted plan, task spec, card, worktree, branch, baseline, and digests |
+| `ACTIVE` | `AWAITING_INTEGRATION` | Atomic commit and completed Worker checks |
+| `ACTIVE` or `AWAITING_INTEGRATION` | `BLOCKED` | Preserved state and exception report |
+| `BLOCKED` | `ACTIVE` | Explicit Master recovery with a valid unchanged or higher task revision |
+| `AWAITING_INTEGRATION` | `ACTIVE` | Explicit rework request with a higher task revision |
+| `AWAITING_INTEGRATION` | `IDLE` | Accepted integration confirmation |
+| `ACTIVE`, `AWAITING_INTEGRATION`, or `BLOCKED` | `IDLE` | Recorded cancellation or supersession after Master reconciliation |
+
+Every card write increments its `record_revision` and updates `updated_at`. On return to `IDLE`, copy the completed task
+identity, outcome, and commit mapping into `last_task`; clear all active identity, scope, authorization, blocker, and lock fields
+to their null, empty, or default-deny values. Historical evidence remains in `last_task`, Git, the persisted task spec, and the
+Dispatch Plan rather than keeping a stale lock.
+
+Only Master updates the Master card. `IDLE → ACTIVE` requires a persisted plan; `ACTIVE → BLOCKED` records a release-level
+blocker; `BLOCKED → ACTIVE` requires a recorded recovery decision; and `ACTIVE` or `BLOCKED → IDLE` requires the release task
+to be completed, cancelled, or superseded with all Worker outcomes preserved. Worker state maps to Dispatch status as follows:
+
+| Worker state | Compatible Dispatch status |
+| --- | --- |
+| `IDLE` | No current task, or terminal `INTEGRATED` / `CANCELLED` / `SUPERSEDED` |
+| `ACTIVE` | `PUBLISHED` |
+| `AWAITING_INTEGRATION` | `PUBLISHED` |
+| `BLOCKED` | `BLOCKED` |
+
+A mismatch between these records blocks further execution until Master reconciles it; no record silently wins.
 
 `task_id + task_spec_revision + source_thread_id` is the message identity. `plan_revision` is its fencing token and
 `task_spec_digest` proves content equality. Duplicate delivery is idempotent only when the identity and digest both match.

@@ -87,6 +87,9 @@ executable message.
 - A non-IDLE task card locks only its own worktree; it does not block unrelated worktrees.
 - If a target worktree is `ACTIVE`, `AWAITING_INTEGRATION`, or `BLOCKED`, do not reuse it until Master resolves, cancels,
   supersedes, or explicitly takes over the prior task.
+- Follow the authoritative Dispatch, Worker, and Master transition tables in [references/methodology.md](references/methodology.md).
+  Status-only updates increment persisted `record_revision`, not semantic task or plan revisions. On return to `IDLE`, clear
+  active lock fields and preserve the completed identity and outcome under `last_task`.
 - If an upstream contract is not frozen, downstream Workers may perform discovery only; implementation remains gated.
 - Worktree numbering never determines task order. Dependency edges determine task order.
 - A pre-dispatch mismatch removes that task from the current batch; it does not delay independent tasks.

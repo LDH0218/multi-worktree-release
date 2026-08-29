@@ -31,7 +31,7 @@ tasks:
     expected_head: <full-sha>
     acceptance_digest: <sha256-digest>
     authorization_envelope_digest: <sha256-digest>
-    dispatch_status: READY | GATED | PUBLISHED | BLOCKED | INTEGRATED | SUPERSEDED
+    dispatch_status: READY | GATED | PUBLISHED | BLOCKED | INTEGRATED | SUPERSEDED | CANCELLED
     dispatch_wave: <positive-integer>
     blocked_by: [<task-id>]
     parallel_with: [<task-id>]
@@ -71,7 +71,7 @@ Read the persisted Dispatch Plan and complete task specification from the reposi
 `.codex/multi-worktree-release/` state directory when they exist.
 Then report the absolute path, branch, HEAD, status, preserved untracked material, and task-card state. If the card is not IDLE,
 verify its task ID, task revision, task-spec digest, plan revision, dispatch wave, frozen baseline, issuer, Worker SHA, and
-waiting condition against this handoff.
+waiting condition against this handoff. Verify card and plan `record_revision` values and the Worker/Dispatch state mapping.
 
 Do not switch branches, synchronize, merge, rebase, reset, delete historical material, run external services, create a run,
 publish, or expand scope. This generation inherits no external or destructive authorization.
@@ -246,8 +246,9 @@ Authorization status
 
 Release candidate: <PASSED/FAILED>.
 Worker handoff: <ACCEPTED/REWORK REQUIRED>; responsible findings: <NONE OR LIST>.
-Record integrated_as_sha and release_head_sha. Return to IDLE when accepted. If another layer blocks release, Master retains
-the release task or assigns that layer without occupying this accepted Worker's lock.
+Record integrated_as_sha and release_head_sha. When accepted, copy the task identity, `COMPLETED` outcome, and commit mapping to
+`last_task`, clear active lock fields to default-deny/null values, and return to IDLE. If another layer blocks release, Master
+retains the release task or assigns that layer without occupying this accepted Worker's lock.
 ```
 
 ## Master rework request
@@ -313,8 +314,9 @@ Decision: <CANCELLED / SUPERSEDED BY NEW_TASK_ID REVISION=N>
 Reason: <VERIFIED FACT OR CHANGED DECISION>
 
 Stop new implementation, external calls, and commits. Do not discard uncommitted work. First report HEAD, status, and changed
-paths, blocker kind, and preserved material. After Master reconciliation, record outcome=<CANCELLED/SUPERSEDED> and return to
-IDLE. Wait for a complete new task before doing further work.
+paths, blocker kind, and preserved material. After Master reconciliation, copy the identity and
+outcome=<CANCELLED/SUPERSEDED> to `last_task`, clear active lock fields to default-deny/null values, and return to IDLE. Wait for
+a complete new task before doing further work.
 ```
 
 ## Conversation-generation handoff
@@ -331,12 +333,14 @@ Identity and worktree
 
 Task state
 - WORKTREE_TASK: <IDLE/ACTIVE/AWAITING_INTEGRATION/BLOCKED>.
+- Worker-card record revision and updated time: <N / RFC3339_TIMESTAMP>.
 - Current plan revision: <N_OR_NULL>.
 - If non-IDLE: task_id=<ID>, task_revision=<N>, task_spec_digest=<DIGEST>, dispatch_wave=<N>, source_thread_id=<ID>,
   frozen_baseline=<SHA>.
 - Worker commit=<SHA_OR_NULL>; integrated_as_sha=<SHA_OR_NULL>; release_head_sha=<SHA_OR_NULL>.
 - Waiting condition or blocker: <TEXT_OR_NULL>.
 - Blocker kind=<KIND_OR_NULL>; blocked_since=<TIMESTAMP_OR_NULL>; recovery_owner=<ROLE_OR_THREAD_OR_NULL>.
+- If IDLE: last_task=<TASK_ID / TASK_SPEC_REVISION / TASK_SPEC_DIGEST / OUTCOME / WORKER_SHA / INTEGRATED_SHA OR NULL>.
 
 Cross-worktree facts
 - Master: <PATH / BRANCH / SHA / STATUS>.
