@@ -10,15 +10,27 @@ Use this plan before publishing implementation work. It is a semantic coordinati
 table, structured text, or a diagram. In the plan, `A -> B` means that B is blocked by A.
 
 ```yaml
+schema_version: 1
+record_revision: <positive-integer>
 release_task_id: <MASTER_RELEASE_TASK_ID>
 plan_revision: <positive-integer>
+plan_digest: <sha256-digest>
 issued_at: <timestamp>
+updated_at: <timestamp>
 issued_by: <MASTER_SOURCE_THREAD_ID>
+state_root: <absolute-path>
+task_specs_root: <absolute-path>
 tasks:
   - task_id: <id>
     task_spec_revision: <positive-integer>
     task_spec_digest: <sha256-digest>
+    task_spec_path: <absolute-path>
+    owner_role: <role>
     worktree: <absolute-path>
+    branch: <branch>
+    expected_head: <full-sha>
+    acceptance_digest: <sha256-digest>
+    authorization_envelope_digest: <sha256-digest>
     dispatch_status: READY | GATED | PUBLISHED | BLOCKED | INTEGRATED | SUPERSEDED
     dispatch_wave: <positive-integer>
     blocked_by: [<task-id>]
@@ -29,6 +41,10 @@ validation:
   acyclic_dependencies: <PASS/FAIL>
   worktree_preflight: <PASS/FAIL>
   semantic_ownership_overlap: <NONE OR LIST>
+  persisted_task_specs: <PASS/FAIL>
+  task_spec_digests: <PASS/FAIL>
+  plan_digest: <PASS/FAIL>
+  atomic_persistence: <PASS/FAIL>
 ready_wave: <positive-integer-or-null>
 blocked_tasks: [<task-id>]
 ```
@@ -39,6 +55,11 @@ content increments the affected `task_spec_revision` and digest. A changed objec
 authority boundary requires a superseding task. Unaffected active tasks continue only through an explicit digest-verified
 `GRANDFATHER` decision.
 
+Persist the complete task specification atomically and verify its digest before atomically updating this plan. Increment
+`record_revision` on every plan write and `plan_revision` only for semantic plan changes. Unless repository governance defines
+another durable path, write the plan to `<MASTER_WORKTREE>/.codex/multi-worktree-release/dispatch-plan.json` and task specs to
+the sibling `tasks/` directory. Do not dispatch from a conversation-only projection or after a partial write or digest mismatch.
+
 ## New conversation read-only bootstrap
 
 ```text
@@ -46,6 +67,8 @@ You are <PROJECT>'s <ROLE>-<GENERATION> task.
 Use only the absolute worktree <ABSOLUTE_WORKTREE> on branch <BRANCH>; expected HEAD is <FULL_SHA>.
 
 Read the repository governance, architecture index if present, WORKTREE_SCOPE.md, and WORKTREE_TASK.md completely.
+Read the persisted Dispatch Plan and complete task specification from the repository-defined paths or the default
+`.codex/multi-worktree-release/` state directory when they exist.
 Then report the absolute path, branch, HEAD, status, preserved untracked material, and task-card state. If the card is not IDLE,
 verify its task ID, task revision, task-spec digest, plan revision, dispatch wave, frozen baseline, issuer, Worker SHA, and
 waiting condition against this handoff.
@@ -63,6 +86,7 @@ dispatch wave <DISPATCH_WAVE>, issued by Master task <SOURCE_THREAD_ID> at <TIME
 It <does not supersede another task|supersedes TASK_ID>. Duplicate delivery is idempotent; reject older or mismatched messages.
 
 Worktree and baseline
+- Persisted task specification: <ABSOLUTE_PATH>
 - Absolute worktree: <PATH>
 - Branch: <BRANCH>
 - Expected HEAD: <FULL_SHA>
@@ -301,6 +325,8 @@ This is the read-only handoff from <ROLE>-<OLD_GENERATION> to <ROLE>-<NEW_GENERA
 Identity and worktree
 - Role: <ROLE>; absolute worktree: <PATH>; branch: <BRANCH>.
 - HEAD: <FULL_SHA>; expected status: <STATUS INCLUDING PRESERVED PATHS>.
+- Dispatch Plan: <ABSOLUTE_PATH / PLAN_REVISION / RECORD_REVISION / DIGEST>.
+- Persisted task specification: <ABSOLUTE_PATH_OR_NULL / TASK_SPEC_DIGEST_OR_NULL>.
 - The generation label is context only, not Git, product workflow, runtime, or authorization identity.
 
 Task state

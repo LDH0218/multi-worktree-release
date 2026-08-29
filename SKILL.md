@@ -68,9 +68,17 @@ Before publishing implementation work, Master creates a versioned Task Dependenc
 model, not a required visual diagram; it may be represented as structured text, YAML, a table, or a diagram. Read the detailed
 plan validation and state-transition rules in [references/methodology.md](references/methodology.md).
 
+Persist the normative machine record before dispatch. Unless repository governance names another location, use
+`<MASTER_WORKTREE>/.codex/multi-worktree-release/dispatch-plan.json` and store complete task specifications under the sibling
+`tasks/` directory. Each plan entry carries its absolute `task_spec_path`. Conversation text, tables, and diagrams are
+projections, not the recovery source. Write task specs and the plan atomically, verify their digests, and only then publish an
+executable message.
+
 - The plan records task IDs, absolute worktrees, `dispatch_status`, `dispatch_wave`, `blocked_by`, and `parallel_with`.
 - Every plan entry records `task_spec_revision` and `task_spec_digest`. An affected changed assignment increments its task
   revision; an unchanged active assignment may continue only through an explicit grandfather record in the new plan revision.
+- Keep semantic `plan_revision` separate from `record_revision`, which increments on every persisted state update. Preserve the
+  state directory as user-owned material whether repository policy tracks it or keeps it local.
 - Validate unique task IDs, known dependency references, acyclic dependencies, available worktrees, and no semantic file or
   contract overlap before publishing a batch.
 - If tasks have no unresolved dependency and no semantic file or contract overlap, publish them in the same parallel batch.

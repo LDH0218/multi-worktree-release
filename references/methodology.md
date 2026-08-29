@@ -42,15 +42,48 @@ The Task Dependency and Dispatch Plan is the normative coordination model for a 
 visual graph; structured text, YAML, a table, or a diagram are all valid representations. A dependency edge `A -> B` means
 that task B is blocked by task A.
 
+The normative recovery record is machine-readable and persisted in the Master worktree before dispatch. Repository governance
+may name another durable location; otherwise use:
+
+```text
+<MASTER_WORKTREE>/.codex/multi-worktree-release/
+├── dispatch-plan.json
+└── tasks/
+    └── <task-id>.json
+```
+
+This directory is Master-local by default because it contains absolute paths and live coordination state. Adoption records
+whether repository policy tracks or ignores it; neither choice authorizes cleanup. Conversation messages, tables, YAML
+renderings, and diagrams are projections of these records and cannot replace them. A task card may stay compact because the
+complete task specification is recoverable from its persisted task-spec path and digest.
+
+The default plan path is `<MASTER_WORKTREE>/.codex/multi-worktree-release/dispatch-plan.json`; task specifications use absolute
+paths beneath `<MASTER_WORKTREE>/.codex/multi-worktree-release/tasks/`.
+
 The plan is versioned and contains at least:
 
 ```yaml
+schema_version: 1
+record_revision: <positive-integer>
 plan_revision: <positive-integer>
+plan_digest: <sha256-digest>
+issued_at: <rfc3339-timestamp>
+updated_at: <rfc3339-timestamp>
+release_task_id: <id>
+issued_by: <master-source-thread-id>
+state_root: <absolute-path>
+task_specs_root: <absolute-path>
 tasks:
   - task_id: <id>
     task_spec_revision: <positive-integer>
     task_spec_digest: <sha256-digest>
+    task_spec_path: <absolute-path>
+    owner_role: <role>
     worktree: <absolute-path>
+    branch: <branch>
+    expected_head: <full-sha>
+    acceptance_digest: <sha256-digest>
+    authorization_envelope_digest: <sha256-digest>
     dispatch_status: READY | GATED | PUBLISHED | BLOCKED | INTEGRATED | SUPERSEDED
     dispatch_wave: <positive-integer>
     blocked_by: [<task-id>]
@@ -60,7 +93,8 @@ tasks:
 Before publishing a wave, Master validates that task IDs are unique, every dependency reference is known, no dependency cycle
 exists, every target worktree is available and matches its task card, and semantic file or contract ownership does not overlap.
 Mechanical overlap in generated outputs is allowed only when Master owns regeneration from the integrated sources. Master
-normalizes `parallel_with` symmetrically and computes waves from unresolved `blocked_by` edges.
+normalizes `parallel_with` symmetrically and computes waves from unresolved `blocked_by` edges. It also verifies every persisted
+task-spec path and digest, the plan digest, and the completion of each atomic replacement before sending a task message.
 
 Tasks with no unresolved blockers and no semantic overlap may be published in the same wave. A task with unresolved blockers
 remains `GATED` and is not published. A worktree preflight failure removes only that task from the current wave; it does not
@@ -74,6 +108,12 @@ inputs, outputs, acceptance, or other executable content changes in scope, incre
 `plan_revision` is a fencing token and is not part of message identity. An unaffected active task may keep its existing task
 revision only when Master records `GRANDFATHER` in the new plan, verifies that its complete persisted task-spec digest is
 unchanged, and sends no altered executable assignment. A status-only plan update does not change task content or task revision.
+
+`record_revision` increments on every persisted plan write, including status-only changes; `plan_revision` increments only for
+semantic plan changes. Compute `plan_digest` with the canonical structured-data digest rule, setting `plan_digest` to `null`
+while hashing. Persist each complete task specification first by writing a sibling temporary file, flushing it when supported,
+and atomically renaming it to the final path. Verify `task_spec_digest`, then persist the plan with the same atomic-replacement
+pattern, verify `plan_digest`, and only then publish the message. A partial write or digest mismatch stops dispatch.
 
 Separate three completion states:
 
@@ -190,6 +230,7 @@ An executable task should contain:
 task_id: <stable-id>
 task_spec_revision: <positive-integer>
 task_spec_digest: <sha256-digest>
+task_spec_path: <absolute-path>
 plan_revision: <positive-integer>
 dispatch_wave: <positive-integer>
 source_thread_id: <issuing-master-task-id>
@@ -251,6 +292,7 @@ state: IDLE | ACTIVE | AWAITING_INTEGRATION | BLOCKED
 task_id: <id-or-null>
 task_spec_revision: <integer-or-null>
 task_spec_digest: <sha256-digest-or-null>
+task_spec_path: <absolute-path-or-null>
 plan_revision: <integer-or-null>
 dispatch_wave: <integer-or-null>
 source_thread_id: <thread-id-or-null>
@@ -295,6 +337,9 @@ Master card uses a list; never concatenate multiple SHAs into one field:
 state: IDLE | ACTIVE | BLOCKED
 release_task_id: <id-or-null>
 plan_revision: <integer-or-null>
+record_revision: <integer-or-null>
+dispatch_plan_path: <absolute-path-or-null>
+dispatch_plan_digest: <sha256-digest-or-null>
 frozen_baseline_sha: <full-sha-or-null>
 worker_handoffs:
   - task_id: <worker-task-id>
@@ -379,7 +424,9 @@ authority. The new generation must not resume an affected task under an older pl
 
 If an old conversation disappears:
 
-- Recover facts from Git, governance files, and the task card.
+- Recover facts from Git, governance files, the persisted Dispatch Plan, complete task specifications, and the task card.
+- Stop recovery if the plan, task spec, or state-card identities, revisions, paths, or digests disagree; conversation history
+  cannot override a persisted mismatch.
 - For `ACTIVE` plus uncommitted changes, inspect and preserve the diff; do not commit or discard without a decision.
 - For `AWAITING_INTEGRATION`, verify the commit remains reachable and wait for Master.
 - For `BLOCKED`, preserve the blocker kind, evidence, `blocked_since`, and recovery owner.
