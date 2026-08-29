@@ -158,6 +158,7 @@ Commit and handoff
 ```text
 Task: <TASK_ID>, revision=<REVISION>, task_spec_digest=<TASK_SPEC_DIGEST>, plan_revision=<PLAN_REVISION>, dispatch_wave=<DISPATCH_WAVE>,
 source_thread_id=<SOURCE_THREAD_ID>
+Persisted task specification: <ABSOLUTE_PATH>
 Worktree: <ABSOLUTE_PATH>
 Branch: <BRANCH>
 Frozen baseline: <FULL_SHA>
@@ -171,6 +172,7 @@ Changed paths
 - <PATH>
 
 Verification
+- Acceptance digest: <SHA256_DIGEST>
 - <COMMAND>: <PASS/FAIL AND KEY EVIDENCE>
 
 Unresolved or cross-layer findings
@@ -196,6 +198,8 @@ Use when implementation must stop before handoff.
 ```text
 Task: <TASK_ID>, task_revision=<REVISION>, task_spec_digest=<TASK_SPEC_DIGEST>, plan_revision=<PLAN_REVISION>, dispatch_wave=<DISPATCH_WAVE>
 Source thread: <SOURCE_THREAD_ID>
+Dispatch Plan: <ABSOLUTE_PATH / PLAN_REVISION / RECORD_REVISION / DIGEST>
+Persisted task specification: <ABSOLUTE_PATH>
 Worktree: <ABSOLUTE_PATH>
 Branch: <BRANCH>
 Current HEAD: <FULL_SHA>
@@ -224,6 +228,9 @@ Requested Master decision
 
 ```text
 Task: <TASK_ID>, revision=<REVISION>, task_spec_digest=<TASK_SPEC_DIGEST>, plan_revision=<PLAN_REVISION>, dispatch_wave=<DISPATCH_WAVE>
+Persisted task specification: <ABSOLUTE_PATH>
+Authorization envelope digest: <SHA256_DIGEST>
+Acceptance digest: <SHA256_DIGEST>
 Worker commit: <WORKER_SHA>
 Integration mapping: <WORKER_SHA> -> <INTEGRATED_AS_SHA>
 Release-candidate HEAD: <RELEASE_HEAD_SHA>
@@ -238,8 +245,11 @@ Master gates
 Candidate evidence
 - Previous release-candidate HEAD: <SHA_OR_NONE>
 - Previous evidence: <VALID / INVALIDATED / NOT APPLICABLE>
-- Invalidation reason: <NEW INTEGRATION / REWORK / PLAN CHANGE / PROJECTION CHANGE / NONE>
+- Previous gate-input digest: <DIGEST_OR_NONE>
+- Current gate-input digest: <DIGEST>
+- Invalidation reason: <INTEGRATED-TREE CHANGE / PLAN CHANGE / AUTHORIZATION CHANGE / ACCEPTANCE CHANGE / PROJECTION CHANGE / NONE>
 - Evidence recomputed from integrated tree: <YES/NO>
+- Unintegrated Worker-only rework leaves existing candidate evidence unchanged.
 
 Authorization status
 - <EXTERNAL CALL / RUN / PUBLISH / DESTRUCTIVE ACTION ACTUALLY USED OR NOT USED>
@@ -256,6 +266,7 @@ retains the release task or assigns that layer without occupying this accepted W
 ```text
 Rework for task <TASK_ID>, task_revision=<NEXT_REVISION>, task_spec_digest=<NEW_TASK_SPEC_DIGEST>,
 plan_revision=<PLAN_REVISION>, dispatch_wave=<DISPATCH_WAVE>
+Persisted task specification: <ABSOLUTE_PATH>
 Original Worker commit: <OLD_SHA>
 Status: not accepted as a release candidate contribution. Do not amend or force-push the original commit.
 
@@ -279,6 +290,7 @@ stop and report instead of synchronizing independently.
 
 ```text
 Master plan update: <OLD_PLAN_REVISION> -> <NEW_PLAN_REVISION>
+Dispatch Plan: <ABSOLUTE_PATH / NEW_RECORD_REVISION / NEW_PLAN_DIGEST>
 Reason: <VERIFIED DEPENDENCY / ASSIGNMENT ERROR / BASELINE DRIFT / OWNERSHIP CHANGE / OTHER>
 Affected tasks: <TASK_IDS>
 Unaffected tasks explicitly verified to continue: <TASK_IDS_OR_NONE>
@@ -310,6 +322,7 @@ Older messages for affected tasks are rejected; no Worker synchronizes independe
 
 ```text
 Task: <TASK_ID>, task_revision=<CURRENT_REVISION>, task_spec_digest=<TASK_SPEC_DIGEST>, plan_revision=<PLAN_REVISION>, dispatch_wave=<DISPATCH_WAVE>
+Persisted task specification: <ABSOLUTE_PATH>
 Decision: <CANCELLED / SUPERSEDED BY NEW_TASK_ID REVISION=N>
 Reason: <VERIFIED FACT OR CHANGED DECISION>
 
@@ -349,7 +362,8 @@ Cross-worktree facts
 
 Contracts and gates
 - Current formal inputs/revisions/routes/candidate: <EXACT VALUES>.
-- Latest gates: <COMMANDS AND RESULTS>.
+- Candidate evidence: <RELEASE_HEAD_SHA / GATE_INPUT_DIGEST / NONE|STALE|PASSED|FAILED>.
+- Latest gates: <COMMANDS / RESULTS / EVIDENCE_DIGESTS>.
 - Preserved material: <PATHS AND POLICY>.
 
 Authorization

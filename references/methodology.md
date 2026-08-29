@@ -176,8 +176,9 @@ Explicit branches:
 - Unexpected dependency or assignment error: stop the affected Worker, preserve evidence, revise or supersede the affected task,
   and leave independent tasks running when their plan entries remain valid.
 - Plan revision: reject stale messages for affected tasks; publish a new revision or a superseding task through Master.
-- Candidate invalidation: clear or mark stale the affected candidate evidence after integration, rework, plan, or projection
-  changes, then rerun the required gates from the integrated tree.
+- Candidate invalidation: clear or mark stale all candidate evidence after an integrated-tree HEAD change. A plan,
+  authorization, acceptance, or projection change invalidates the gates whose inputs changed. Unintegrated Worker rework does
+  not change the candidate. Rerun required gates from the integrated tree.
 
 ## Canonical authorization envelope
 
@@ -364,7 +365,14 @@ worker_handoffs:
     worker_commit_sha: <full-sha>
     integrated_as_sha: <full-sha-or-null>
     state: RECEIVED | INTEGRATED | REWORK_REQUESTED
-release_head_sha: <full-sha-or-null>
+candidate_evidence:
+  release_head_sha: <full-sha-or-null>
+  gate_input_digest: <sha256-digest-or-null>
+  status: NONE | STALE | PASSED | FAILED
+  checks:
+    - command: <command>
+      result: PASS | FAIL
+      evidence_digest: <sha256-digest>
 blocker: <text-or-null>
 ```
 
@@ -466,9 +474,10 @@ Master should:
 
 Master rejects a handoff whose task or plan revision is stale for its affected plan entry, unless Master has explicitly verified
 that the entry is unchanged. A release candidate and its gates are valid only for the exact integrated-tree
-`release_head_sha`. Any new integration or rework invalidates all prior candidate evidence because the candidate SHA changes. A
-dependency-plan or regenerated-projection change invalidates the gates whose inputs changed; Master clears or marks the stale
-evidence and reruns the release-candidate and affected gates.
+`release_head_sha` and `gate_input_digest`. Any integrated-tree change invalidates all prior candidate evidence because the
+candidate SHA changes. A Worker-only rework that has not been integrated leaves the candidate unchanged. A dependency-plan,
+authorization, acceptance, or regenerated-projection change invalidates the gates whose inputs changed; Master clears or marks
+the stale evidence and reruns the release-candidate and affected gates.
 
 Master may resolve mechanical conflicts in generated indexes, hashes, manifests, or projections by regeneration. Semantic
 conflicts in Worker-owned inputs, compilers, or business rules return to that Worker. Unknown ownership remains blocked.

@@ -116,9 +116,10 @@ executable message.
   release candidate. Production release remains a separate authorized action.
 - Execution order and integration order are independent. Independent Workers may execute in parallel. Master may integrate
   accepted handoffs in any suitable order, but must recheck conflicts and recompute derived outputs after integration.
-- Any integration or rework invalidates all prior release-candidate evidence because `release_head_sha` changes. A
-  dependency-plan or derived-output change invalidates the gates whose inputs changed. Master recomputes evidence from the
-  integrated tree and reruns the release-candidate and affected gates.
+- Any change to the integrated Master tree changes `release_head_sha` and invalidates all prior release-candidate evidence. A
+  Worker-only rework that has not been integrated does not change the candidate. A dependency-plan, authorization,
+  acceptance, or derived-output change invalidates only the gates whose inputs changed. Master records the invalidation,
+  recomputes evidence from the integrated tree, and reruns the release-candidate and affected gates.
 - An accepted Worker handoff may return to `IDLE` even if the global candidate is blocked by another responsibility layer.
 
 ## Deliver evidence, not ceremony
