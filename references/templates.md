@@ -1,7 +1,8 @@
 # Multi-Worktree Release Templates
 
-Use only the templates relevant to the current operation. Replace every placeholder with repository-verified values. Omit
-fields that truly do not apply; do not invent values or authority.
+Use only the templates relevant to the current operation. Replace every placeholder with repository-verified values. Required
+identity, state, revision, and authorization fields are never omitted; record explicit `false`, `null`, `0`, or an empty list
+when denied or empty. Omit only fields that the canonical contract explicitly marks optional. Never invent values or authority.
 
 ## Task Dependency and Dispatch Plan
 
@@ -87,10 +88,22 @@ Explicit exclusions
 - <NON-GOAL>
 
 Authorization envelope
-- External call: <DENIED OR EXACT TARGET/INPUT/ROUTE/LIMIT/EXPIRY>
-- Create execution/job: <DENIED OR FRESH-RUN REQUIREMENT>
-- Publish: <DENIED OR EXACT TARGET>
-- Destructive action: <DENIED OR EXACT TARGET/RECOVERY>
+- Schema version: <1>
+- External call: <false OR true>
+- Create execution/job: <false OR true>
+- Publish: <false OR true>
+- Destructive action: <false OR true>
+- Exact target: <TARGET_OR_NULL>
+- Controlled input: <INPUT_OR_NULL; NEVER A SECRET>
+- Controlled-input digest: <SHA256_DIGEST_OR_NULL>
+- Route: <ROUTE_OR_NULL>
+- Provider: <PROVIDER_OR_NULL>
+- Maximum calls: <NON_NEGATIVE_INTEGER>
+- Maximum cost and unit: <NON_NEGATIVE_AMOUNT / ISO_CURRENCY_OR_PROVIDER_UNIT_OR_NULL>
+- Fresh execution required: <true OR false>
+- Resume execution ID: <EXACT_ID_OR_NULL; NULL PROHIBITS RESUMPTION>
+- Expiry: <RFC3339_TIMESTAMP_OR_NULL>
+- Envelope digest: <SHA256_DIGEST_OR_NULL>
 - Scope expansion and synchronization: denied unless separately listed above.
 
 Acceptance
@@ -141,6 +154,7 @@ Plan and lock status
 - Blocker: <NONE OR BLOCKER_KIND AND EVIDENCE>
 
 Authorization statement
+- Envelope digest: <SHA256_DIGEST>
 - <EXTERNAL CALLS USED OR NOT USED>
 - <EXECUTION/JOB CREATED OR NOT CREATED>
 - <PUBLICATION OR DESTRUCTIVE ACTION USED OR NOT USED>
@@ -224,7 +238,7 @@ Evidence
 Allowed paths: <PATHS>
 Forbidden paths: <PATHS>
 Baseline for successor task: <FULL_SHA>
-Authorization: <EXACT ENVELOPE; DEFAULT DENY>
+Authorization: <COMPLETE CANONICAL ENVELOPE; KEEP EVERY REQUIRED FIELD; DEFAULT DENY>
 Acceptance: <COMMANDS>
 
 Return the task card to ACTIVE and create a successor commit. Report both old and new SHAs. If the worktree or baseline differs,

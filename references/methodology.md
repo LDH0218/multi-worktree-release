@@ -132,6 +132,45 @@ Explicit branches:
 - Candidate invalidation: clear or mark stale the affected candidate evidence after integration, rework, plan, or projection
   changes, then rerun the required gates from the integrated tree.
 
+## Canonical authorization envelope
+
+Every executable task, non-IDLE Worker card, rework request, and persisted task specification uses the same complete
+authorization envelope. All fields are required. A denied capability remains explicit as `false`, `null`, or `0`; a missing
+field is invalid and never grants authority.
+
+```yaml
+authorization:
+  schema_version: 1
+  real_external_call: false
+  create_execution: false
+  publish: false
+  destructive_operation: false
+  target: null
+  controlled_input: null
+  controlled_input_digest: null
+  route: null
+  provider: null
+  max_calls: 0
+  max_cost: 0
+  cost_unit: null
+  fresh_execution_required: true
+  resume_execution_id: null
+  expires_at: null
+  envelope_digest: null
+```
+
+When a capability is allowed, `target`, `controlled_input`, `controlled_input_digest`, route/provider, applicable limits, and
+an RFC 3339 `expires_at` must be concrete. `max_cost` is non-negative and `cost_unit` identifies an ISO 4217 currency or an
+explicit provider billing unit. `resume_execution_id: null` prohibits resumption. A non-null resume ID authorizes only that
+exact execution and only when the task explicitly permits resumption; `fresh_execution_required: true` and a non-null resume
+ID are mutually exclusive. Secrets are never valid controlled inputs or state-card values.
+
+Digests use `sha256:<64-lowercase-hex>`. For structured data, hash UTF-8 JSON with object keys recursively sorted, arrays kept
+in order, and no insignificant whitespace. For files or byte streams, hash the exact bytes. Compute `envelope_digest` over the
+authorization object with `envelope_digest` itself set to `null`. The digest is an integrity check, not a grant of authority.
+Any change to the authorization envelope is an authority-boundary change and requires a superseding task rather than an
+in-place revision.
+
 ## Task publication contract
 
 An executable task should contain:
@@ -165,15 +204,19 @@ dependencies:
   parallel_with: [<task-id>]
   blocked_by: [<task-id>]
 authorization:
+  schema_version: 1
   real_external_call: false
   create_execution: false
   publish: false
   destructive_operation: false
   target: null
   controlled_input: null
+  controlled_input_digest: null
   route: null
+  provider: null
   max_calls: 0
   max_cost: 0
+  cost_unit: null
   fresh_execution_required: true
   resume_execution_id: null
   expires_at: null
@@ -205,16 +248,23 @@ frozen_baseline_sha: <full-sha-or-null>
 allowed_paths: [<path>]
 forbidden_paths: [<path>]
 authorization:
+  schema_version: 1
   real_external_call: false
   create_execution: false
   publish: false
   destructive_operation: false
   target: null
+  controlled_input: null
   controlled_input_digest: null
   route: null
+  provider: null
   max_calls: 0
-  envelope_digest: null
+  max_cost: 0
+  cost_unit: null
+  fresh_execution_required: true
+  resume_execution_id: null
   expires_at: null
+  envelope_digest: null
 acceptance_commands: [<command>]
 blocker_kind: DEPENDENCY | ASSIGNMENT | BASELINE | OWNERSHIP | ENVIRONMENT | AUTHORITY | WORKTREE | null
 blocked_since: <timestamp-or-null>

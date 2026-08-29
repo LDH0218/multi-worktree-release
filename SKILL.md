@@ -39,9 +39,11 @@ product workflow/module, runtime execution, and external authorization. A conver
 contract revision, release credential, or permission.
 
 External calls, new executions/jobs, production publication, destructive actions, cross-worktree synchronization, and scope
-expansion are default-deny. Require a current explicit authorization envelope binding the task, exact target, controlled input
-and digest, route/provider, limits, fresh-run requirement, prohibited resumptions, and expiry. Never store secrets in prompts,
-task cards, or handoff reports.
+expansion are default-deny. Use the canonical authorization envelope in [references/methodology.md](references/methodology.md)
+to bind the task, exact target, controlled input and digest, route/provider, call and cost limits, fresh-run requirement,
+prohibited resumptions, and expiry. Keep every required field even when denied by recording `false`, `null`, or `0`; omission
+never grants authority. Never store secrets in prompts, task cards, or handoff reports. An authority-boundary change cannot
+widen an existing task in place; publish a superseding task with a new authorization envelope.
 
 ## Coordinate through the Master
 
