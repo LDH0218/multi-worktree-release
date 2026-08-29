@@ -39,7 +39,26 @@ class ContractError(ValueError):
 
 
 def canonical_json(value: Any) -> bytes:
+    ensure_canonical_value(value)
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def ensure_canonical_value(value: Any, path: str = "$") -> None:
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float):
+        raise ContractError(f"floating-point digest input is forbidden at {path}")
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            ensure_canonical_value(item, f"{path}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ContractError(f"non-string object key is forbidden at {path}")
+            ensure_canonical_value(item, f"{path}.{key}")
+        return
+    raise ContractError(f"unsupported digest input type at {path}: {type(value).__name__}")
 
 
 def object_digest(value: dict[str, Any], digest_field: str) -> str:
@@ -98,8 +117,8 @@ def validate_authorization(value: dict[str, Any], schema: dict[str, Any]) -> Non
             raise ContractError(f"authorization.{field} must be boolean")
     if not isinstance(value["max_calls"], int) or isinstance(value["max_calls"], bool) or value["max_calls"] < 0:
         raise ContractError("authorization.max_calls must be a non-negative integer")
-    if not isinstance(value["max_cost"], (int, float)) or isinstance(value["max_cost"], bool) or value["max_cost"] < 0:
-        raise ContractError("authorization.max_cost must be a non-negative number")
+    if not isinstance(value["max_cost"], int) or isinstance(value["max_cost"], bool) or value["max_cost"] < 0:
+        raise ContractError("authorization.max_cost must be a non-negative integer")
     if value["fresh_execution_required"] and value["resume_execution_id"] is not None:
         raise ContractError("fresh execution and resume ID are mutually exclusive")
     validate_digest(value["controlled_input_digest"], "controlled_input_digest", allow_null=True)
@@ -127,6 +146,8 @@ def validate_authorization(value: dict[str, Any], schema: dict[str, Any]) -> Non
 
 def validate_task_spec(value: dict[str, Any], schema: dict[str, Any]) -> None:
     require_exact_fields(value, schema_required(schema, "task_spec"), "task spec")
+    if value["schema_version"] != 1:
+        raise ContractError("task_spec.schema_version must be 1")
     validate_authorization(value["authorization"], schema)
     validate_rfc3339(value["issued_at"], "task_spec.issued_at")
     validate_digest(value["task_spec_digest"], "task_spec_digest")
@@ -237,6 +258,8 @@ def validate_persisted_plan_specs(value: dict[str, Any], schema: dict[str, Any])
 
 def validate_worker_card(value: dict[str, Any], schema: dict[str, Any]) -> None:
     require_exact_fields(value, schema_required(schema, "worker_card"), "Worker card")
+    if value["schema_version"] != 1:
+        raise ContractError("worker_card.schema_version must be 1")
     validate_authorization(value["authorization"], schema)
     validate_rfc3339(value["updated_at"], "worker_card.updated_at")
     validate_rfc3339(value["issued_at"], "worker_card.issued_at", allow_null=True)
@@ -270,6 +293,8 @@ def validate_worker_card(value: dict[str, Any], schema: dict[str, Any]) -> None:
 
 def validate_master_card(value: dict[str, Any], schema: dict[str, Any]) -> None:
     require_exact_fields(value, schema_required(schema, "master_card"), "Master card")
+    if value["schema_version"] != 1:
+        raise ContractError("master_card.schema_version must be 1")
     if value["state"] not in set(schema["$defs"]["master_state"]["enum"]):
         raise ContractError(f"unknown Master state: {value['state']}")
     validate_rfc3339(value["updated_at"], "master_card.updated_at")
@@ -439,6 +464,10 @@ class ContractScenarios(unittest.TestCase):
         value["envelope_digest"] = object_digest(value, "envelope_digest")
         validate_authorization(value, self.schema)
 
+    def test_floating_point_digest_input_is_rejected(self) -> None:
+        with self.assertRaises(ContractError):
+            value_digest({"cost": 1.5})
+
     def test_revision_and_supersession_decisions(self) -> None:
         old = {"task_id": "A", "task_spec_revision": 1, "task_spec_digest": "sha256:" + "1" * 64,
                "plan_revision": 1, "objective": "x", "owner_role": "api", "worktree": "/w", "expected_head": "a" * 40,
@@ -581,6 +610,7 @@ def make_plan(tasks: list[dict[str, Any]]) -> dict[str, Any]:
 
 def make_task_spec() -> dict[str, Any]:
     task = {
+        "schema_version": 1,
         "task_id": "A",
         "task_spec_revision": 1,
         "task_spec_digest": None,
@@ -615,6 +645,7 @@ def make_task_spec() -> dict[str, Any]:
 
 def make_idle_worker_card() -> dict[str, Any]:
     return {
+        "schema_version": 1,
         "state": "IDLE",
         "record_revision": 1,
         "updated_at": "2026-01-01T00:00:00Z",
@@ -675,6 +706,7 @@ def make_active_worker_card() -> dict[str, Any]:
 
 def make_idle_master_card() -> dict[str, Any]:
     return {
+        "schema_version": 1,
         "state": "IDLE",
         "record_revision": 1,
         "updated_at": "2026-01-01T00:00:00Z",

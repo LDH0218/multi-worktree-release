@@ -46,7 +46,7 @@
         "route": {"type": ["string", "null"]},
         "provider": {"type": ["string", "null"]},
         "max_calls": {"type": "integer", "minimum": 0},
-        "max_cost": {"type": "number", "minimum": 0},
+        "max_cost": {"type": "integer", "minimum": 0},
         "cost_unit": {"type": ["string", "null"]},
         "fresh_execution_required": {"type": "boolean"},
         "resume_execution_id": {"type": ["string", "null"]},
@@ -58,6 +58,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "schema_version",
         "task_id",
         "task_spec_revision",
         "task_spec_digest",
@@ -87,6 +88,7 @@
         "stop_conditions"
       ],
       "properties": {
+        "schema_version": {"const": 1},
         "task_id": {"type": "string", "minLength": 1},
         "task_spec_revision": {"type": "integer", "minimum": 1},
         "task_spec_digest": {"$ref": "#/$defs/required_digest"},
@@ -253,6 +255,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "schema_version",
         "state",
         "record_revision",
         "updated_at",
@@ -281,6 +284,7 @@
         "last_task"
       ],
       "properties": {
+        "schema_version": {"const": 1},
         "state": {"$ref": "#/$defs/worker_state"},
         "record_revision": {"type": "integer", "minimum": 1},
         "updated_at": {"type": "string", "format": "date-time"},
@@ -372,6 +376,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "schema_version",
         "state",
         "record_revision",
         "updated_at",
@@ -385,6 +390,7 @@
         "blocker"
       ],
       "properties": {
+        "schema_version": {"const": 1},
         "state": {"$ref": "#/$defs/master_state"},
         "record_revision": {"type": "integer", "minimum": 1},
         "updated_at": {"type": "string", "format": "date-time"},

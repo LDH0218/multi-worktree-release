@@ -227,16 +227,17 @@ authorization:
 ```
 
 When a capability is allowed, `target`, `controlled_input`, `controlled_input_digest`, route/provider, applicable limits, and
-an RFC 3339 `expires_at` must be concrete. `max_cost` is non-negative and `cost_unit` identifies an ISO 4217 currency or an
-explicit provider billing unit. `resume_execution_id: null` prohibits resumption. A non-null resume ID authorizes only that
-exact execution and only when the task explicitly permits resumption; `fresh_execution_required: true` and a non-null resume
-ID are mutually exclusive. Secrets are never valid controlled inputs or state-card values.
+an RFC 3339 `expires_at` must be concrete. `max_cost` is a non-negative integer count and `cost_unit` identifies the exact
+atomic unit, such as `USD-cent` or a provider credit. `resume_execution_id: null` prohibits resumption. A non-null resume ID
+authorizes only that exact execution and only when the task explicitly permits resumption; `fresh_execution_required: true`
+and a non-null resume ID are mutually exclusive. Secrets are never valid controlled inputs or state-card values.
 
-Digests use `sha256:<64-lowercase-hex>`. For structured data, hash UTF-8 JSON with object keys recursively sorted, arrays kept
-in order, and no insignificant whitespace. For files or byte streams, hash the exact bytes. Compute `envelope_digest` over the
-authorization object with `envelope_digest` itself set to `null`. The digest is an integrity check, not a grant of authority.
-Any change to the authorization envelope is an authority-boundary change and requires a superseding task rather than an
-in-place revision.
+Digests use `sha256:<64-lowercase-hex>`. Structured digest inputs use only null, booleans, integers, strings, arrays, and objects
+with string keys; floating-point values are invalid and decimals use strings or integer units. Hash UTF-8 JSON with object keys
+recursively sorted, arrays kept in order, strings preserved exactly as stored, and no insignificant whitespace. For files or
+byte streams, hash the exact bytes. Compute `envelope_digest` over the authorization object with `envelope_digest` itself set
+to `null`. The digest is an integrity check, not a grant of authority. Any change to the authorization envelope is an
+authority-boundary change and requires a superseding task rather than an in-place revision.
 
 Compute `task_spec_digest` with the same structured-data rule over the complete persisted task specification, with
 `task_spec_digest` itself set to `null`. Messages may render that specification as prose, but they must carry its digest and may
@@ -247,6 +248,7 @@ not change executable meaning. An equal task identity with a different task-spec
 An executable task should contain:
 
 ```yaml
+schema_version: 1
 task_id: <stable-id>
 task_spec_revision: <positive-integer>
 task_spec_digest: <sha256-digest>
@@ -308,6 +310,7 @@ acceptance criteria.
 Worker card:
 
 ```yaml
+schema_version: 1
 state: IDLE | ACTIVE | AWAITING_INTEGRATION | BLOCKED
 record_revision: <positive-integer>
 updated_at: <rfc3339-timestamp>
@@ -362,6 +365,7 @@ last_task:
 Master card uses a list; never concatenate multiple SHAs into one field:
 
 ```yaml
+schema_version: 1
 state: IDLE | ACTIVE | BLOCKED
 record_revision: <positive-integer>
 updated_at: <rfc3339-timestamp>

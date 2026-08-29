@@ -88,8 +88,8 @@ After the read-only check, report inconsistencies and stop; otherwise update you
 ## Master to Worker task
 
 ```text
-This is <PROJECT> task <TASK_ID>, revision <REVISION>, task-spec digest <TASK_SPEC_DIGEST>, plan revision <PLAN_REVISION>,
-dispatch wave <DISPATCH_WAVE>, issued by Master task <SOURCE_THREAD_ID> at <TIMESTAMP>.
+This is <PROJECT> schema version <1>, task <TASK_ID>, revision <REVISION>, task-spec digest <TASK_SPEC_DIGEST>, plan revision
+<PLAN_REVISION>, dispatch wave <DISPATCH_WAVE>, issued by Master task <SOURCE_THREAD_ID> at <TIMESTAMP>.
 It <does not supersede another task|supersedes TASK_ID>. Duplicate delivery is idempotent; reject older or mismatched messages.
 
 Worktree and baseline
@@ -134,7 +134,7 @@ Authorization envelope
 - Route: <ROUTE_OR_NULL>
 - Provider: <PROVIDER_OR_NULL>
 - Maximum calls: <NON_NEGATIVE_INTEGER>
-- Maximum cost and unit: <NON_NEGATIVE_AMOUNT / ISO_CURRENCY_OR_PROVIDER_UNIT_OR_NULL>
+- Maximum cost and unit: <NON_NEGATIVE_INTEGER / EXACT_ATOMIC_UNIT_OR_NULL>
 - Fresh execution required: <true OR false>
 - Resume execution ID: <EXACT_ID_OR_NULL; NULL PROHIBITS RESUMPTION>
 - Expiry: <RFC3339_TIMESTAMP_OR_NULL>
