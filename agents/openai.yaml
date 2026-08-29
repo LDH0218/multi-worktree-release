@@ -1,0 +1,4 @@
+interface:
+  display_name: "Multi-Worktree Release"
+  short_description: "Coordinate multi-thread, multi-worktree delivery"
+  default_prompt: "Use $multi-worktree-release to audit this repository and design a safe multi-thread, multi-worktree release workflow."
