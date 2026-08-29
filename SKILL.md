@@ -22,6 +22,10 @@ whose current repository protocol does not already settle the decision. Read [re
 only when producing or validating task cards, dependency and dispatch plans, cross-task messages, exception reports, handoffs,
 integration confirmations, or rotation prompts.
 
+Read [references/contracts.schema.json](references/contracts.schema.json) when producing or validating persisted machine
+records. After changing this Skill's contracts, or before relying on newly created plan/task/card records, run
+`python3 scripts/validate_contracts.py` and resolve every failed invariant.
+
 ## Establish repository truth first
 
 1. Read repository-owned agent instructions and the governance files they route to. If present, inspect architecture indexes,
@@ -77,6 +81,8 @@ executable message.
 - The plan records task IDs, absolute worktrees, `dispatch_status`, `dispatch_wave`, `blocked_by`, and `parallel_with`.
 - Every plan entry records `task_spec_revision` and `task_spec_digest`. An affected changed assignment increments its task
   revision; an unchanged active assignment may continue only through an explicit grandfather record in the new plan revision.
+- A grandfathered entry preserves its persisted task spec and records that spec's original `task_spec_plan_revision`; it does
+  not rewrite the task merely to copy the newer global fence.
 - Keep semantic `plan_revision` separate from `record_revision`, which increments on every persisted state update. Preserve the
   state directory as user-owned material whether repository policy tracks it or keeps it local.
 - Validate unique task IDs, known dependency references, acyclic dependencies, available worktrees, and no semantic file or

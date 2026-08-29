@@ -1,0 +1,402 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:multi-worktree-release:contracts:1",
+  "title": "Multi-Worktree Release Contracts",
+  "type": "object",
+  "$defs": {
+    "digest": {
+      "type": ["string", "null"],
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "required_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "real_external_call",
+        "create_execution",
+        "publish",
+        "destructive_operation",
+        "target",
+        "controlled_input",
+        "controlled_input_digest",
+        "route",
+        "provider",
+        "max_calls",
+        "max_cost",
+        "cost_unit",
+        "fresh_execution_required",
+        "resume_execution_id",
+        "expires_at",
+        "envelope_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "real_external_call": {"type": "boolean"},
+        "create_execution": {"type": "boolean"},
+        "publish": {"type": "boolean"},
+        "destructive_operation": {"type": "boolean"},
+        "target": {"type": ["string", "null"]},
+        "controlled_input": {},
+        "controlled_input_digest": {"$ref": "#/$defs/digest"},
+        "route": {"type": ["string", "null"]},
+        "provider": {"type": ["string", "null"]},
+        "max_calls": {"type": "integer", "minimum": 0},
+        "max_cost": {"type": "number", "minimum": 0},
+        "cost_unit": {"type": ["string", "null"]},
+        "fresh_execution_required": {"type": "boolean"},
+        "resume_execution_id": {"type": ["string", "null"]},
+        "expires_at": {"type": ["string", "null"], "format": "date-time"},
+        "envelope_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "task_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "task_spec_revision",
+        "task_spec_digest",
+        "task_spec_path",
+        "plan_revision",
+        "dispatch_wave",
+        "source_thread_id",
+        "issued_at",
+        "supersedes_task_id",
+        "generation",
+        "owner_role",
+        "worktree",
+        "branch",
+        "expected_head",
+        "task_class",
+        "objective",
+        "current_state",
+        "allowed_paths",
+        "forbidden_paths",
+        "inputs",
+        "outputs",
+        "derived_outputs",
+        "dependencies",
+        "authorization",
+        "acceptance",
+        "commit_message",
+        "stop_conditions"
+      ],
+      "properties": {
+        "task_id": {"type": "string", "minLength": 1},
+        "task_spec_revision": {"type": "integer", "minimum": 1},
+        "task_spec_digest": {"$ref": "#/$defs/required_digest"},
+        "task_spec_path": {"type": "string", "minLength": 1},
+        "plan_revision": {"type": "integer", "minimum": 1},
+        "dispatch_wave": {"type": "integer", "minimum": 1},
+        "source_thread_id": {"type": "string", "minLength": 1},
+        "issued_at": {"type": "string", "format": "date-time"},
+        "supersedes_task_id": {"type": ["string", "null"]},
+        "generation": {"type": "string", "minLength": 1},
+        "owner_role": {"type": "string", "minLength": 1},
+        "worktree": {"type": "string", "minLength": 1},
+        "branch": {"type": "string", "minLength": 1},
+        "expected_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "task_class": {"type": "string", "minLength": 1},
+        "objective": {"type": "string", "minLength": 1},
+        "current_state": {},
+        "allowed_paths": {"type": "array", "items": {"type": "string"}},
+        "forbidden_paths": {"type": "array", "items": {"type": "string"}},
+        "inputs": {"type": "array", "items": {"type": "object"}},
+        "outputs": {"type": "array"},
+        "derived_outputs": {"type": "object"},
+        "dependencies": {"type": "object"},
+        "authorization": {"$ref": "#/$defs/authorization"},
+        "acceptance": {"type": "array"},
+        "commit_message": {"type": "string", "minLength": 1},
+        "stop_conditions": {"type": "array"}
+      }
+    },
+    "dispatch_task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "task_spec_revision",
+        "task_spec_digest",
+        "task_spec_path",
+        "task_spec_plan_revision",
+        "revision_decision",
+        "owner_role",
+        "worktree",
+        "branch",
+        "expected_head",
+        "acceptance_digest",
+        "authorization_envelope_digest",
+        "dispatch_status",
+        "dispatch_wave",
+        "blocked_by",
+        "parallel_with"
+      ],
+      "properties": {
+        "task_id": {"type": "string", "minLength": 1},
+        "task_spec_revision": {"type": "integer", "minimum": 1},
+        "task_spec_digest": {"$ref": "#/$defs/required_digest"},
+        "task_spec_path": {"type": "string", "minLength": 1},
+        "task_spec_plan_revision": {"type": "integer", "minimum": 1},
+        "revision_decision": {"enum": ["NEW", "GRANDFATHER", "REVISE", "SUPERSEDE", "CANCELLED"]},
+        "owner_role": {"type": "string", "minLength": 1},
+        "worktree": {"type": "string", "minLength": 1},
+        "branch": {"type": "string", "minLength": 1},
+        "expected_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "acceptance_digest": {"$ref": "#/$defs/required_digest"},
+        "authorization_envelope_digest": {"$ref": "#/$defs/required_digest"},
+        "dispatch_status": {
+          "enum": ["READY", "GATED", "PUBLISHED", "BLOCKED", "INTEGRATED", "SUPERSEDED", "CANCELLED"]
+        },
+        "dispatch_wave": {"type": "integer", "minimum": 1},
+        "blocked_by": {"type": "array", "items": {"type": "string"}},
+        "parallel_with": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "dispatch_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_revision",
+        "plan_revision",
+        "plan_digest",
+        "issued_at",
+        "updated_at",
+        "release_task_id",
+        "issued_by",
+        "state_root",
+        "task_specs_root",
+        "tasks",
+        "validation",
+        "ready_wave",
+        "blocked_tasks"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "record_revision": {"type": "integer", "minimum": 1},
+        "plan_revision": {"type": "integer", "minimum": 1},
+        "plan_digest": {"$ref": "#/$defs/required_digest"},
+        "issued_at": {"type": "string", "format": "date-time"},
+        "updated_at": {"type": "string", "format": "date-time"},
+        "release_task_id": {"type": "string", "minLength": 1},
+        "issued_by": {"type": "string", "minLength": 1},
+        "state_root": {"type": "string", "minLength": 1},
+        "task_specs_root": {"type": "string", "minLength": 1},
+        "tasks": {"type": "array", "items": {"$ref": "#/$defs/dispatch_task"}},
+        "validation": {"$ref": "#/$defs/plan_validation"},
+        "ready_wave": {"type": ["integer", "null"], "minimum": 1},
+        "blocked_tasks": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "plan_validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unique_task_ids",
+        "known_dependency_references",
+        "acyclic_dependencies",
+        "worktree_preflight",
+        "semantic_ownership_overlap",
+        "persisted_task_specs",
+        "task_spec_digests",
+        "plan_digest",
+        "atomic_persistence"
+      ],
+      "properties": {
+        "unique_task_ids": {"enum": ["PASS", "FAIL"]},
+        "known_dependency_references": {"enum": ["PASS", "FAIL"]},
+        "acyclic_dependencies": {"enum": ["PASS", "FAIL"]},
+        "worktree_preflight": {"enum": ["PASS", "FAIL"]},
+        "semantic_ownership_overlap": {"type": ["string", "array"]},
+        "persisted_task_specs": {"enum": ["PASS", "FAIL"]},
+        "task_spec_digests": {"enum": ["PASS", "FAIL"]},
+        "plan_digest": {"enum": ["PASS", "FAIL"]},
+        "atomic_persistence": {"enum": ["PASS", "FAIL"]}
+      }
+    },
+    "worker_state": {
+      "enum": ["IDLE", "ACTIVE", "AWAITING_INTEGRATION", "BLOCKED"]
+    },
+    "master_state": {
+      "enum": ["IDLE", "ACTIVE", "BLOCKED"]
+    },
+    "task_outcome": {
+      "enum": ["COMPLETED", "CANCELLED", "SUPERSEDED", null]
+    },
+    "last_task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "task_spec_revision",
+        "task_spec_digest",
+        "outcome",
+        "worker_commit_sha",
+        "integrated_as_sha"
+      ],
+      "properties": {
+        "task_id": {"type": ["string", "null"]},
+        "task_spec_revision": {"type": ["integer", "null"], "minimum": 1},
+        "task_spec_digest": {"$ref": "#/$defs/digest"},
+        "outcome": {"$ref": "#/$defs/task_outcome"},
+        "worker_commit_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "integrated_as_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "worker_card": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "record_revision",
+        "updated_at",
+        "task_id",
+        "task_spec_revision",
+        "task_spec_digest",
+        "task_spec_path",
+        "plan_revision",
+        "dispatch_wave",
+        "source_thread_id",
+        "issued_at",
+        "supersedes_task_id",
+        "worker_generation",
+        "frozen_baseline_sha",
+        "allowed_paths",
+        "forbidden_paths",
+        "authorization",
+        "acceptance_commands",
+        "blocker_kind",
+        "blocked_since",
+        "recovery_owner",
+        "blocker",
+        "worker_commit_sha",
+        "integrated_as_sha",
+        "release_head_sha",
+        "last_task"
+      ],
+      "properties": {
+        "state": {"$ref": "#/$defs/worker_state"},
+        "record_revision": {"type": "integer", "minimum": 1},
+        "updated_at": {"type": "string", "format": "date-time"},
+        "task_id": {"type": ["string", "null"]},
+        "task_spec_revision": {"type": ["integer", "null"], "minimum": 1},
+        "task_spec_digest": {"$ref": "#/$defs/digest"},
+        "task_spec_path": {"type": ["string", "null"]},
+        "plan_revision": {"type": ["integer", "null"], "minimum": 1},
+        "dispatch_wave": {"type": ["integer", "null"], "minimum": 1},
+        "source_thread_id": {"type": ["string", "null"]},
+        "issued_at": {"type": ["string", "null"], "format": "date-time"},
+        "supersedes_task_id": {"type": ["string", "null"]},
+        "worker_generation": {"type": ["string", "null"]},
+        "frozen_baseline_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "allowed_paths": {"type": "array", "items": {"type": "string"}},
+        "forbidden_paths": {"type": "array", "items": {"type": "string"}},
+        "authorization": {"$ref": "#/$defs/authorization"},
+        "acceptance_commands": {"type": "array", "items": {"type": "string"}},
+        "blocker_kind": {
+          "enum": ["DEPENDENCY", "ASSIGNMENT", "BASELINE", "OWNERSHIP", "ENVIRONMENT", "AUTHORITY", "WORKTREE", null]
+        },
+        "blocked_since": {"type": ["string", "null"]},
+        "recovery_owner": {"type": ["string", "null"]},
+        "blocker": {"type": ["string", "null"]},
+        "worker_commit_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "integrated_as_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "release_head_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "last_task": {"$ref": "#/$defs/last_task"}
+      }
+    },
+    "worker_handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "task_spec_revision",
+        "task_spec_digest",
+        "plan_revision",
+        "dispatch_wave",
+        "source_thread_id",
+        "role",
+        "frozen_baseline_sha",
+        "authorization_envelope_digest",
+        "acceptance_digest",
+        "worker_commit_sha",
+        "integrated_as_sha",
+        "state"
+      ],
+      "properties": {
+        "task_id": {"type": "string", "minLength": 1},
+        "task_spec_revision": {"type": "integer", "minimum": 1},
+        "task_spec_digest": {"$ref": "#/$defs/required_digest"},
+        "plan_revision": {"type": "integer", "minimum": 1},
+        "dispatch_wave": {"type": "integer", "minimum": 1},
+        "source_thread_id": {"type": "string", "minLength": 1},
+        "role": {"type": "string", "minLength": 1},
+        "frozen_baseline_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "authorization_envelope_digest": {"$ref": "#/$defs/required_digest"},
+        "acceptance_digest": {"$ref": "#/$defs/required_digest"},
+        "worker_commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "integrated_as_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "state": {"enum": ["RECEIVED", "INTEGRATED", "REWORK_REQUESTED"]}
+      }
+    },
+    "candidate_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["release_head_sha", "gate_input_digest", "status", "checks"],
+      "properties": {
+        "release_head_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "gate_input_digest": {"$ref": "#/$defs/digest"},
+        "status": {"enum": ["NONE", "STALE", "PASSED", "FAILED"]},
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["command", "result", "evidence_digest"],
+            "properties": {
+              "command": {"type": "string", "minLength": 1},
+              "result": {"enum": ["PASS", "FAIL"]},
+              "evidence_digest": {"$ref": "#/$defs/required_digest"}
+            }
+          }
+        }
+      }
+    },
+    "master_card": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "record_revision",
+        "updated_at",
+        "release_task_id",
+        "plan_revision",
+        "dispatch_plan_path",
+        "dispatch_plan_digest",
+        "frozen_baseline_sha",
+        "worker_handoffs",
+        "candidate_evidence",
+        "blocker"
+      ],
+      "properties": {
+        "state": {"$ref": "#/$defs/master_state"},
+        "record_revision": {"type": "integer", "minimum": 1},
+        "updated_at": {"type": "string", "format": "date-time"},
+        "release_task_id": {"type": ["string", "null"]},
+        "plan_revision": {"type": ["integer", "null"], "minimum": 1},
+        "dispatch_plan_path": {"type": ["string", "null"]},
+        "dispatch_plan_digest": {"$ref": "#/$defs/digest"},
+        "frozen_baseline_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "worker_handoffs": {"type": "array", "items": {"$ref": "#/$defs/worker_handoff"}},
+        "candidate_evidence": {"$ref": "#/$defs/candidate_evidence"},
+        "blocker": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

@@ -3,6 +3,7 @@
 Use only the templates relevant to the current operation. Replace every placeholder with repository-verified values. Required
 identity, state, revision, and authorization fields are never omitted; record explicit `false`, `null`, `0`, or an empty list
 when denied or empty. Omit only fields that the canonical contract explicitly marks optional. Never invent values or authority.
+The machine field and enum authority is [contracts.schema.json](contracts.schema.json); these templates must remain equivalent.
 
 ## Task Dependency and Dispatch Plan
 
@@ -25,6 +26,8 @@ tasks:
     task_spec_revision: <positive-integer>
     task_spec_digest: <sha256-digest>
     task_spec_path: <absolute-path>
+    task_spec_plan_revision: <positive-integer>
+    revision_decision: NEW | GRANDFATHER | REVISE | SUPERSEDE | CANCELLED
     owner_role: <role>
     worktree: <absolute-path>
     branch: <branch>
@@ -54,6 +57,10 @@ removes only that task from the current wave. Every semantic plan change increme
 content increments the affected `task_spec_revision` and digest. A changed objective, owner, worktree, frozen baseline, or
 authority boundary requires a superseding task. Unaffected active tasks continue only through an explicit digest-verified
 `GRANDFATHER` decision.
+
+A `GRANDFATHER` entry preserves the existing task spec, digest, and its original `task_spec_plan_revision`; do not rewrite the
+task to copy the new global plan fence. `NEW` and `REVISE` task specs bind to the current plan revision. Terminal entries retain
+their last issued task-spec plan revision and digest.
 
 Persist the complete task specification atomically and verify its digest before atomically updating this plan. Increment
 `record_revision` on every plan write and `plan_revision` only for semantic plan changes. Unless repository governance defines
@@ -299,7 +306,8 @@ Task decisions
 - Task: <TASK_ID>
   Old task revision: <REVISION>
   Old task-spec digest: <DIGEST>
-  Action: <GRANDFATHER / GATE / REVISE / SUPERSEDE / CANCEL>
+  Revision decision: <GRANDFATHER / REVISE / SUPERSEDE / CANCELLED>
+  Dispatch action: <GATE / READY / PUBLISH / NONE>
   New task ID and revision: <ID_AND_REVISION_OR_NONE>
   New task-spec digest: <DIGEST_OR_NONE>
   New baseline: <FULL_SHA_OR_NONE>
@@ -316,7 +324,8 @@ Master authorization and next action
 
 The new assignment must carry the new plan revision. `REVISE` requires a higher task revision and new digest. `GRANDFATHER`
 requires an unchanged persisted digest. Objective, owner, worktree, frozen-baseline, or authority changes require `SUPERSEDE`.
-Older messages for affected tasks are rejected; no Worker synchronizes independently to satisfy the replacement baseline.
+`CANCELLED` is terminal. Dispatch gating is recorded separately from the revision decision. Older messages for affected tasks
+are rejected; no Worker synchronizes independently to satisfy the replacement baseline.
 
 ## Cancellation or supersession
 

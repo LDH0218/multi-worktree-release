@@ -60,6 +60,9 @@ complete task specification is recoverable from its persisted task-spec path and
 The default plan path is `<MASTER_WORKTREE>/.codex/multi-worktree-release/dispatch-plan.json`; task specifications use absolute
 paths beneath `<MASTER_WORKTREE>/.codex/multi-worktree-release/tasks/`.
 
+[contracts.schema.json](contracts.schema.json) is the machine-field and enum authority. The examples in this document and
+[templates.md](templates.md) are human-readable projections and must remain schema-equivalent.
+
 The plan is versioned and contains at least:
 
 ```yaml
@@ -78,6 +81,8 @@ tasks:
     task_spec_revision: <positive-integer>
     task_spec_digest: <sha256-digest>
     task_spec_path: <absolute-path>
+    task_spec_plan_revision: <positive-integer>
+    revision_decision: NEW | GRANDFATHER | REVISE | SUPERSEDE | CANCELLED
     owner_role: <role>
     worktree: <absolute-path>
     branch: <branch>
@@ -88,6 +93,18 @@ tasks:
     dispatch_wave: <positive-integer>
     blocked_by: [<task-id>]
     parallel_with: [<task-id>]
+validation:
+  unique_task_ids: <PASS/FAIL>
+  known_dependency_references: <PASS/FAIL>
+  acyclic_dependencies: <PASS/FAIL>
+  worktree_preflight: <PASS/FAIL>
+  semantic_ownership_overlap: <NONE OR LIST>
+  persisted_task_specs: <PASS/FAIL>
+  task_spec_digests: <PASS/FAIL>
+  plan_digest: <PASS/FAIL>
+  atomic_persistence: <PASS/FAIL>
+ready_wave: <positive-integer-or-null>
+blocked_tasks: [<task-id>]
 ```
 
 Before publishing a wave, Master validates that task IDs are unique, every dependency reference is known, no dependency cycle
@@ -107,7 +124,9 @@ inputs, outputs, acceptance, or other executable content changes in scope, incre
 
 `plan_revision` is a fencing token and is not part of message identity. An unaffected active task may keep its existing task
 revision only when Master records `GRANDFATHER` in the new plan, verifies that its complete persisted task-spec digest is
-unchanged, and sends no altered executable assignment. A status-only plan update does not change task content or task revision.
+unchanged, preserves the task spec's original `task_spec_plan_revision`, and sends no altered executable assignment. `NEW` and
+`REVISE` entries bind their task spec to the current plan revision. Terminal `SUPERSEDE` and `CANCELLED` entries preserve the
+last issued task-spec plan revision and digest. A status-only plan update changes none of these fields.
 
 `record_revision` increments on every persisted plan write, including status-only changes; `plan_revision` increments only for
 semantic plan changes. Compute `plan_digest` with the canonical structured-data digest rule, setting `plan_digest` to `null`
