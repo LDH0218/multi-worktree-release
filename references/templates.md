@@ -16,6 +16,8 @@ issued_at: <timestamp>
 issued_by: <MASTER_SOURCE_THREAD_ID>
 tasks:
   - task_id: <id>
+    task_spec_revision: <positive-integer>
+    task_spec_digest: <sha256-digest>
     worktree: <absolute-path>
     dispatch_status: READY | GATED | PUBLISHED | BLOCKED | INTEGRATED | SUPERSEDED
     dispatch_wave: <positive-integer>
@@ -32,8 +34,10 @@ blocked_tasks: [<task-id>]
 ```
 
 Only Master publishes executable assignments. A task with unresolved `blocked_by` remains `GATED`; a worktree preflight failure
-removes only that task from the current wave. When dependencies, waves, owners, worktrees, baselines, acceptance, or authority
-boundaries change, increment `plan_revision` and supersede or revise affected assignments.
+removes only that task from the current wave. Every semantic plan change increments `plan_revision`. Changed in-scope executable
+content increments the affected `task_spec_revision` and digest. A changed objective, owner, worktree, frozen baseline, or
+authority boundary requires a superseding task. Unaffected active tasks continue only through an explicit digest-verified
+`GRANDFATHER` decision.
 
 ## New conversation read-only bootstrap
 
@@ -43,8 +47,8 @@ Use only the absolute worktree <ABSOLUTE_WORKTREE> on branch <BRANCH>; expected 
 
 Read the repository governance, architecture index if present, WORKTREE_SCOPE.md, and WORKTREE_TASK.md completely.
 Then report the absolute path, branch, HEAD, status, preserved untracked material, and task-card state. If the card is not IDLE,
-verify its task ID, task revision, plan revision, dispatch wave, frozen baseline, issuer, Worker SHA, and waiting condition
-against this handoff.
+verify its task ID, task revision, task-spec digest, plan revision, dispatch wave, frozen baseline, issuer, Worker SHA, and
+waiting condition against this handoff.
 
 Do not switch branches, synchronize, merge, rebase, reset, delete historical material, run external services, create a run,
 publish, or expand scope. This generation inherits no external or destructive authorization.
@@ -54,8 +58,8 @@ After the read-only check, report inconsistencies and stop; otherwise update you
 ## Master to Worker task
 
 ```text
-This is <PROJECT> task <TASK_ID>, revision <REVISION>, plan revision <PLAN_REVISION>, dispatch wave <DISPATCH_WAVE>, issued by
-Master task <SOURCE_THREAD_ID> at <TIMESTAMP>.
+This is <PROJECT> task <TASK_ID>, revision <REVISION>, task-spec digest <TASK_SPEC_DIGEST>, plan revision <PLAN_REVISION>,
+dispatch wave <DISPATCH_WAVE>, issued by Master task <SOURCE_THREAD_ID> at <TIMESTAMP>.
 It <does not supersede another task|supersedes TASK_ID>. Duplicate delivery is idempotent; reject older or mismatched messages.
 
 Worktree and baseline
@@ -128,7 +132,7 @@ Commit and handoff
 ## Worker to Master handoff
 
 ```text
-Task: <TASK_ID>, revision=<REVISION>, plan_revision=<PLAN_REVISION>, dispatch_wave=<DISPATCH_WAVE>,
+Task: <TASK_ID>, revision=<REVISION>, task_spec_digest=<TASK_SPEC_DIGEST>, plan_revision=<PLAN_REVISION>, dispatch_wave=<DISPATCH_WAVE>,
 source_thread_id=<SOURCE_THREAD_ID>
 Worktree: <ABSOLUTE_PATH>
 Branch: <BRANCH>
@@ -166,7 +170,7 @@ Authorization statement
 Use when implementation must stop before handoff.
 
 ```text
-Task: <TASK_ID>, task_revision=<REVISION>, plan_revision=<PLAN_REVISION>, dispatch_wave=<DISPATCH_WAVE>
+Task: <TASK_ID>, task_revision=<REVISION>, task_spec_digest=<TASK_SPEC_DIGEST>, plan_revision=<PLAN_REVISION>, dispatch_wave=<DISPATCH_WAVE>
 Source thread: <SOURCE_THREAD_ID>
 Worktree: <ABSOLUTE_PATH>
 Branch: <BRANCH>
@@ -195,7 +199,7 @@ Requested Master decision
 ## Master integration confirmation
 
 ```text
-Task: <TASK_ID>, revision=<REVISION>, plan_revision=<PLAN_REVISION>, dispatch_wave=<DISPATCH_WAVE>
+Task: <TASK_ID>, revision=<REVISION>, task_spec_digest=<TASK_SPEC_DIGEST>, plan_revision=<PLAN_REVISION>, dispatch_wave=<DISPATCH_WAVE>
 Worker commit: <WORKER_SHA>
 Integration mapping: <WORKER_SHA> -> <INTEGRATED_AS_SHA>
 Release-candidate HEAD: <RELEASE_HEAD_SHA>
@@ -225,7 +229,8 @@ the release task or assigns that layer without occupying this accepted Worker's 
 ## Master rework request
 
 ```text
-Rework for task <TASK_ID>, task_revision=<NEXT_REVISION>, plan_revision=<PLAN_REVISION>, dispatch_wave=<DISPATCH_WAVE>
+Rework for task <TASK_ID>, task_revision=<NEXT_REVISION>, task_spec_digest=<NEW_TASK_SPEC_DIGEST>,
+plan_revision=<PLAN_REVISION>, dispatch_wave=<DISPATCH_WAVE>
 Original Worker commit: <OLD_SHA>
 Status: not accepted as a release candidate contribution. Do not amend or force-push the original commit.
 
@@ -256,8 +261,10 @@ Unaffected tasks explicitly verified to continue: <TASK_IDS_OR_NONE>
 Task decisions
 - Task: <TASK_ID>
   Old task revision: <REVISION>
+  Old task-spec digest: <DIGEST>
   Action: <GRANDFATHER / GATE / REVISE / SUPERSEDE / CANCEL>
   New task ID and revision: <ID_AND_REVISION_OR_NONE>
+  New task-spec digest: <DIGEST_OR_NONE>
   New baseline: <FULL_SHA_OR_NONE>
   New dependency or dispatch wave: <DETAIL_OR_NONE>
 
@@ -270,13 +277,14 @@ Master authorization and next action
 - <EXACT DECISION AND EXECUTABLE NEXT MESSAGE>
 ```
 
-The new assignment must carry the new plan revision. Older messages for affected tasks are rejected; no Worker synchronizes
-independently to satisfy the replacement baseline.
+The new assignment must carry the new plan revision. `REVISE` requires a higher task revision and new digest. `GRANDFATHER`
+requires an unchanged persisted digest. Objective, owner, worktree, frozen-baseline, or authority changes require `SUPERSEDE`.
+Older messages for affected tasks are rejected; no Worker synchronizes independently to satisfy the replacement baseline.
 
 ## Cancellation or supersession
 
 ```text
-Task: <TASK_ID>, task_revision=<CURRENT_REVISION>, plan_revision=<PLAN_REVISION>, dispatch_wave=<DISPATCH_WAVE>
+Task: <TASK_ID>, task_revision=<CURRENT_REVISION>, task_spec_digest=<TASK_SPEC_DIGEST>, plan_revision=<PLAN_REVISION>, dispatch_wave=<DISPATCH_WAVE>
 Decision: <CANCELLED / SUPERSEDED BY NEW_TASK_ID REVISION=N>
 Reason: <VERIFIED FACT OR CHANGED DECISION>
 
@@ -298,7 +306,8 @@ Identity and worktree
 Task state
 - WORKTREE_TASK: <IDLE/ACTIVE/AWAITING_INTEGRATION/BLOCKED>.
 - Current plan revision: <N_OR_NULL>.
-- If non-IDLE: task_id=<ID>, task_revision=<N>, dispatch_wave=<N>, source_thread_id=<ID>, frozen_baseline=<SHA>.
+- If non-IDLE: task_id=<ID>, task_revision=<N>, task_spec_digest=<DIGEST>, dispatch_wave=<N>, source_thread_id=<ID>,
+  frozen_baseline=<SHA>.
 - Worker commit=<SHA_OR_NULL>; integrated_as_sha=<SHA_OR_NULL>; release_head_sha=<SHA_OR_NULL>.
 - Waiting condition or blocker: <TEXT_OR_NULL>.
 - Blocker kind=<KIND_OR_NULL>; blocked_since=<TIMESTAMP_OR_NULL>; recovery_owner=<ROLE_OR_THREAD_OR_NULL>.

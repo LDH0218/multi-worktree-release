@@ -48,6 +48,8 @@ The plan is versioned and contains at least:
 plan_revision: <positive-integer>
 tasks:
   - task_id: <id>
+    task_spec_revision: <positive-integer>
+    task_spec_digest: <sha256-digest>
     worktree: <absolute-path>
     dispatch_status: READY | GATED | PUBLISHED | BLOCKED | INTEGRATED | SUPERSEDED
     dispatch_wave: <positive-integer>
@@ -64,9 +66,14 @@ Tasks with no unresolved blockers and no semantic overlap may be published in th
 remains `GATED` and is not published. A worktree preflight failure removes only that task from the current wave; it does not
 delay independent tasks.
 
-Any change to dependencies, parallel groups, dispatch waves, owner, worktree, frozen baseline, acceptance, or authority
-boundary increments `plan_revision`. New or revised assignments carry the new revision. Older revisions for an affected task
-are rejected; an unaffected active task may continue only when Master records that its plan entry is unchanged.
+Any semantic plan change increments `plan_revision`. If an affected task's dependencies, dispatch wave, allowed behavior,
+inputs, outputs, acceptance, or other executable content changes in scope, increment `task_spec_revision` and recompute
+`task_spec_digest`. A changed objective, owner, worktree, frozen baseline, or authority boundary creates a new task with
+`supersedes_task_id`; it is never an in-place revision. Older plan or task revisions for an affected task are rejected.
+
+`plan_revision` is a fencing token and is not part of message identity. An unaffected active task may keep its existing task
+revision only when Master records `GRANDFATHER` in the new plan, verifies that its complete persisted task-spec digest is
+unchanged, and sends no altered executable assignment. A status-only plan update does not change task content or task revision.
 
 Separate three completion states:
 
@@ -171,6 +178,10 @@ authorization object with `envelope_digest` itself set to `null`. The digest is 
 Any change to the authorization envelope is an authority-boundary change and requires a superseding task rather than an
 in-place revision.
 
+Compute `task_spec_digest` with the same structured-data rule over the complete persisted task specification, with
+`task_spec_digest` itself set to `null`. Messages may render that specification as prose, but they must carry its digest and may
+not change executable meaning. An equal task identity with a different task-spec digest is invalid, not a revision.
+
 ## Task publication contract
 
 An executable task should contain:
@@ -178,6 +189,7 @@ An executable task should contain:
 ```yaml
 task_id: <stable-id>
 task_spec_revision: <positive-integer>
+task_spec_digest: <sha256-digest>
 plan_revision: <positive-integer>
 dispatch_wave: <positive-integer>
 source_thread_id: <issuing-master-task-id>
@@ -238,6 +250,7 @@ Worker card:
 state: IDLE | ACTIVE | AWAITING_INTEGRATION | BLOCKED
 task_id: <id-or-null>
 task_spec_revision: <integer-or-null>
+task_spec_digest: <sha256-digest-or-null>
 plan_revision: <integer-or-null>
 dispatch_wave: <integer-or-null>
 source_thread_id: <thread-id-or-null>
@@ -286,6 +299,8 @@ frozen_baseline_sha: <full-sha-or-null>
 worker_handoffs:
   - task_id: <worker-task-id>
     task_spec_revision: <positive-integer>
+    task_spec_digest: <sha256-digest>
+    plan_revision: <positive-integer>
     source_thread_id: <thread-id>
     role: <role>
     worker_commit_sha: <full-sha>
@@ -295,9 +310,11 @@ release_head_sha: <full-sha-or-null>
 blocker: <text-or-null>
 ```
 
-`task_id + task_spec_revision + source_thread_id` is the message identity. Duplicate delivery is idempotent. Reject older
-revisions, unknown issuers, and messages inconsistent with a non-IDLE lock. Use a higher revision for an in-scope correction;
-use `supersedes_task_id` when replacing the task.
+`task_id + task_spec_revision + source_thread_id` is the message identity. `plan_revision` is its fencing token and
+`task_spec_digest` proves content equality. Duplicate delivery is idempotent only when the identity and digest both match.
+Reject an equal identity with a different digest, older task revisions, stale plan fences for affected entries, unknown
+issuers, and messages inconsistent with a non-IDLE lock. Use a higher task revision for an in-scope correction; use a new task
+with `supersedes_task_id` for a changed objective, owner, worktree, frozen baseline, or authority boundary.
 
 ## Exception and recovery
 
@@ -311,8 +328,8 @@ Master then applies the narrowest valid recovery:
 
 - An unexpected dependency revises the plan, marks only affected tasks `GATED` or `BLOCKED`, and publishes the upstream task or
   a new task revision. Independent tasks continue when their plan entries remain valid.
-- An in-scope correction increments `task_spec_revision`. A changed objective, owner, worktree, or authority boundary creates a
-  new task with `supersedes_task_id`; the old assignment cannot continue.
+- An in-scope correction increments `task_spec_revision` and changes `task_spec_digest`. A changed objective, owner, worktree,
+  frozen baseline, or authority boundary creates a new task with `supersedes_task_id`; the old assignment cannot continue.
 - A wrongly assigned task with no changes may be cancelled and returned to `IDLE`. A task with dirty changes remains preserved
   until Master records whether the work is retained, reassigned, or explicitly discarded. No automatic reset, cleanup, or
   deletion is allowed.
@@ -321,7 +338,7 @@ Master then applies the narrowest valid recovery:
 - If a Worker or conversation disappears, Master performs read-only inspection, preserves the worktree state, and may assign a
   takeover or superseding task. Elapsed time alone does not authorize automatic takeover or cleanup.
 - A stale baseline is handled by Master. Workers do not independently synchronize; if shared inputs changed or the patch no
-  longer applies, Master publishes a replacement with the new baseline. If the patch remains disjoint and applicable, Master
+  longer applies, Master publishes a superseding task with the new baseline. If the patch remains disjoint and applicable, Master
   may integrate it only after ownership, ancestry, and affected-gate review.
 
 Every recovery decision records the old and new task or plan revisions, the reason, preserved material, and the resulting lock
@@ -356,9 +373,9 @@ by that Worker requires an explicit rework revision.
 
 A new conversation generation performs a read-only bootstrap and does not inherit implementation, runtime, publication,
 destructive, synchronization, or scope-expansion authorization. A rotation handoff records the current plan revision and
-dispatch waves, all worktree SHAs and states, patch-equivalent historical forks, active contracts and inputs, latest gates,
-preserved material, unfinished work, blockers and recovery owners, and actions requiring renewed authority. The new generation
-must not resume an affected task under an older plan or task revision.
+task revisions and digests, dispatch waves, all worktree SHAs and states, patch-equivalent historical forks, active contracts
+and inputs, latest gates, preserved material, unfinished work, blockers and recovery owners, and actions requiring renewed
+authority. The new generation must not resume an affected task under an older plan or task revision or a mismatched digest.
 
 If an old conversation disappears:
 

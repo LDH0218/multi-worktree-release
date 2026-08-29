@@ -55,8 +55,10 @@ widen an existing task in place; publish a superseding task with a new authoriza
 - Bind each long-lived role to one explicit worktree and branch. A conversation rotation reuses that worktree and branch.
 - Freeze every task to a full SHA. Workers do not independently merge, rebase, reset, or synchronize from Master.
 - Treat a non-IDLE task card as a lock on that worktree only, not as a global release lock. Identify messages with
-  `task_id + task_spec_revision + source_thread_id`;
-  duplicate messages are idempotent, older revisions are rejected, and changed scope requires a new revision or supersession.
+  `task_id + task_spec_revision + source_thread_id`; require the same `task_spec_digest` for duplicate delivery. Treat
+  `plan_revision` as a fencing token, not part of message identity. Changed executable content for an affected task requires a
+  higher task revision. A changed objective, owner, worktree, frozen baseline, or authority boundary requires a superseding
+  task rather than an in-place revision.
 - Keep `WORKTREE_TASK.md` compact and local when repository policy allows: it is a durable state card, not a copy of the full
   cross-task message. Follow repository policy if the file is tracked or uses another name.
 
@@ -67,6 +69,8 @@ model, not a required visual diagram; it may be represented as structured text, 
 plan validation and state-transition rules in [references/methodology.md](references/methodology.md).
 
 - The plan records task IDs, absolute worktrees, `dispatch_status`, `dispatch_wave`, `blocked_by`, and `parallel_with`.
+- Every plan entry records `task_spec_revision` and `task_spec_digest`. An affected changed assignment increments its task
+  revision; an unchanged active assignment may continue only through an explicit grandfather record in the new plan revision.
 - Validate unique task IDs, known dependency references, acyclic dependencies, available worktrees, and no semantic file or
   contract overlap before publishing a batch.
 - If tasks have no unresolved dependency and no semantic file or contract overlap, publish them in the same parallel batch.
@@ -84,7 +88,7 @@ plan validation and state-transition rules in [references/methodology.md](refere
 - If a Worker discovers an unexpected dependency, wrong assignment, wrong scope, wrong worktree, ownership ambiguity, or baseline
   mismatch, it stops implementation, preserves the current state, records `BLOCKED`, and reports to Master.
 - Master revises the plan and gates only affected tasks. An in-scope correction uses a higher `task_spec_revision`; a changed
-  objective, owner, worktree, or authority boundary creates a superseding task.
+  objective, owner, worktree, frozen baseline, or authority boundary creates a superseding task.
 - Do not silently reset, discard, amend, force-push, or reuse an affected worktree. Cancellation and takeover require Master to
   record the evidence and outcome. Read [references/methodology.md](references/methodology.md) for the recovery procedure.
 
