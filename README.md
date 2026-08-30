@@ -181,14 +181,21 @@ Skill 中的授权字段是协作治理契约，不替代 GitHub、云平台或�
 
 ```text
 .
+├── AGENTS.md                        # 本仓库的维护与发布治理规则
+├── ROADMAP.md                       # 轻量 FAST 的采用路线与 Pilot 进度
 ├── SKILL.md                         # Skill 入口与执行规则
 ├── agents/openai.yaml               # Codex 展示信息
+├── design/                          # 非规范设计记录与暂缓的 v2 研究
 ├── references/
 │   ├── contracts.schema.json        # 机器可读契约 Schema
 │   ├── methodology.md               # 完整方法与治理规则
 │   └── templates.md                 # Dispatch Plan、任务卡与 handoff 模板
 └── scripts/
-    └── validate_contracts.py         # 契约一致性校验器
+    ├── validate_contracts.py         # 契约一致性校验器
+    ├── v2_adoption.py                # 非规范 v2 adoption 实验原型
+    ├── v2_fast_binding.py            # 非规范 FAST 身份绑定实验原型
+    ├── test_v2_adoption.py           # adoption 原型离线测试
+    └── test_v2_fast_binding.py       # FAST binding 原型离线测试
 ```
 
 建议先读：
