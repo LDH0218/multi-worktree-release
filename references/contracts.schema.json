@@ -36,6 +36,69 @@
         {"type": "object", "additionalProperties": {"$ref": "#/$defs/canonical_value"}}
       ]
     },
+    "model_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "reasoning_effort", "service_tier", "selection_reason"],
+      "properties": {
+        "model": {"enum": ["gpt-5.6-sol", "gpt-5.6-luna"]},
+        "reasoning_effort": {"enum": ["high", "max"]},
+        "service_tier": {"enum": ["default", "priority"]},
+        "selection_reason": {
+          "enum": [
+            "owner-default:master",
+            "owner-default:ordinary-worker",
+            "owner-default:complex-worker"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "model": {"const": "gpt-5.6-sol"},
+            "reasoning_effort": {"const": "high"},
+            "service_tier": {"const": "default"},
+            "selection_reason": {"const": "owner-default:master"}
+          }
+        },
+        {
+          "properties": {
+            "model": {"const": "gpt-5.6-luna"},
+            "reasoning_effort": {"const": "max"},
+            "service_tier": {"const": "priority"},
+            "selection_reason": {"const": "owner-default:ordinary-worker"}
+          }
+        },
+        {
+          "properties": {
+            "model": {"const": "gpt-5.6-sol"},
+            "reasoning_effort": {"const": "high"},
+            "service_tier": {"const": "default"},
+            "selection_reason": {"const": "owner-default:complex-worker"}
+          }
+        }
+      ]
+    },
+    "model_owner_defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["master", "ordinary_worker", "complex_worker"],
+      "properties": {
+        "master": {"$ref": "#/$defs/model_profile"},
+        "ordinary_worker": {"$ref": "#/$defs/model_profile"},
+        "complex_worker": {"$ref": "#/$defs/model_profile"}
+      }
+    },
+    "model_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "enforced_from_plan_revision", "owner_defaults"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "enforced_from_plan_revision": {"type": "integer", "minimum": 1},
+        "owner_defaults": {"$ref": "#/$defs/model_owner_defaults"}
+      }
+    },
     "authorization_v1": {
       "type": "object",
       "additionalProperties": false,
@@ -301,11 +364,26 @@
         "inputs": {"type": "array", "items": {"type": "object"}},
         "outputs": {"type": "array"},
         "derived_outputs": {"type": "object"},
-        "dependencies": {"type": "object"},
+        "dependencies": {"$ref": "#/$defs/task_dependencies"},
+        "model_profile": {"$ref": "#/$defs/model_profile"},
         "authorization": {"$ref": "#/$defs/authorization"},
         "acceptance": {"type": "array"},
         "commit_message": {"type": "string", "minLength": 1},
         "stop_conditions": {"type": "array"}
+      }
+    },
+    "task_dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["upstream_commits", "parallel_with", "blocked_by"],
+      "properties": {
+        "upstream_commits": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+          "uniqueItems": true
+        },
+        "parallel_with": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "blocked_by": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
       }
     },
     "dispatch_task": {
@@ -346,8 +424,9 @@
           "enum": ["READY", "GATED", "PUBLISHED", "BLOCKED", "INTEGRATED", "SUPERSEDED", "CANCELLED"]
         },
         "dispatch_wave": {"type": "integer", "minimum": 1},
-        "blocked_by": {"type": "array", "items": {"type": "string"}},
-        "parallel_with": {"type": "array", "items": {"type": "string"}}
+        "blocked_by": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "parallel_with": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "model_profile": {"$ref": "#/$defs/model_profile"}
       }
     },
     "dispatch_plan": {
@@ -383,7 +462,8 @@
         "tasks": {"type": "array", "items": {"$ref": "#/$defs/dispatch_task"}},
         "validation": {"$ref": "#/$defs/plan_validation"},
         "ready_wave": {"type": ["integer", "null"], "minimum": 1},
-        "blocked_tasks": {"type": "array", "items": {"type": "string"}}
+        "blocked_tasks": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "model_policy": {"$ref": "#/$defs/model_policy"}
       }
     },
     "plan_validation": {

@@ -21,6 +21,25 @@ updated_at: <timestamp>
 issued_by: <MASTER_SOURCE_THREAD_ID>
 state_root: <absolute-path>
 task_specs_root: <absolute-path>
+model_policy:
+  schema_version: 1
+  enforced_from_plan_revision: <positive-integer>
+  owner_defaults:
+    master:
+      model: gpt-5.6-sol
+      reasoning_effort: high
+      service_tier: default
+      selection_reason: owner-default:master
+    ordinary_worker:
+      model: gpt-5.6-luna
+      reasoning_effort: max
+      service_tier: priority
+      selection_reason: owner-default:ordinary-worker
+    complex_worker:
+      model: gpt-5.6-sol
+      reasoning_effort: high
+      service_tier: default
+      selection_reason: owner-default:complex-worker
 tasks:
   - task_id: <id>
     task_spec_revision: <positive-integer>
@@ -38,6 +57,11 @@ tasks:
     dispatch_wave: <positive-integer>
     blocked_by: [<task-id>]
     parallel_with: [<task-id>]
+    model_profile:
+      model: <gpt-5.6-sol-or-gpt-5.6-luna>
+      reasoning_effort: <high-or-max>
+      service_tier: <default-or-priority>
+      selection_reason: <owner-default:master-or-owner-default:ordinary-worker-or-owner-default:complex-worker>
 validation:
   unique_task_ids: <PASS/FAIL>
   known_dependency_references: <PASS/FAIL>
@@ -57,6 +81,18 @@ removes only that task from the current wave. Every semantic plan change increme
 content increments the affected `task_spec_revision` and digest. A changed objective, owner, worktree, frozen baseline, or
 authority boundary requires a superseding task. Unaffected active tasks continue only through an explicit digest-verified
 `GRANDFATHER` decision.
+
+Task Spec `dependencies.blocked_by` is the canonical direct graph; the Plan entry is only its current unresolved direct
+projection. Derive waves from the static graph, require exact Plan/Task Spec equality, validate transitive reduction and
+parallel incomparability, and recompute `blocked_tasks` plus the `READY`/`PUBLISHED` `ready_wave` frontier on every write.
+
+`model_policy` and `model_profile` may be omitted only for legacy records. After `enforced_from_plan_revision`, every `NEW` or
+`REVISE` task must persist the same exact profile in its Task Spec and Plan entry. Older digest-preserved records below the
+fence remain untouched. The exact defaults are Master `gpt-5.6-sol`/`high`/`default`
+(`owner-default:master`), ordinary Worker `gpt-5.6-luna`/`max`/`priority`
+(`owner-default:ordinary-worker`), and complex Worker `gpt-5.6-sol`/`high`/`default`
+(`owner-default:complex-worker`). A launcher that cannot honor the profile must stop dispatch. Model `service_tier` is not an
+authorization route/provider and grants no external call, run, publication, destructive operation, synchronization, or scope.
 
 A `GRANDFATHER` entry preserves the existing task spec, digest, and its original `task_spec_plan_revision`; do not rewrite the
 task to copy the new global plan fence. `NEW` and `REVISE` task specs bind to the current plan revision. Terminal entries retain
@@ -115,6 +151,14 @@ Forbidden paths
 
 Inputs and dependencies
 - <PATH / REVISION / DIGEST / UPSTREAM COMMIT>
+
+Model routing profile
+- Model: <gpt-5.6-sol-or-gpt-5.6-luna>
+- Reasoning effort: <high-or-max>
+- Service tier: <default-or-priority>
+- Selection reason: <owner-default:master-or-owner-default:ordinary-worker-or-owner-default:complex-worker>
+- If the launcher cannot honor this exact profile, stop and report; do not substitute it.
+- This profile grants no authority and is separate from authorization route/provider.
 
 Required behavior
 - <REQUIREMENT>
@@ -193,6 +237,7 @@ Plan and lock status
 
 Authorization statement
 - Envelope digest: <SHA256_DIGEST>
+- Model profile honored: <MODEL / REASONING_EFFORT / SERVICE_TIER / SELECTION_REASON>
 - <EXTERNAL CALLS USED OR NOT USED>
 - <EXECUTION/JOB CREATED OR NOT CREATED>
 - <PUBLICATION OR DESTRUCTIVE ACTION USED OR NOT USED>

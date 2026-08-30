@@ -95,17 +95,32 @@ projections, not the recovery source. Write task specs and the plan atomically, 
 executable message.
 
 - The plan records task IDs, absolute worktrees, `dispatch_status`, `dispatch_wave`, `blocked_by`, and `parallel_with`.
+- Treat Task Spec `dependencies.blocked_by` as the canonical static direct graph and Plan `blocked_by` as the exact unresolved
+  direct projection. Reject duplicate, self, unknown, cyclic, redundant-transitive, stale, or omitted edges. Derive every wave
+  as `1` for a root or `1 + max(parent wave)`, and recompute `blocked_tasks` plus the minimum active `READY`/`PUBLISHED`
+  `ready_wave` frontier on every Plan write.
+- Require `parallel_with` to be canonical, symmetric, same-wave, transitively incomparable, and free of active-worktree or
+  semantic ownership overlap. Never infer parallel eligibility merely from equal waves.
 - Every plan entry records `task_spec_revision` and `task_spec_digest`. An affected changed assignment increments its task
   revision; an unchanged active assignment may continue only through an explicit grandfather record in the new plan revision.
 - A grandfathered entry preserves its persisted task spec and records that spec's original `task_spec_plan_revision`; it does
   not rewrite the task merely to copy the newer global fence.
+- Persist `model_policy` with an `enforced_from_plan_revision` migration fence before requiring profiles. At or after the fence,
+  every `NEW` or `REVISE` Task Spec and matching Plan entry uses one identical exact `model_profile`; older digest-preserved
+  records below the fence may omit it. Changing a profile requires a higher Task Spec revision/digest. Stop dispatch if the
+  launcher cannot honor the persisted profile.
+- Use only these owner defaults: Master `gpt-5.6-sol`/`high`/`default` with `owner-default:master`; ordinary Worker
+  `gpt-5.6-luna`/`max`/`priority` with `owner-default:ordinary-worker`; complex Worker
+  `gpt-5.6-sol`/`high`/`default` with `owner-default:complex-worker`. Model `service_tier` is scheduler metadata, never
+  authorization `route`/`provider`, and grants no external call, execution, publication, destructive action, synchronization,
+  or scope expansion.
 - Keep semantic `plan_revision` separate from `record_revision`, which increments on every persisted state update. Preserve the
   state directory as user-owned material whether repository policy tracks it or keeps it local.
 - Validate unique task IDs, known dependency references, acyclic dependencies, available worktrees, and no semantic file or
   contract overlap before publishing a batch.
 - If tasks have no unresolved dependency and no semantic file or contract overlap, publish them in the same parallel batch.
-- `parallel_with` records tasks that may run concurrently.
-- `blocked_by` records unresolved dependencies and determines publication order.
+- `parallel_with` records validated same-wave concurrency claims.
+- Task Spec `blocked_by` determines dependency order; Plan `blocked_by` records only currently unresolved direct dependencies.
 - A non-IDLE task card locks only its own worktree; it does not block unrelated worktrees.
 - If a target worktree is `ACTIVE`, `AWAITING_INTEGRATION`, or `BLOCKED`, do not reuse it until Master resolves, cancels,
   supersedes, or explicitly takes over the prior task.

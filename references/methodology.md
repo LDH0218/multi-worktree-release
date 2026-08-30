@@ -76,6 +76,25 @@ release_task_id: <id>
 issued_by: <master-source-thread-id>
 state_root: <absolute-path>
 task_specs_root: <absolute-path>
+model_policy:
+  schema_version: 1
+  enforced_from_plan_revision: <positive-integer>
+  owner_defaults:
+    master:
+      model: gpt-5.6-sol
+      reasoning_effort: high
+      service_tier: default
+      selection_reason: owner-default:master
+    ordinary_worker:
+      model: gpt-5.6-luna
+      reasoning_effort: max
+      service_tier: priority
+      selection_reason: owner-default:ordinary-worker
+    complex_worker:
+      model: gpt-5.6-sol
+      reasoning_effort: high
+      service_tier: default
+      selection_reason: owner-default:complex-worker
 tasks:
   - task_id: <id>
     task_spec_revision: <positive-integer>
@@ -93,6 +112,11 @@ tasks:
     dispatch_wave: <positive-integer>
     blocked_by: [<task-id>]
     parallel_with: [<task-id>]
+    model_profile:
+      model: <gpt-5.6-sol-or-gpt-5.6-luna>
+      reasoning_effort: <high-or-max>
+      service_tier: <default-or-priority>
+      selection_reason: <owner-default:master-or-owner-default:ordinary-worker-or-owner-default:complex-worker>
 validation:
   unique_task_ids: <PASS/FAIL>
   known_dependency_references: <PASS/FAIL>
@@ -109,13 +133,42 @@ blocked_tasks: [<task-id>]
 
 Before publishing a wave, Master validates that task IDs are unique, every dependency reference is known, no dependency cycle
 exists, every target worktree is available and matches its task card, and semantic file or contract ownership does not overlap.
-Mechanical overlap in generated outputs is allowed only when Master owns regeneration from the integrated sources. Master
-normalizes `parallel_with` symmetrically and computes waves from unresolved `blocked_by` edges. It also verifies every persisted
-task-spec path and digest, the plan digest, and the completion of each atomic replacement before sending a task message.
+Mechanical overlap in generated outputs is allowed only when Master owns regeneration from the integrated sources. Task Spec
+`dependencies.blocked_by` is the static direct graph; Plan `blocked_by` is its exact unresolved live projection. Master rejects
+duplicate, self, unknown, redundant-transitive, cyclic, and dependency/parallel-conflict edges, requires symmetric
+`parallel_with`, and derives `dispatch_wave` as `1` for roots or `1 + max(parent wave)` otherwise. It recomputes
+`blocked_tasks` from `GATED`/`BLOCKED` status and `ready_wave` as the minimum `READY`/`PUBLISHED` wave. It also verifies every
+persisted task-spec path and digest, the plan digest, and the completion of each atomic replacement before sending a task
+message. Full graph rules and complexity are normative in [dispatch-graph-invariants.md](../design/dispatch-graph-invariants.md).
+
+The validator applies full graph semantics to every current nonterminal task and every task covered by the model-policy fence.
+Legacy terminal entries below that fence remain immutable digest-checked evidence and may act only as trusted topological
+boundaries for newly enforced descendants. This compatibility rule prevents retroactive rewriting of completed evidence; it
+does not permit a new or active task to bypass cycle, reduction, wave, blocker, frontier, or parallel-conflict validation.
 
 Tasks with no unresolved blockers and no semantic overlap may be published in the same wave. A task with unresolved blockers
 remains `GATED` and is not published. A worktree preflight failure removes only that task from the current wave; it does not
 delay independent tasks.
+
+### Model routing policy and migration fence
+
+`model_policy` and `model_profile` are optional only for backward compatibility. A Plan without `model_policy` remains a
+legacy record and may not contain per-task profiles. Once Master adds a policy, `enforced_from_plan_revision` is the migration
+fence: every `NEW` or `REVISE` Task Spec bound at or after that fence, and its matching Dispatch entry, must persist the same
+exact profile. Older digest-preserved `GRANDFATHER` and terminal evidence below the fence may omit it and must not be rewritten.
+Adding the policy or changing a profile is executable semantic content: increment `plan_revision`; a changed task profile also
+requires a higher `task_spec_revision` and a new digest. Unsupported model/reasoning/tier combinations or a Plan/Task Spec
+profile mismatch stop dispatch.
+
+Owner defaults are exact: Master uses `gpt-5.6-sol` / `high` / `default` with `owner-default:master`; an ordinary Worker uses
+`gpt-5.6-luna` / `max` / `priority` with `owner-default:ordinary-worker`; a complex Worker uses `gpt-5.6-sol` / `high` /
+`default` with `owner-default:complex-worker`. Master classifies each Worker task as ordinary or complex before publication.
+The launcher must honor all three persisted routing fields exactly; if it cannot, dispatch stops instead of substituting a
+model, effort, or tier.
+
+The model `service_tier` is scheduler metadata only. It is never authorization `route` or `provider`, and it grants no external
+call, execution creation, publication, destructive operation, synchronization, or scope expansion. Those capabilities remain
+governed solely by the complete default-deny authorization envelope and its independent digest.
 
 Any semantic plan change increments `plan_revision`. If an affected task's dependencies, dispatch wave, allowed behavior,
 inputs, outputs, acceptance, or other executable content changes in scope, increment `task_spec_revision` and recompute
@@ -324,6 +377,11 @@ dependencies:
   upstream_commits: [<sha>]
   parallel_with: [<task-id>]
   blocked_by: [<task-id>]
+model_profile:
+  model: <gpt-5.6-sol-or-gpt-5.6-luna>
+  reasoning_effort: <high-or-max>
+  service_tier: <default-or-priority>
+  selection_reason: <owner-default:master-or-owner-default:ordinary-worker-or-owner-default:complex-worker>
 authorization:
   schema_version: 2
   capabilities:

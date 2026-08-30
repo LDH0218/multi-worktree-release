@@ -60,6 +60,29 @@ WORKER_ASSIGNMENT_FIELDS = (
     "allowed_paths", "forbidden_paths", "authorization", "acceptance_commands",
 )
 HANDOFF_IDENTITY_FIELDS = ("task_id", "task_spec_revision", "task_spec_digest", "source_thread_id")
+MODEL_OWNER_DEFAULTS = {
+    "master": {
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "high",
+        "service_tier": "default",
+        "selection_reason": "owner-default:master",
+    },
+    "ordinary_worker": {
+        "model": "gpt-5.6-luna",
+        "reasoning_effort": "max",
+        "service_tier": "priority",
+        "selection_reason": "owner-default:ordinary-worker",
+    },
+    "complex_worker": {
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "high",
+        "service_tier": "default",
+        "selection_reason": "owner-default:complex-worker",
+    },
+}
+MODEL_REASON_TO_OWNER = {
+    profile["selection_reason"]: owner for owner, profile in MODEL_OWNER_DEFAULTS.items()
+}
 
 
 class ContractError(ValueError):
@@ -179,6 +202,66 @@ def require_exact_fields(value: dict[str, Any], required: set[str], label: str) 
 
 def schema_required(schema: dict[str, Any], definition: str) -> set[str]:
     return set(schema["$defs"][definition]["required"])
+
+
+def schema_properties(schema: dict[str, Any], definition: str) -> set[str]:
+    return set(schema["$defs"][definition]["properties"])
+
+
+def require_schema_fields(value: dict[str, Any], schema: dict[str, Any],
+                          definition: str, label: str) -> None:
+    actual = set(value)
+    required = schema_required(schema, definition)
+    allowed = schema_properties(schema, definition)
+    missing = sorted(required - actual)
+    extra = sorted(actual - allowed)
+    if missing or extra:
+        raise ContractError(f"{label} field mismatch; missing={missing}, extra={extra}")
+
+
+def validate_string_list(value: Any, label: str, *, canonical: bool = False) -> None:
+    if not isinstance(value, list):
+        raise ContractError(f"{label} must be an array")
+    if any(not isinstance(item, str) or not item for item in value):
+        raise ContractError(f"{label} entries must be non-empty strings")
+    if len(set(value)) != len(value):
+        raise ContractError(f"{label} must not contain duplicates")
+    if canonical and value != sorted(value, key=lambda item: item.encode("utf-8")):
+        raise ContractError(f"{label} must use canonical UTF-8 order")
+
+
+def validate_model_profile(value: Any, schema: dict[str, Any], label: str = "model_profile") -> None:
+    if not isinstance(value, dict):
+        raise ContractError(f"{label} must be an object")
+    require_exact_fields(value, schema_required(schema, "model_profile"), label)
+    for field in ("model", "reasoning_effort", "service_tier", "selection_reason"):
+        if not isinstance(value[field], str) or not value[field]:
+            raise ContractError(f"{label}.{field} must be a non-empty string")
+    reason = value["selection_reason"]
+    owner = MODEL_REASON_TO_OWNER.get(reason)
+    if owner is None or value != MODEL_OWNER_DEFAULTS[owner]:
+        raise ContractError(f"{label} uses an unsupported model/reasoning/service-tier combination")
+
+
+def validate_model_policy(value: Any, schema: dict[str, Any], plan_revision: int) -> None:
+    if not isinstance(value, dict):
+        raise ContractError("model_policy must be an object")
+    require_exact_fields(value, schema_required(schema, "model_policy"), "model_policy")
+    if value["schema_version"] != 1:
+        raise ContractError("model_policy.schema_version must be 1")
+    validate_positive_integer(value["enforced_from_plan_revision"],
+                              "model_policy.enforced_from_plan_revision")
+    if value["enforced_from_plan_revision"] > plan_revision:
+        raise ContractError("model_policy enforcement cannot begin in a future plan revision")
+    defaults = value["owner_defaults"]
+    if not isinstance(defaults, dict):
+        raise ContractError("model_policy.owner_defaults must be an object")
+    require_exact_fields(defaults, schema_required(schema, "model_owner_defaults"),
+                         "model_policy.owner_defaults")
+    for owner, expected in MODEL_OWNER_DEFAULTS.items():
+        validate_model_profile(defaults[owner], schema, f"model_policy.owner_defaults.{owner}")
+        if defaults[owner] != expected:
+            raise ContractError(f"model_policy owner default drifted for {owner}")
 
 
 def validate_positive_integer(value: Any, label: str) -> None:
@@ -445,13 +528,24 @@ def validate_execution_request(value: dict[str, Any], schema: dict[str, Any],
 
 def validate_task_spec(value: dict[str, Any], schema: dict[str, Any],
                        enforce_authorization_expiry: bool = True) -> None:
-    require_exact_fields(value, schema_required(schema, "task_spec"), "task spec")
+    require_schema_fields(value, schema, "task_spec", "task spec")
     if value["schema_version"] != 1:
         raise ContractError("task_spec.schema_version must be 1")
     validate_positive_integer(value["task_spec_revision"], "task_spec.task_spec_revision")
     validate_positive_integer(value["plan_revision"], "task_spec.plan_revision")
     validate_positive_integer(value["dispatch_wave"], "task_spec.dispatch_wave")
     validate_authorization(value["authorization"], schema, enforce_expiry=enforce_authorization_expiry)
+    dependencies = value["dependencies"]
+    if not isinstance(dependencies, dict):
+        raise ContractError("task_spec.dependencies must be an object")
+    require_exact_fields(dependencies, schema_required(schema, "task_dependencies"),
+                         "task_spec.dependencies")
+    for field in ("upstream_commits", "parallel_with", "blocked_by"):
+        validate_string_list(dependencies[field], f"task_spec.dependencies.{field}")
+    for sha in dependencies["upstream_commits"]:
+        validate_sha(sha, "task_spec.dependencies.upstream_commits entry")
+    if "model_profile" in value:
+        validate_model_profile(value["model_profile"], schema, "task_spec.model_profile")
     validate_rfc3339(value["issued_at"], "task_spec.issued_at")
     for field in ("task_spec_path", "worktree"):
         if not Path(value[field]).is_absolute():
@@ -463,10 +557,12 @@ def validate_task_spec(value: dict[str, Any], schema: dict[str, Any],
 
 
 def validate_plan(value: dict[str, Any], schema: dict[str, Any]) -> None:
-    require_exact_fields(value, schema_required(schema, "dispatch_plan"), "dispatch plan")
+    require_schema_fields(value, schema, "dispatch_plan", "dispatch plan")
     require_exact_fields(value["validation"], schema_required(schema, "plan_validation"), "plan validation")
     validate_positive_integer(value["record_revision"], "dispatch_plan.record_revision")
     validate_positive_integer(value["plan_revision"], "dispatch_plan.plan_revision")
+    if "model_policy" in value:
+        validate_model_policy(value["model_policy"], schema, value["plan_revision"])
     validate_rfc3339(value["issued_at"], "dispatch_plan.issued_at")
     validate_rfc3339(value["updated_at"], "dispatch_plan.updated_at")
     for field in ("state_root", "task_specs_root"):
@@ -475,13 +571,14 @@ def validate_plan(value: dict[str, Any], schema: dict[str, Any]) -> None:
     validate_digest(value["plan_digest"], "plan_digest")
     if value["plan_digest"] != object_digest(value, "plan_digest"):
         raise ContractError("dispatch plan digest mismatch")
-    task_required = schema_required(schema, "dispatch_task")
     ids: list[str] = []
     entries: dict[str, dict[str, Any]] = {}
     active_worktrees: dict[str, str] = {}
     for task in value["tasks"]:
-        require_exact_fields(task, task_required, "dispatch task")
+        require_schema_fields(task, schema, "dispatch_task", "dispatch task")
         task_id = task["task_id"]
+        if not isinstance(task_id, str) or not task_id:
+            raise ContractError("dispatch task_id must be a non-empty string")
         validate_positive_integer(task["task_spec_revision"], f"{task_id}.task_spec_revision")
         validate_positive_integer(task["task_spec_plan_revision"], f"{task_id}.task_spec_plan_revision")
         validate_positive_integer(task["dispatch_wave"], f"{task_id}.dispatch_wave")
@@ -506,6 +603,12 @@ def validate_plan(value: dict[str, Any], schema: dict[str, Any]) -> None:
             active_worktrees[task["worktree"]] = task_id
         for field in ("task_spec_digest", "acceptance_digest", "authorization_envelope_digest"):
             validate_digest(task[field], f"{task_id}.{field}")
+        for field in ("blocked_by", "parallel_with"):
+            validate_string_list(task[field], f"{task_id}.{field}")
+            if task_id in task[field]:
+                raise ContractError(f"{task_id}.{field} may not reference itself")
+        if "model_profile" in task:
+            validate_model_profile(task["model_profile"], schema, f"{task_id}.model_profile")
         decision = task["revision_decision"]
         issued_plan = task["task_spec_plan_revision"]
         if issued_plan > value["plan_revision"]:
@@ -514,6 +617,19 @@ def validate_plan(value: dict[str, Any], schema: dict[str, Any]) -> None:
             raise ContractError(f"{task_id} {decision} must bind to the current plan revision")
         if decision == "GRANDFATHER" and issued_plan >= value["plan_revision"]:
             raise ContractError(f"{task_id} GRANDFATHER must preserve an older task-spec plan revision")
+    policy = value.get("model_policy")
+    if policy is None:
+        profiled = sorted(task_id for task_id, task in entries.items() if "model_profile" in task)
+        if profiled:
+            raise ContractError(f"model_profile requires a persisted model_policy fence: {profiled}")
+    else:
+        fence = policy["enforced_from_plan_revision"]
+        missing_profiles = sorted(
+            task_id for task_id, task in entries.items()
+            if task["task_spec_plan_revision"] >= fence and "model_profile" not in task
+        )
+        if missing_profiles:
+            raise ContractError(f"model_policy requires Dispatch model_profile: {missing_profiles}")
     known = set(ids)
     for task_id, task in entries.items():
         unknown = (set(task["blocked_by"]) | set(task["parallel_with"])) - known
@@ -539,12 +655,213 @@ def validate_plan(value: dict[str, Any], schema: dict[str, Any]) -> None:
 
     for task_id in ids:
         visit(task_id)
+    expected_blocked = sorted(
+        task_id for task_id, task in entries.items()
+        if task["dispatch_status"] in {"GATED", "BLOCKED"}
+    )
+    if value["blocked_tasks"] != expected_blocked:
+        raise ContractError(
+            f"blocked_tasks mismatch: expected={expected_blocked}, actual={value['blocked_tasks']}"
+        )
+    frontier = [task["dispatch_wave"] for task in entries.values()
+                if task["dispatch_status"] in {"READY", "PUBLISHED"}]
+    expected_ready_wave = min(frontier) if frontier else None
+    if value["ready_wave"] != expected_ready_wave:
+        raise ContractError(
+            f"ready_wave mismatch: expected={expected_ready_wave}, actual={value['ready_wave']}"
+        )
     ready_statuses = {"READY", "PUBLISHED", "INTEGRATED"}
     if any(task["dispatch_status"] in ready_statuses for task in entries.values()):
         pass_fields = set(schema_required(schema, "plan_validation")) - {"semantic_ownership_overlap"}
         failed = [field for field in pass_fields if value["validation"][field] != "PASS"]
         if failed or value["validation"]["semantic_ownership_overlap"] != "NONE":
             raise ContractError(f"ready/published plan has failed validation: {failed}")
+
+
+def graph_enforcement_applies(plan: dict[str, Any], entry: dict[str, Any],
+                              spec: dict[str, Any], historical: bool) -> bool:
+    policy = plan.get("model_policy")
+    if policy is not None and entry["task_spec_plan_revision"] >= policy["enforced_from_plan_revision"]:
+        return True
+    if "model_profile" in entry or "model_profile" in spec:
+        return True
+    return not historical and entry["dispatch_status"] not in TERMINAL_DISPATCH_STATES
+
+
+def owned_paths(spec: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    for item in spec["allowed_paths"]:
+        if not isinstance(item, str) or not item or item == "WORKTREE_TASK.md":
+            continue
+        paths.append(item.rstrip("/"))
+    return paths
+
+
+def paths_overlap(left: str, right: str) -> bool:
+    return left == right or left.startswith(right + "/") or right.startswith(left + "/")
+
+
+def validate_dispatch_graph_and_model_routing(plan: dict[str, Any], specs: dict[str, dict[str, Any]],
+                                              schema: dict[str, Any], historical: bool = False) -> None:
+    entries = {entry["task_id"]: entry for entry in plan["tasks"]}
+    known = set(entries)
+    policy = plan.get("model_policy")
+
+    if policy is None:
+        profiled_specs = sorted(task_id for task_id, spec in specs.items() if "model_profile" in spec)
+        if profiled_specs:
+            raise ContractError(f"Task Spec model_profile requires a persisted model_policy fence: {profiled_specs}")
+    else:
+        fence = policy["enforced_from_plan_revision"]
+        for task_id, entry in entries.items():
+            spec = specs[task_id]
+            required = entry["task_spec_plan_revision"] >= fence
+            entry_has = "model_profile" in entry
+            spec_has = "model_profile" in spec
+            if required and (not entry_has or not spec_has):
+                raise ContractError(f"model_policy requires Task Spec and Dispatch model_profile for {task_id}")
+            if entry_has != spec_has:
+                raise ContractError(f"model_profile presence mismatch for {task_id}")
+            if entry_has:
+                validate_model_profile(entry["model_profile"], schema, f"{task_id}.model_profile")
+                validate_model_profile(spec["model_profile"], schema, f"task_spec.{task_id}.model_profile")
+                if entry["model_profile"] != spec["model_profile"]:
+                    raise ContractError(f"Dispatch/Task Spec model_profile mismatch for {task_id}")
+                if entry["model_profile"] not in policy["owner_defaults"].values():
+                    raise ContractError(f"{task_id}.model_profile is not an owner-policy default")
+
+    static_dependencies = {
+        task_id: list(spec["dependencies"]["blocked_by"]) for task_id, spec in specs.items()
+    }
+    static_parallel = {
+        task_id: list(spec["dependencies"]["parallel_with"]) for task_id, spec in specs.items()
+    }
+    enforced = {
+        task_id for task_id, entry in entries.items()
+        if graph_enforcement_applies(plan, entry, specs[task_id], historical)
+    }
+
+    for task_id in enforced:
+        for field, values in (("blocked_by", static_dependencies[task_id]),
+                              ("parallel_with", static_parallel[task_id]),
+                              ("plan.blocked_by", entries[task_id]["blocked_by"]),
+                              ("plan.parallel_with", entries[task_id]["parallel_with"])):
+            validate_string_list(values, f"{task_id}.{field}", canonical=True)
+            if task_id in values:
+                raise ContractError(f"{task_id}.{field} may not reference itself")
+            unknown = set(values) - known
+            if unknown:
+                raise ContractError(f"{task_id}.{field} references unknown tasks: {sorted(unknown)}")
+        if entries[task_id]["parallel_with"] != static_parallel[task_id]:
+            raise ContractError(f"Dispatch/Task Spec parallel_with mismatch for {task_id}")
+
+    visiting: list[str] = []
+    visited: set[str] = set()
+
+    def visit(task_id: str) -> None:
+        if task_id in visiting:
+            cycle = visiting[visiting.index(task_id):] + [task_id]
+            raise ContractError(f"static dependency cycle: {' -> '.join(cycle)}")
+        if task_id in visited:
+            return
+        visiting.append(task_id)
+        for dependency in static_dependencies.get(task_id, []):
+            if dependency in known:
+                visit(dependency)
+        visiting.pop()
+        visited.add(task_id)
+
+    for task_id in enforced:
+        visit(task_id)
+
+    reachability_cache: dict[tuple[str, str], bool] = {}
+
+    def reachable(start: str, target: str, seen: set[str] | None = None) -> bool:
+        key = (start, target)
+        if key in reachability_cache:
+            return reachability_cache[key]
+        current_seen = set() if seen is None else seen
+        if start in current_seen:
+            return False
+        current_seen.add(start)
+        result = any(
+            dependency == target or reachable(dependency, target, current_seen.copy())
+            for dependency in static_dependencies.get(start, []) if dependency in known
+        )
+        reachability_cache[key] = result
+        return result
+
+    for task_id in enforced:
+        dependencies = static_dependencies[task_id]
+        for dependency in dependencies:
+            for peer in dependencies:
+                if dependency != peer and reachable(peer, dependency):
+                    raise ContractError(
+                        f"{task_id}.blocked_by contains redundant transitive dependency {dependency}"
+                    )
+
+    wave_cache: dict[str, int] = {}
+
+    def derived_wave(task_id: str) -> int:
+        if task_id in wave_cache:
+            return wave_cache[task_id]
+        if task_id not in enforced:
+            return entries[task_id]["dispatch_wave"]
+        dependencies = static_dependencies[task_id]
+        result = 1 if not dependencies else 1 + max(derived_wave(item) for item in dependencies)
+        wave_cache[task_id] = result
+        return result
+
+    for task_id in enforced:
+        expected_wave = derived_wave(task_id)
+        entry = entries[task_id]
+        spec = specs[task_id]
+        if entry["dispatch_wave"] != expected_wave or spec["dispatch_wave"] != expected_wave:
+            raise ContractError(
+                f"{task_id} dispatch_wave mismatch: expected={expected_wave}, "
+                f"plan={entry['dispatch_wave']}, task_spec={spec['dispatch_wave']}"
+            )
+
+        unresolved = [dependency for dependency in static_dependencies[task_id]
+                      if entries[dependency]["dispatch_status"] != "INTEGRATED"]
+        live = entry["blocked_by"]
+        status = entry["dispatch_status"]
+        if status in {"GATED", "BLOCKED"}:
+            if live != unresolved:
+                raise ContractError(
+                    f"{task_id} live blocker mismatch: expected={unresolved}, actual={live}"
+                )
+        elif status in {"READY", "PUBLISHED", "INTEGRATED"}:
+            if unresolved or live:
+                raise ContractError(
+                    f"{task_id} status {status} requires resolved dependencies and empty blocked_by"
+                )
+        elif live:
+            raise ContractError(f"terminal task {task_id} must clear live blocked_by")
+
+    parallel_pairs: set[tuple[str, str]] = set()
+    for task_id in enforced:
+        for peer in static_parallel[task_id]:
+            if task_id not in static_parallel.get(peer, []):
+                raise ContractError(f"Task Spec parallel_with is not symmetric: {task_id}, {peer}")
+            pair = tuple(sorted((task_id, peer)))
+            if pair in parallel_pairs:
+                continue
+            parallel_pairs.add(pair)
+            left, right = pair
+            if reachable(left, right) or reachable(right, left):
+                raise ContractError(f"parallel dependency conflict between {left} and {right}")
+            if entries[left]["dispatch_wave"] != entries[right]["dispatch_wave"]:
+                raise ContractError(f"parallel peers have unequal waves: {left}, {right}")
+            if entries[left]["worktree"] == entries[right]["worktree"]:
+                raise ContractError(f"parallel peers share worktree: {left}, {right}")
+            overlaps = sorted(
+                {f"{left}:{left_path} <-> {right}:{right_path}"
+                 for left_path in owned_paths(specs[left]) for right_path in owned_paths(specs[right])
+                 if paths_overlap(left_path, right_path)}
+            )
+            if overlaps:
+                raise ContractError(f"parallel semantic ownership conflict: {overlaps}")
 
 
 def load_persisted_plan_specs(value: dict[str, Any], schema: dict[str, Any],
@@ -590,6 +907,7 @@ def load_persisted_plan_specs(value: dict[str, Any], schema: dict[str, Any],
                 historical_error("H16", f"historical acceptance digest mismatch for {entry['task_id']}")
             raise ContractError(f"acceptance digest mismatch for {entry['task_id']}")
         specs[entry["task_id"]] = spec
+    validate_dispatch_graph_and_model_routing(value, specs, schema, historical=historical)
     return specs
 
 
@@ -1287,11 +1605,13 @@ def child_mapping_keys(block: str, parent: str, parent_indent: int) -> set[str]:
 
 def validate_documented_contracts(repo_root: Path, schema: dict[str, Any]) -> None:
     methodology = (repo_root / "references" / "methodology.md").read_text(encoding="utf-8")
+    templates = (repo_root / "references" / "templates.md").read_text(encoding="utf-8")
     canonical = extract_code_block(methodology, "## Canonical authorization envelope")
     task = extract_code_block(methodology, "## Task publication contract")
     worker = extract_code_block(methodology, "Worker card:")
     master = extract_code_block(methodology, "Master card uses a list")
     plan = extract_code_block(methodology, "The plan is versioned and contains at least:")
+    template_plan = extract_code_block(templates, "## Task Dependency and Dispatch Plan")
     required = schema_required(schema, "authorization_v2")
     for label, block in (("canonical authorization", canonical), ("task authorization", task), ("Worker authorization", worker)):
         keys = nested_mapping_keys(block, "authorization")
@@ -1307,19 +1627,38 @@ def validate_documented_contracts(repo_root: Path, schema: dict[str, Any]) -> No
             if grant_keys != schema_keys:
                 raise ContractError(f"{label} {capability} grant fields drifted from schema; "
                                     f"missing={sorted(schema_keys-grant_keys)}, extra={sorted(grant_keys-schema_keys)}")
-    projections = (("task spec", task, "task_spec"), ("Worker card", worker, "worker_card"),
-                   ("Master card", master, "master_card"), ("Dispatch Plan", plan, "dispatch_plan"))
-    for label, block, definition in projections:
+    projections = (("task spec", task, "task_spec", True), ("Worker card", worker, "worker_card", False),
+                   ("Master card", master, "master_card", False),
+                   ("Dispatch Plan", plan, "dispatch_plan", True))
+    for label, block, definition, include_optional in projections:
         keys = yaml_like_keys(block, 0)
-        required_keys = schema_required(schema, definition)
-        if keys != required_keys:
+        expected_keys = schema_properties(schema, definition) if include_optional else schema_required(schema, definition)
+        if keys != expected_keys:
             raise ContractError(f"{label} top-level fields drifted from schema; "
-                                f"missing={sorted(required_keys-keys)}, extra={sorted(keys-required_keys)}")
+                                f"missing={sorted(expected_keys-keys)}, extra={sorted(keys-expected_keys)}")
+    expected_profile_keys = schema_required(schema, "model_profile")
+    for label, block, indent in (("task spec", task, 0), ("Dispatch Plan", plan, 4)):
+        profile_keys = (nested_mapping_keys(block, "model_profile") if indent == 0
+                        else child_mapping_keys(block, "model_profile", indent))
+        if profile_keys != expected_profile_keys:
+            raise ContractError(f"{label} model_profile fields drifted from schema")
+    policy_keys = nested_mapping_keys(plan, "model_policy")
+    if policy_keys != schema_required(schema, "model_policy"):
+        raise ContractError("Dispatch Plan model_policy fields drifted from schema")
+    owner_defaults = child_mapping_keys(plan, "owner_defaults", 2)
+    if owner_defaults != schema_required(schema, "model_owner_defaults"):
+        raise ContractError("Dispatch Plan model owner-default keys drifted from schema")
+    if yaml_like_keys(template_plan, 0) != schema_properties(schema, "dispatch_plan"):
+        raise ContractError("template Dispatch Plan top-level fields drifted from schema")
+    if child_mapping_keys(template_plan, "model_profile", 4) != expected_profile_keys:
+        raise ContractError("template Dispatch Plan model_profile fields drifted from schema")
+    if nested_mapping_keys(template_plan, "model_policy") != schema_required(schema, "model_policy"):
+        raise ContractError("template Dispatch Plan model_policy fields drifted from schema")
+    if child_mapping_keys(template_plan, "owner_defaults", 2) != schema_required(schema, "model_owner_defaults"):
+        raise ContractError("template Dispatch Plan model owner-default keys drifted from schema")
     dispatch_enum = set(schema["$defs"]["dispatch_task"]["properties"]["dispatch_status"]["enum"])
     decision_enum = set(schema["$defs"]["dispatch_task"]["properties"]["revision_decision"]["enum"])
-    for label, block in (("methodology plan", plan),
-                         ("template plan", extract_code_block((repo_root / "references" / "templates.md").read_text(encoding="utf-8"),
-                                                              "## Task Dependency and Dispatch Plan"))):
+    for label, block in (("methodology plan", plan), ("template plan", template_plan)):
         dispatch_line = re.search(r"^\s+dispatch_status: (.+)$", block, re.MULTILINE)
         decision_line = re.search(r"^\s+revision_decision: (.+)$", block, re.MULTILINE)
         if not dispatch_line or set(dispatch_line.group(1).split(" | ")) != dispatch_enum:
@@ -1350,6 +1689,13 @@ def validate_documented_contracts(repo_root: Path, schema: dict[str, Any]) -> No
         missing_history_terms = [term for term in required_history_terms if term not in contents]
         if missing_history_terms:
             raise ContractError(f"historical CLI contract missing from {relative}: {missing_history_terms}")
+        model_terms = (
+            "gpt-5.6-sol", "gpt-5.6-luna", "service_tier", "owner-default:master",
+            "owner-default:ordinary-worker", "owner-default:complex-worker",
+        )
+        missing_model_terms = [term for term in model_terms if term not in contents]
+        if missing_model_terms:
+            raise ContractError(f"model-routing contract missing from {relative}: {missing_model_terms}")
 
 
 def default_authorization() -> dict[str, Any]:
@@ -1843,6 +2189,244 @@ class ContractScenarios(unittest.TestCase):
         with self.assertRaises(ContractError):
             validate_master_card(card, self.schema)
 
+    def test_public_cli_accepts_graph_positive_fixtures(self) -> None:
+        fixtures = {
+            "multi-wave": {
+                "A": {"status": "PUBLISHED", "parallel": ["B"]},
+                "B": {"status": "READY", "parallel": ["A"]},
+                "C": {"status": "GATED", "dependencies": ["A"]},
+            },
+            "resolved-blocker": {
+                "A": {"status": "INTEGRATED"},
+                "B": {"status": "READY", "dependencies": ["A"]},
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            for name, nodes in fixtures.items():
+                with self.subTest(name=name):
+                    root = Path(directory) / name
+                    plan, specs = make_graph_bundle(root, nodes)
+                    result = run_public_cli("--plan", str(write_graph_bundle(root, plan, specs)))
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_public_cli_rejects_n01_n17_graph_matrix(self) -> None:
+        def entry(plan: dict[str, Any], task_id: str) -> dict[str, Any]:
+            return next(item for item in plan["tasks"] if item["task_id"] == task_id)
+
+        def n01(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            specs["B"]["dependencies"]["blocked_by"] = ["MISSING"]
+
+        def n02(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            specs["B"]["dependencies"]["blocked_by"] = ["B"]
+
+        def n03(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            specs["A"]["dependencies"]["blocked_by"] = ["B"]
+
+        def n04(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            specs["C"]["dependencies"]["blocked_by"] = ["A", "B"]
+
+        def n05(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            specs["B"]["dependencies"]["parallel_with"] = []
+            entry(plan, "B")["parallel_with"] = []
+
+        def n06(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            specs["B"]["dependencies"]["blocked_by"] = ["A"]
+            specs["B"]["dispatch_wave"] = 2
+            task = entry(plan, "B")
+            task.update({"dispatch_status": "GATED", "dispatch_wave": 2, "blocked_by": ["A"]})
+            plan["blocked_tasks"] = ["B"]
+
+        def n07(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            specs["A"]["dependencies"]["parallel_with"] = ["C"]
+            specs["C"]["dependencies"]["parallel_with"] = ["A"]
+            entry(plan, "A")["parallel_with"] = ["C"]
+            entry(plan, "C")["parallel_with"] = ["A"]
+
+        def n08(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            specs["A"]["dependencies"]["parallel_with"] = ["B"]
+            specs["B"]["dependencies"]["parallel_with"] = ["A"]
+            entry(plan, "A")["parallel_with"] = ["B"]
+            entry(plan, "B")["parallel_with"] = ["A"]
+
+        def n09(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            specs["B"]["dispatch_wave"] = 1
+            entry(plan, "B")["dispatch_wave"] = 1
+
+        def n10(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            entry(plan, "B").update({"dispatch_status": "READY", "blocked_by": []})
+            plan["blocked_tasks"] = []
+
+        def n11(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            entry(plan, "B").update({"dispatch_status": "GATED", "blocked_by": ["A"]})
+            plan.update({"blocked_tasks": ["B"], "ready_wave": None})
+
+        def n12(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            entry(plan, "B")["dispatch_status"] = "PUBLISHED"
+            plan["blocked_tasks"] = []
+
+        def n13(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            plan["blocked_tasks"] = []
+
+        def n14(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            plan["blocked_tasks"] = ["A"]
+
+        def n15(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            plan["ready_wave"] = 2
+
+        def n16(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            plan["ready_wave"] = 1
+
+        def n17(plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> None:
+            specs["A"]["dependencies"]["parallel_with"] = []
+
+        cases = (
+            ("N01", {"A": {"status": "READY"}, "B": {"dependencies": ["A"]}}, n01, "unknown tasks"),
+            ("N02", {"A": {"status": "READY"}, "B": {"dependencies": ["A"]}}, n02, "reference itself"),
+            ("N03", {"A": {"status": "READY"}, "B": {"dependencies": ["A"]}}, n03, "static dependency cycle"),
+            ("N04", {"A": {"status": "READY"}, "B": {"dependencies": ["A"]},
+                     "C": {"dependencies": ["B"]}}, n04, "redundant transitive dependency"),
+            ("N05", {"A": {"parallel": ["B"]}, "B": {"parallel": ["A"]}}, n05, "not symmetric"),
+            ("N06", {"A": {"parallel": ["B"]}, "B": {"parallel": ["A"]}}, n06,
+             "parallel dependency conflict"),
+            ("N07", {"A": {}, "B": {"dependencies": ["A"]}, "C": {"dependencies": ["B"]}}, n07,
+             "parallel dependency conflict"),
+            ("N08", {"A": {"status": "READY"}, "B": {"status": "READY", "dependencies": ["C"]},
+                     "C": {"status": "INTEGRATED"}}, n08, "unequal waves"),
+            ("N09", {"A": {}, "B": {"dependencies": ["A"]}}, n09, "dispatch_wave mismatch"),
+            ("N10", {"A": {"status": "PUBLISHED"}, "B": {"dependencies": ["A"]}}, n10,
+             "status READY requires resolved dependencies"),
+            ("N11", {"A": {"status": "INTEGRATED"}, "B": {"status": "READY", "dependencies": ["A"]}},
+             n11, "live blocker mismatch"),
+            ("N12", {"A": {"status": "READY"}, "B": {"dependencies": ["A"]}}, n12,
+             "status PUBLISHED requires resolved dependencies"),
+            ("N13", {"A": {"status": "GATED"}}, n13, "blocked_tasks mismatch"),
+            ("N14", {"A": {"status": "INTEGRATED"}}, n14, "blocked_tasks mismatch"),
+            ("N15", {"A": {"status": "READY"}, "B": {"status": "READY", "dependencies": ["C"]},
+                     "C": {"status": "INTEGRATED"}}, n15, "ready_wave mismatch"),
+            ("N16", {"A": {"status": "INTEGRATED"}}, n16, "ready_wave mismatch"),
+            ("N17", {"A": {"parallel": ["B"]}, "B": {"parallel": ["A"]}}, n17,
+             "Dispatch/Task Spec parallel_with mismatch"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            for diagnostic_id, nodes, mutate, expected in cases:
+                with self.subTest(diagnostic_id=diagnostic_id):
+                    root = Path(directory) / diagnostic_id
+                    plan, specs = make_graph_bundle(root, nodes)
+                    mutate(plan, specs)
+                    result = run_public_cli("--plan", str(write_graph_bundle(root, plan, specs)))
+                    self.assertEqual(result.returncode, 1, result.stdout)
+                    self.assertIn(expected, result.stderr)
+
+    def test_public_cli_rejects_parallel_ownership_and_cancelled_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            overlap_root = root / "overlap"
+            overlap_nodes = {
+                "A": {"parallel": ["B"], "allowed_paths": ["src/shared"]},
+                "B": {"parallel": ["A"], "allowed_paths": ["src/shared/child"]},
+            }
+            plan, specs = make_graph_bundle(overlap_root, overlap_nodes)
+            overlap = run_public_cli("--plan", str(write_graph_bundle(overlap_root, plan, specs)))
+            self.assertEqual(overlap.returncode, 1)
+            self.assertIn("parallel semantic ownership conflict", overlap.stderr)
+
+            cancelled_root = root / "cancelled"
+            plan, specs = make_graph_bundle(cancelled_root, {
+                "A": {"status": "CANCELLED"},
+                "B": {"dependencies": ["A"]},
+            })
+            downstream = next(item for item in plan["tasks"] if item["task_id"] == "B")
+            downstream.update({"dispatch_status": "READY", "blocked_by": []})
+            plan.update({"blocked_tasks": [], "ready_wave": 2})
+            cancelled = run_public_cli("--plan", str(write_graph_bundle(cancelled_root, plan, specs)))
+            self.assertEqual(cancelled.returncode, 1)
+            self.assertIn("status READY requires resolved dependencies", cancelled.stderr)
+
+    def test_model_routing_policy_fence_and_exact_profiles(self) -> None:
+        self.assertEqual(MODEL_OWNER_DEFAULTS, {
+            "master": {"model": "gpt-5.6-sol", "reasoning_effort": "high", "service_tier": "default",
+                       "selection_reason": "owner-default:master"},
+            "ordinary_worker": {"model": "gpt-5.6-luna", "reasoning_effort": "max",
+                                "service_tier": "priority", "selection_reason": "owner-default:ordinary-worker"},
+            "complex_worker": {"model": "gpt-5.6-sol", "reasoning_effort": "high",
+                               "service_tier": "default", "selection_reason": "owner-default:complex-worker"},
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            legacy_root = root / "legacy"
+            legacy_plan, legacy_specs = make_graph_bundle(legacy_root, {"A": {}}, persist_model_policy=False)
+            legacy = run_public_cli("--plan", str(write_graph_bundle(legacy_root, legacy_plan, legacy_specs)))
+            self.assertEqual(legacy.returncode, 0, legacy.stderr)
+
+            grandfather_root = root / "grandfather"
+            grandfather_plan, grandfather_specs = make_graph_bundle(
+                grandfather_root, {"A": {"status": "INTEGRATED"}}, persist_model_policy=False,
+            )
+            grandfather_plan["plan_revision"] = 2
+            grandfather_plan["model_policy"] = make_model_policy(enforced_from_plan_revision=2)
+            grandfather_plan["tasks"][0]["revision_decision"] = "GRANDFATHER"
+            grandfather = run_public_cli(
+                "--plan", str(write_graph_bundle(grandfather_root, grandfather_plan, grandfather_specs)),
+            )
+            self.assertEqual(grandfather.returncode, 0, grandfather.stderr)
+
+            fenced_root = root / "fenced"
+            fenced_plan, fenced_specs = make_graph_bundle(fenced_root, {"A": {"model_owner": "complex_worker"}})
+            fenced = run_public_cli("--plan", str(write_graph_bundle(fenced_root, fenced_plan, fenced_specs)))
+            self.assertEqual(fenced.returncode, 0, fenced.stderr)
+
+            missing_root = root / "missing"
+            missing_plan, missing_specs = make_graph_bundle(missing_root, {"A": {}})
+            del missing_specs["A"]["model_profile"]
+            missing = run_public_cli("--plan", str(write_graph_bundle(missing_root, missing_plan, missing_specs)))
+            self.assertEqual(missing.returncode, 1)
+            self.assertIn("requires Task Spec and Dispatch model_profile", missing.stderr)
+
+            mismatch_root = root / "mismatch"
+            mismatch_plan, mismatch_specs = make_graph_bundle(mismatch_root, {"A": {}})
+            mismatch_specs["A"]["model_profile"] = make_model_profile("complex_worker")
+            mismatch = run_public_cli("--plan", str(write_graph_bundle(mismatch_root, mismatch_plan, mismatch_specs)))
+            self.assertEqual(mismatch.returncode, 1)
+            self.assertIn("Dispatch/Task Spec model_profile mismatch", mismatch.stderr)
+
+            unsupported_root = root / "unsupported"
+            unsupported_plan, unsupported_specs = make_graph_bundle(unsupported_root, {"A": {}})
+            unsupported_specs["A"]["model_profile"]["service_tier"] = "default"
+            unsupported_plan["tasks"][0]["model_profile"]["service_tier"] = "default"
+            unsupported = run_public_cli(
+                "--plan", str(write_graph_bundle(unsupported_root, unsupported_plan, unsupported_specs)),
+            )
+            self.assertEqual(unsupported.returncode, 1)
+            self.assertIn("unsupported model/reasoning/service-tier combination", unsupported.stderr)
+
+    def test_model_profile_is_not_authorization_and_changes_require_revision(self) -> None:
+        profile = make_model_profile("ordinary_worker")
+        profile["route"] = "external-api"
+        with self.assertRaisesRegex(ContractError, "field mismatch"):
+            validate_model_profile(profile, self.schema)
+
+        authorization = default_authorization()
+        authorization["service_tier"] = "priority"
+        authorization["envelope_digest"] = object_digest(authorization, "envelope_digest")
+        with self.assertRaisesRegex(ContractError, "field mismatch"):
+            validate_authorization(authorization, self.schema)
+
+        task = make_task_spec()
+        task["model_profile"] = make_model_profile("ordinary_worker")
+        task["task_spec_digest"] = object_digest(task, "task_spec_digest")
+        self.assertFalse(task["authorization"]["real_external_call"])
+        self.assertFalse(task["authorization"]["create_execution"])
+        self.assertFalse(task["authorization"]["publish"])
+        self.assertFalse(task["authorization"]["destructive_operation"])
+
+        changed = copy.deepcopy(task)
+        changed["model_profile"] = make_model_profile("complex_worker")
+        with self.assertRaisesRegex(ContractError, "higher task revision"):
+            classify_task_change(task, changed)
+        changed["task_spec_revision"] = 2
+        changed["task_spec_digest"] = object_digest(changed, "task_spec_digest")
+        self.assertEqual(classify_task_change(task, changed), "REVISE")
+
 
 class HistoricalContractScenarios(unittest.TestCase):
     def setUp(self) -> None:
@@ -2277,8 +2861,15 @@ def make_plan(tasks: list[dict[str, Any]]) -> dict[str, Any]:
             "plan_digest": "PASS",
             "atomic_persistence": "PASS",
         },
-        "ready_wave": 1,
-        "blocked_tasks": [task["task_id"] for task in tasks if task["blocked_by"]],
+        "ready_wave": min(
+            (task["dispatch_wave"] for task in tasks
+             if task["dispatch_status"] in {"READY", "PUBLISHED"}),
+            default=None,
+        ),
+        "blocked_tasks": sorted(
+            task["task_id"] for task in tasks
+            if task["dispatch_status"] in {"GATED", "BLOCKED"}
+        ),
     }
     plan["plan_digest"] = object_digest(plan, "plan_digest")
     return plan
@@ -2317,6 +2908,18 @@ def make_task_spec() -> dict[str, Any]:
     }
     task["task_spec_digest"] = object_digest(task, "task_spec_digest")
     return task
+
+
+def make_model_profile(owner: str) -> dict[str, Any]:
+    return copy.deepcopy(MODEL_OWNER_DEFAULTS[owner])
+
+
+def make_model_policy(enforced_from_plan_revision: int = 1) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "enforced_from_plan_revision": enforced_from_plan_revision,
+        "owner_defaults": copy.deepcopy(MODEL_OWNER_DEFAULTS),
+    }
 
 
 def make_idle_worker_card() -> dict[str, Any]:
@@ -2529,6 +3132,110 @@ def make_prior_rework_handoff(current_spec: dict[str, Any]) -> dict[str, Any]:
         "acceptance_digest": "sha256:" + "2" * 64,
     })
     return handoff
+
+
+def make_graph_bundle(root: Path, nodes: dict[str, dict[str, Any]], *,
+                      persist_model_policy: bool = True) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    specs: dict[str, dict[str, Any]] = {}
+    waves: dict[str, int] = {}
+
+    def wave(task_id: str, visiting: set[str] | None = None) -> int:
+        if task_id in waves:
+            return waves[task_id]
+        path = set() if visiting is None else visiting
+        if task_id in path:
+            raise ValueError("fixture dependencies must be acyclic")
+        path.add(task_id)
+        dependencies = nodes[task_id].get("dependencies", [])
+        result = 1 if not dependencies else 1 + max(wave(item, path.copy()) for item in dependencies)
+        waves[task_id] = result
+        return result
+
+    for task_id in nodes:
+        wave(task_id)
+
+    for index, task_id in enumerate(sorted(nodes), start=1):
+        node = nodes[task_id]
+        spec = make_task_spec()
+        spec_path = root / "tasks" / f"{task_id}.json"
+        spec.update({
+            "task_id": task_id,
+            "task_spec_path": str(spec_path),
+            "dispatch_wave": node.get("wave", waves[task_id]),
+            "owner_role": node.get("owner_role", "ordinary-worker"),
+            "worktree": node.get("worktree", str(root / "worktrees" / task_id)),
+            "branch": f"task/{task_id}",
+            "expected_head": f"{index:040x}",
+            "objective": f"implement {task_id}",
+            "allowed_paths": node.get("allowed_paths", [f"src/{task_id}"]),
+            "forbidden_paths": [],
+            "outputs": node.get("allowed_paths", [f"src/{task_id}"]),
+            "dependencies": {
+                "upstream_commits": [],
+                "parallel_with": list(node.get("parallel", [])),
+                "blocked_by": list(node.get("dependencies", [])),
+            },
+            "acceptance": [f"test {task_id}"],
+            "commit_message": f"feat: implement {task_id}",
+        })
+        if persist_model_policy:
+            spec["model_profile"] = make_model_profile(node.get("model_owner", "ordinary_worker"))
+        spec["task_spec_digest"] = object_digest(spec, "task_spec_digest")
+        specs[task_id] = spec
+
+    entries: list[dict[str, Any]] = []
+    for task_id in sorted(nodes):
+        node = nodes[task_id]
+        spec = specs[task_id]
+        status = node.get("status", "READY" if not node.get("dependencies") else "GATED")
+        unresolved = [
+            dependency for dependency in node.get("dependencies", [])
+            if nodes[dependency].get("status", "READY" if not nodes[dependency].get("dependencies") else "GATED")
+            != "INTEGRATED"
+        ]
+        live = node.get("live", unresolved if status in {"GATED", "BLOCKED"} else [])
+        entry = make_dispatch_task(task_id)
+        entry.update({
+            "task_spec_digest": spec["task_spec_digest"],
+            "task_spec_path": spec["task_spec_path"],
+            "owner_role": spec["owner_role"],
+            "worktree": spec["worktree"],
+            "branch": spec["branch"],
+            "expected_head": spec["expected_head"],
+            "acceptance_digest": value_digest(spec["acceptance"]),
+            "authorization_envelope_digest": spec["authorization"]["envelope_digest"],
+            "dispatch_status": status,
+            "dispatch_wave": spec["dispatch_wave"],
+            "blocked_by": list(live),
+            "parallel_with": list(node.get("parallel", [])),
+        })
+        if persist_model_policy:
+            entry["model_profile"] = copy.deepcopy(spec["model_profile"])
+        entries.append(entry)
+
+    plan = make_plan(entries)
+    plan.update({
+        "state_root": str(root),
+        "task_specs_root": str(root / "tasks"),
+    })
+    if persist_model_policy:
+        plan["model_policy"] = make_model_policy()
+    plan["plan_digest"] = object_digest(plan, "plan_digest")
+    return plan, specs
+
+
+def write_graph_bundle(root: Path, plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> Path:
+    entries = {entry["task_id"]: entry for entry in plan["tasks"]}
+    for task_id, spec in specs.items():
+        spec["task_spec_digest"] = object_digest(spec, "task_spec_digest")
+        entries[task_id]["task_spec_digest"] = spec["task_spec_digest"]
+        path = Path(spec["task_spec_path"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_json_fixture(path, spec)
+    plan["plan_digest"] = object_digest(plan, "plan_digest")
+    plan_path = root / "dispatch-plan.json"
+    write_json_fixture(plan_path, plan)
+    return plan_path
 
 
 def write_json_fixture(path: Path, value: dict[str, Any]) -> None:
