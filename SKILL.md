@@ -104,12 +104,18 @@ executable message.
 - Treat every Task Spec `allowed_paths` and `forbidden_paths` entry as a repository-relative POSIX path. Reject absolute paths,
   backslashes, empty segments, `.`/`..` segments, and repository escapes; normalize one permitted trailing directory slash
   before component-aware equality or ancestor overlap checks. Invalid aliases never reach parallel ownership comparison.
+- Apply standalone Schema-first runtime shape validation to every Dispatch Plan, Worker Card, and Master Card before semantic
+  validation. Check every top-level and nested primitive, nullable branch, object, array, and duplicate-sensitive collection
+  without truthiness or coercion; booleans never satisfy integer fields, and malformed records fail as contract errors.
 - Every plan entry records `task_spec_revision` and `task_spec_digest`. An affected changed assignment increments its task
   revision; an unchanged active assignment may continue only through an explicit grandfather record in the new plan revision.
 - Treat `supersedes_task_id` as validated lineage, not descriptive text. A strict successor points to one distinct known older
   assignment whose Dispatch status is terminal `SUPERSEDED`; reject self/unknown/future links, cycles, duplicate live
-  successors, source-lineage mismatch, or Plan/Task-Spec authorization-digest mismatch. A plan transition that replaces an
-  immutable assignment records exactly one new linked successor. The schema migration fence preserves older terminal records.
+  successors, publisher spoofing, or Plan/Task-Spec authorization-digest mismatch. Each `NEW` or `REVISE` Task Spec binds its
+  `source_thread_id` to its own publishing Plan's `issued_by`. A `GRANDFATHER` record preserves the earlier publisher, and a
+  predecessor and successor may have different sources after Master conversation rotation. A plan transition that replaces
+  an immutable assignment records exactly one new linked successor. The schema migration fence preserves older terminal
+  records and historical validation rejects unproved in-place source changes or forged lineage.
 - A grandfathered entry preserves its persisted task spec and records that spec's original `task_spec_plan_revision`; it does
   not rewrite the task merely to copy the newer global fence.
 - Persist `model_policy` with an `enforced_from_plan_revision` migration fence before requiring profiles. At or after the fence,

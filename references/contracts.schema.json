@@ -20,6 +20,12 @@
     "schema_version": 1,
     "enforced_from_plan_revision": 15
   },
+  "x-task-source-binding": {
+    "schema_version": 1,
+    "bound_revision_decisions": ["NEW", "REVISE"],
+    "task_field": "source_thread_id",
+    "plan_field": "issued_by"
+  },
   "type": "object",
   "$defs": {
     "digest": {

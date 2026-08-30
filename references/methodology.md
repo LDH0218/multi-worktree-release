@@ -175,6 +175,11 @@ The model `service_tier` is scheduler metadata only. It is never authorization `
 call, execution creation, publication, destructive operation, synchronization, or scope expansion. Those capabilities remain
 governed solely by the complete default-deny authorization envelope and its independent digest.
 
+Apply standalone Schema-first runtime shape validation before semantic validation for every Dispatch Plan, Worker Card, and
+Master Card. It recursively checks every required and optional top-level or nested primitive, nullable branch, object, array,
+and duplicate-sensitive collection against the Schema. Python booleans do not satisfy integer fields; no malformed value is
+accepted through truthiness or coercion, and malformed records produce deterministic contract errors rather than `KeyError`.
+
 Any semantic plan change increments `plan_revision`. If an affected task's dependencies, dispatch wave, allowed behavior,
 inputs, outputs, acceptance, or other executable content changes in scope, increment `task_spec_revision` and recompute
 `task_spec_digest`. A changed objective, owner, worktree, frozen baseline, or authority boundary creates a new task with
@@ -183,10 +188,13 @@ inputs, outputs, acceptance, or other executable content changes in scope, incre
 `supersedes_task_id` is an executable lineage edge. Under the schema's plan-revision-15 migration fence, and for every current
 nonterminal successor, it references one distinct known assignment issued under an older task-spec Plan fence; that predecessor
 must be terminal `SUPERSEDED`. Reject self-links, unknown or future targets, cycles, more than one live successor for one
-predecessor, mismatched issuing-source lineage, and either endpoint whose Plan authorization digest does not bind its own Task
-Spec envelope. The edge does not transfer authority: a successor's complete envelope is independently published and validated.
-Older terminal successor records below the fence remain immutable compatibility evidence rather than being retroactively
-rewritten.
+predecessor, publisher spoofing, and either endpoint whose Plan authorization digest does not bind its own Task Spec envelope.
+Each `NEW` or `REVISE` Task Spec binds `source_thread_id` to its own publishing Plan's `issued_by`. `GRANDFATHER` preserves the
+older Task Spec and original publisher without rewriting either. A predecessor and successor therefore may have different
+sources after Master conversation rotation; predecessor identity, digest, terminal state, and authority binding remain the
+lineage proof. Historical validation rejects an unproved in-place source change or forged lineage. The edge does not transfer
+authority: a successor's complete envelope is independently published and validated. Older terminal successor records below
+the fence remain immutable compatibility evidence rather than being retroactively rewritten.
 
 During previous/current Plan validation, every assignment newly transitioned by `revision_decision: SUPERSEDE` must have
 exactly one newly added Task Spec pointing back to it, and every new pointer must name a predecessor present in the previous

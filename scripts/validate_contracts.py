@@ -215,6 +215,137 @@ def schema_properties(schema: dict[str, Any], definition: str) -> set[str]:
     return set(schema["$defs"][definition]["properties"])
 
 
+def json_values_equal(left: Any, right: Any) -> bool:
+    """Compare JSON values without Python's bool/int equality aliasing."""
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            json_values_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right)
+        )
+    if isinstance(left, dict):
+        return set(left) == set(right) and all(
+            json_values_equal(left[key], right[key]) for key in left
+        )
+    return left == right
+
+
+def schema_type_matches(value: Any, expected: str) -> bool:
+    return {
+        "null": value is None,
+        "boolean": isinstance(value, bool),
+        "integer": isinstance(value, int) and not isinstance(value, bool),
+        "number": isinstance(value, (int, float)) and not isinstance(value, bool),
+        "string": isinstance(value, str),
+        "array": isinstance(value, list),
+        "object": isinstance(value, dict),
+    }.get(expected, False)
+
+
+def validate_schema_node(value: Any, node: dict[str, Any], schema: dict[str, Any], label: str) -> None:
+    """Validate the JSON-Schema shape keywords used by persisted contract records."""
+    if "$ref" in node:
+        reference = node["$ref"]
+        prefix = "#/$defs/"
+        if not isinstance(reference, str) or not reference.startswith(prefix):
+            raise ContractError(f"{label} uses an unsupported Schema reference")
+        definition = reference[len(prefix):]
+        if definition not in schema.get("$defs", {}):
+            raise ContractError(f"{label} references unknown Schema definition {definition}")
+        validate_schema_node(value, schema["$defs"][definition], schema, label)
+
+    if "oneOf" in node and "type" not in node:
+        matches = 0
+        for branch in node["oneOf"]:
+            try:
+                validate_schema_node(value, branch, schema, label)
+            except ContractError:
+                continue
+            matches += 1
+        if matches != 1:
+            raise ContractError(f"{label} must match exactly one Schema branch; matched={matches}")
+
+    for branch in node.get("allOf", []):
+        validate_schema_node(value, branch, schema, label)
+
+    if "if" in node:
+        try:
+            validate_schema_node(value, node["if"], schema, label)
+        except ContractError:
+            condition_matches = False
+        else:
+            condition_matches = True
+        selected = node.get("then") if condition_matches else node.get("else")
+        if selected is not None:
+            validate_schema_node(value, selected, schema, label)
+
+    expected_types = node.get("type")
+    if expected_types is not None:
+        choices = [expected_types] if isinstance(expected_types, str) else expected_types
+        if (not isinstance(choices, list) or not choices
+                or any(not isinstance(item, str) for item in choices)):
+            raise ContractError(f"{label} has an invalid Schema type declaration")
+        if not any(schema_type_matches(value, expected) for expected in choices):
+            raise ContractError(f"{label} must have Schema type {'|'.join(choices)}")
+
+    if "const" in node and not json_values_equal(value, node["const"]):
+        raise ContractError(f"{label} must equal the Schema constant {node['const']!r}")
+    if "enum" in node and not any(json_values_equal(value, item) for item in node["enum"]):
+        raise ContractError(f"{label} is not a Schema enum value")
+
+    if isinstance(value, str):
+        if "minLength" in node and len(value) < node["minLength"]:
+            raise ContractError(f"{label} is shorter than the Schema minimum")
+        if "maxLength" in node and len(value) > node["maxLength"]:
+            raise ContractError(f"{label} is longer than the Schema maximum")
+        if "pattern" in node and re.search(node["pattern"], value) is None:
+            raise ContractError(f"{label} does not match the Schema pattern")
+
+    if isinstance(value, int) and not isinstance(value, bool):
+        if "minimum" in node and value < node["minimum"]:
+            raise ContractError(f"{label} is below the Schema minimum")
+        if "maximum" in node and value > node["maximum"]:
+            raise ContractError(f"{label} is above the Schema maximum")
+
+    if isinstance(value, list):
+        if "minItems" in node and len(value) < node["minItems"]:
+            raise ContractError(f"{label} has fewer than the Schema minimum items")
+        if "maxItems" in node and len(value) > node["maxItems"]:
+            raise ContractError(f"{label} has more than the Schema maximum items")
+        if node.get("uniqueItems"):
+            for index, item in enumerate(value):
+                if any(json_values_equal(item, prior) for prior in value[:index]):
+                    raise ContractError(f"{label} must not contain duplicate items")
+        item_schema = node.get("items")
+        if isinstance(item_schema, dict):
+            for index, item in enumerate(value):
+                validate_schema_node(item, item_schema, schema, f"{label}[{index}]")
+
+    if isinstance(value, dict):
+        required = node.get("required", [])
+        missing = sorted(field for field in required if field not in value)
+        if missing:
+            raise ContractError(f"{label} is missing Schema fields: {missing}")
+        properties = node.get("properties", {})
+        for field, field_schema in properties.items():
+            if field in value:
+                validate_schema_node(value[field], field_schema, schema, f"{label}.{field}")
+        extras = [field for field in value if field not in properties]
+        additional = node.get("additionalProperties", True)
+        if additional is False and extras:
+            raise ContractError(f"{label} has extra Schema fields: {sorted(extras)}")
+        if isinstance(additional, dict):
+            for field in extras:
+                validate_schema_node(value[field], additional, schema, f"{label}.{field}")
+
+
+def validate_schema_definition(value: Any, schema: dict[str, Any], definition: str, label: str) -> None:
+    if definition not in schema.get("$defs", {}):
+        raise ContractError(f"unknown Schema definition: {definition}")
+    validate_schema_node(value, schema["$defs"][definition], schema, label)
+
+
 def require_schema_fields(value: dict[str, Any], schema: dict[str, Any],
                           definition: str, label: str) -> None:
     actual = set(value)
@@ -643,6 +774,7 @@ def validate_task_spec(value: dict[str, Any], schema: dict[str, Any],
 
 
 def validate_plan(value: dict[str, Any], schema: dict[str, Any]) -> None:
+    validate_schema_definition(value, schema, "dispatch_plan", "dispatch plan")
     require_schema_fields(value, schema, "dispatch_plan", "dispatch plan")
     require_exact_fields(value["validation"], schema_required(schema, "plan_validation"), "plan validation")
     validate_positive_integer(value["record_revision"], "dispatch_plan.record_revision")
@@ -799,6 +931,28 @@ def supersession_lineage_enforced(entry: dict[str, Any], schema: dict[str, Any],
     )
 
 
+def validate_task_source_bindings(plan: dict[str, Any], specs: dict[str, dict[str, Any]],
+                                  schema: dict[str, Any]) -> None:
+    metadata = schema.get("x-task-source-binding")
+    expected = {
+        "schema_version": 1,
+        "bound_revision_decisions": ["NEW", "REVISE"],
+        "task_field": "source_thread_id",
+        "plan_field": "issued_by",
+    }
+    if metadata != expected:
+        raise ContractError("Schema task-source publication binding is invalid")
+    for entry in plan["tasks"]:
+        if entry["revision_decision"] in set(expected["bound_revision_decisions"]):
+            task_id = entry["task_id"]
+            if specs[task_id][expected["task_field"]] != plan[expected["plan_field"]]:
+                raise ContractError(
+                    f"Task Spec publisher mismatch for {task_id}: "
+                    f"source_thread_id={specs[task_id]['source_thread_id']!r}, "
+                    f"plan.issued_by={plan['issued_by']!r}"
+                )
+
+
 def validate_supersession_lineage(plan: dict[str, Any], specs: dict[str, dict[str, Any]],
                                   schema: dict[str, Any], historical: bool = False) -> None:
     """Validate explicit successor-to-predecessor assignment lineage without inheriting authority."""
@@ -851,10 +1005,6 @@ def validate_supersession_lineage(plan: dict[str, Any], specs: dict[str, dict[st
             raise ContractError(
                 f"supersession predecessor {predecessor_id} is not older than successor {successor_id}"
             )
-        if predecessor_spec["source_thread_id"] != successor_spec["source_thread_id"]:
-            raise ContractError(
-                f"supersession source lineage mismatch between {predecessor_id} and {successor_id}"
-            )
         for endpoint_id, endpoint_entry, endpoint_spec in (
             (predecessor_id, predecessor_entry, predecessor_spec),
             (successor_id, successor_entry, successor_spec),
@@ -878,6 +1028,7 @@ def validate_dispatch_graph_and_model_routing(plan: dict[str, Any], specs: dict[
     known = set(entries)
     policy = plan.get("model_policy")
 
+    validate_task_source_bindings(plan, specs, schema)
     validate_supersession_lineage(plan, specs, schema, historical=historical)
 
     for task_id, entry in entries.items():
@@ -1097,6 +1248,7 @@ def validate_persisted_plan_specs(value: dict[str, Any], schema: dict[str, Any])
 
 def validate_worker_card(value: dict[str, Any], schema: dict[str, Any],
                          enforce_authorization_expiry: bool = True) -> None:
+    validate_schema_definition(value, schema, "worker_card", "Worker card")
     require_exact_fields(value, schema_required(schema, "worker_card"), "Worker card")
     if value["schema_version"] != 1:
         raise ContractError("worker_card.schema_version must be 1")
@@ -1172,6 +1324,7 @@ def validate_worker_card(value: dict[str, Any], schema: dict[str, Any],
 
 def validate_master_card(value: dict[str, Any], schema: dict[str, Any], *, historical: bool = False,
                          previous_candidate: dict[str, Any] | None = None) -> None:
+    validate_schema_definition(value, schema, "master_card", "Master card")
     require_exact_fields(value, schema_required(schema, "master_card"), "Master card")
     if value["schema_version"] != 1:
         raise ContractError("master_card.schema_version must be 1")
@@ -2560,6 +2713,13 @@ def validate_documented_contracts(repo_root: Path, schema: dict[str, Any]) -> No
         "schema_version": 1, "enforced_from_plan_revision": 15,
     }:
         raise ContractError("Schema supersession-lineage migration fence drifted from the validator")
+    if schema.get("x-task-source-binding") != {
+        "schema_version": 1,
+        "bound_revision_decisions": ["NEW", "REVISE"],
+        "task_field": "source_thread_id",
+        "plan_field": "issued_by",
+    }:
+        raise ContractError("Schema task-source publication binding drifted from the validator")
     required = schema_required(schema, "authorization_v2")
     for label, block in (("canonical authorization", canonical), ("task authorization", task), ("Worker authorization", worker)):
         keys = nested_mapping_keys(block, "authorization")
@@ -2660,6 +2820,15 @@ def validate_documented_contracts(repo_root: Path, schema: dict[str, Any]) -> No
         if missing_reaudit_terms:
             raise ContractError(
                 f"final-reaudit contract missing from {relative}: {missing_reaudit_terms}"
+            )
+        acceptance_terms = (
+            "standalone Schema-first runtime shape validation", "source_thread_id", "issued_by",
+            "Master conversation rotation",
+        )
+        missing_acceptance_terms = [term for term in acceptance_terms if term not in contents]
+        if missing_acceptance_terms:
+            raise ContractError(
+                f"final-acceptance contract missing from {relative}: {missing_acceptance_terms}"
             )
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
     obsolete_identity_terms = (
@@ -2790,6 +2959,134 @@ def make_allowed_authorization_v2(*capability_names: str,
     value["expires_at"] = "2100-01-01T00:00:00Z"
     value["envelope_digest"] = object_digest(value, "envelope_digest")
     return value
+
+
+def invalid_schema_type_value(node: dict[str, Any]) -> Any:
+    expected = node.get("type")
+    choices = [expected] if isinstance(expected, str) else list(expected or [])
+    for candidate in (None, True, 1, "invalid", [], {}):
+        if not any(schema_type_matches(candidate, item) for item in choices):
+            return candidate
+    raise AssertionError(f"test helper cannot find an invalid type for {choices}")
+
+
+def schema_rejecting_sample(node: dict[str, Any], schema: dict[str, Any]) -> Any:
+    for candidate in (None, True, 1, 1.5, "x", "a" * 40, "sha256:" + "a" * 64, [], {}):
+        try:
+            validate_schema_node(candidate, node, schema, "mutation sample")
+        except ContractError:
+            return candidate
+    raise AssertionError("test helper cannot find a Schema-rejected sample")
+
+
+def schema_accepting_sample(node: dict[str, Any], schema: dict[str, Any]) -> Any | None:
+    for candidate in (None, True, 1, 1.5, "x", "a" * 40, "sha256:" + "a" * 64, [], {}):
+        try:
+            validate_schema_node(candidate, node, schema, "mutation sample")
+        except ContractError:
+            continue
+        return candidate
+    return None
+
+
+def replace_json_path(value: Any, path: tuple[str | int, ...], replacement: Any) -> Any:
+    candidate = copy.deepcopy(value)
+    if not path:
+        return replacement
+    parent = candidate
+    for component in path[:-1]:
+        parent = parent[component]
+    parent[path[-1]] = replacement
+    return candidate
+
+
+def delete_json_path(value: Any, path: tuple[str | int, ...]) -> Any:
+    candidate = copy.deepcopy(value)
+    parent = candidate
+    for component in path[:-1]:
+        parent = parent[component]
+    del parent[path[-1]]
+    return candidate
+
+
+def schema_shape_mutations(value: Any, schema: dict[str, Any], definition: str
+                           ) -> list[tuple[str, Any]]:
+    """Generate wrong-type, missing-field, extra-field, and duplicate mutations recursively."""
+    mutations: list[tuple[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(label: str, candidate: Any) -> None:
+        if label not in seen:
+            seen.add(label)
+            mutations.append((label, candidate))
+
+    def walk(current: Any, node: dict[str, Any], path: tuple[str | int, ...]) -> None:
+        path_label = "$" + "".join(
+            f"[{component}]" if isinstance(component, int) else f".{component}"
+            for component in path
+        )
+        if "$ref" in node:
+            reference = node["$ref"]
+            walk(current, schema["$defs"][reference.removeprefix("#/$defs/")], path)
+            return
+        if "oneOf" in node and "type" not in node:
+            for branch in node["oneOf"]:
+                try:
+                    validate_schema_node(current, branch, schema, path_label)
+                except ContractError:
+                    continue
+                walk(current, branch, path)
+            return
+
+        if "type" in node:
+            add(f"{path_label}:wrong-type", replace_json_path(
+                value, path, invalid_schema_type_value(node),
+            ))
+        elif "enum" in node:
+            add(f"{path_label}:invalid-enum", replace_json_path(value, path, "__invalid_enum__"))
+
+        for branch in node.get("allOf", []):
+            walk(current, branch, path)
+
+        if isinstance(current, dict):
+            properties = node.get("properties", {})
+            for field in node.get("required", []):
+                if field in current:
+                    add(f"{path_label}.{field}:missing", delete_json_path(value, path + (field,)))
+            if node.get("additionalProperties") is False:
+                extra = copy.deepcopy(current)
+                extra["__unexpected_field__"] = None
+                add(f"{path_label}:extra-field", replace_json_path(value, path, extra))
+            for field, field_schema in properties.items():
+                if field in current:
+                    walk(current[field], field_schema, path + (field,))
+            additional = node.get("additionalProperties")
+            if isinstance(additional, dict):
+                for field in current:
+                    if field not in properties:
+                        walk(current[field], additional, path + (field,))
+
+        if isinstance(current, list):
+            item_schema = node.get("items")
+            if isinstance(item_schema, dict):
+                invalid_item = schema_rejecting_sample(item_schema, schema)
+                malformed = copy.deepcopy(current)
+                malformed.append(invalid_item)
+                add(f"{path_label}:invalid-item", replace_json_path(value, path, malformed))
+            if node.get("uniqueItems"):
+                duplicate_item = current[0] if current else (
+                    schema_accepting_sample(item_schema, schema)
+                    if isinstance(item_schema, dict) else None
+                )
+                if duplicate_item is not None:
+                    add(f"{path_label}:duplicate", replace_json_path(
+                        value, path, [copy.deepcopy(duplicate_item), copy.deepcopy(duplicate_item)],
+                    ))
+            if current and isinstance(item_schema, dict):
+                walk(current[0], item_schema, path + (0,))
+
+    walk(value, schema["$defs"][definition], ())
+    return mutations
 
 
 class ContractScenarios(unittest.TestCase):
@@ -3210,6 +3507,127 @@ class ContractScenarios(unittest.TestCase):
             with self.subTest(invalid=value), self.assertRaises(ContractError):
                 validate_rfc3339(value, "timestamp")
 
+    def test_standalone_plan_worker_master_schema_shape_parity(self) -> None:
+        plan, _specs = make_graph_bundle(
+            Path("/tmp/mwr-shape-plan"), {"A": {"status": "PUBLISHED"}},
+        )
+        active_worker = make_active_worker_card()
+        active_worker["authorization"] = default_authorization_v2()
+        idle_worker = make_idle_worker_card()
+        idle_worker["authorization"] = default_authorization_v2()
+        idle_worker["last_task"] = {
+            "task_id": "completed-task",
+            "task_spec_revision": 1,
+            "task_spec_digest": "sha256:" + "a" * 64,
+            "outcome": "COMPLETED",
+            "worker_commit_sha": "b" * 40,
+            "integrated_as_sha": "c" * 40,
+        }
+        active_master = make_active_master_card(plan)
+        active_master["worker_handoffs"] = [make_received_handoff()]
+        active_master["candidate_evidence"] = make_candidate_v2(
+            plan_revision=plan["plan_revision"], plan_digest=plan["plan_digest"],
+        )
+        fixtures = (
+            ("plan", plan, "dispatch_plan", validate_plan),
+            ("active-worker", active_worker, "worker_card", validate_worker_card),
+            ("idle-worker", idle_worker, "worker_card", validate_worker_card),
+            ("active-master", active_master, "master_card", validate_master_card),
+            ("idle-master", make_idle_master_card(), "master_card", validate_master_card),
+        )
+        for fixture_label, fixture, definition, validator in fixtures:
+            validator(fixture, self.schema)
+            mutations = schema_shape_mutations(fixture, self.schema, definition)
+            self.assertGreater(len(mutations), 20, fixture_label)
+            for mutation_label, candidate in mutations:
+                with self.subTest(fixture=fixture_label, mutation=mutation_label):
+                    with self.assertRaises(ContractError):
+                        validator(candidate, self.schema)
+
+    def test_public_cli_plan_worker_master_shape_mutation_matrix(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan, specs = make_graph_bundle(root / "plan", {"A": {"status": "PUBLISHED"}})
+            plan_path = write_graph_bundle(root / "plan", plan, specs)
+            worker = make_active_worker_card()
+            worker["authorization"] = default_authorization_v2()
+            master = make_active_master_card(plan, str(plan_path))
+            master["worker_handoffs"] = [make_received_handoff()]
+            master["candidate_evidence"] = make_candidate_v2(
+                plan_revision=plan["plan_revision"], plan_digest=plan["plan_digest"],
+            )
+            public_cases: list[tuple[str, str, dict[str, Any], tuple[str, ...]]] = []
+
+            def add_plan(label: str, mutator: Any) -> None:
+                candidate = copy.deepcopy(plan)
+                mutator(candidate)
+                candidate["plan_digest"] = object_digest(candidate, "plan_digest")
+                public_cases.append((label, "plan", candidate, ("--plan",)))
+
+            add_plan("plan-top-bool", lambda value: value.update(release_task_id=True))
+            add_plan("plan-tasks-object", lambda value: value.update(tasks={}))
+            add_plan("plan-entry-bool-int", lambda value: value["tasks"][0].update(task_spec_revision=True))
+            add_plan("plan-entry-list-item", lambda value: value["tasks"][0].update(blocked_by=[1]))
+            add_plan("plan-validation-shape", lambda value: value.update(validation=[]))
+
+            worker_cases = {
+                "worker-top-source-bool": lambda value: value.update(source_thread_id=True),
+                "worker-paths-object": lambda value: value.update(allowed_paths={}),
+                "worker-last-task-array": lambda value: value.update(last_task=[]),
+                "worker-authorization-array": lambda value: value.update(authorization=[]),
+            }
+            for label, mutator in worker_cases.items():
+                candidate = copy.deepcopy(worker)
+                mutator(candidate)
+                public_cases.append((label, "worker", candidate, ("--worker-card-json",)))
+
+            master_cases = {
+                "master-top-release-bool": lambda value: value.update(release_task_id=True),
+                "master-handoffs-object": lambda value: value.update(worker_handoffs={}),
+                "master-handoff-bool-int": lambda value: value["worker_handoffs"][0].update(plan_revision=True),
+                "master-candidate-array": lambda value: value.update(candidate_evidence=[]),
+            }
+            for label, mutator in master_cases.items():
+                candidate = copy.deepcopy(master)
+                mutator(candidate)
+                public_cases.append((label, "master", candidate, ("--master-card-json",)))
+
+            for index, (label, kind, candidate, option) in enumerate(public_cases):
+                path = root / f"{index:02d}-{kind}-{label}.json"
+                write_json_fixture(path, candidate)
+                result = run_public_cli(option[0], str(path))
+                with self.subTest(case=label):
+                    self.assertEqual(result.returncode, 1, result.stdout)
+                    self.assertNotIn("Traceback", result.stderr)
+
+    def test_task_source_binds_to_own_publishing_plan_across_rotation(self) -> None:
+        plan, specs = make_rotated_supersession_bundle(Path("/tmp/mwr-source-rotation"))
+        validate_task_source_bindings(plan, specs, self.schema)
+        validate_supersession_lineage(plan, specs, self.schema)
+
+        spoofed = copy.deepcopy(specs)
+        spoofed["new"]["source_thread_id"] = "spoofed-master"
+        with self.assertRaisesRegex(ContractError, "publisher mismatch"):
+            validate_task_source_bindings(plan, spoofed, self.schema)
+
+        previous = make_previous_rotation_plan(plan)
+        previous_specs = {"old": copy.deepcopy(specs["old"])}
+        self.assertEqual(
+            validate_plan_transition(previous, plan, previous_specs, specs), "FORWARD",
+        )
+        forged_plan = copy.deepcopy(plan)
+        forged_specs = copy.deepcopy(specs)
+        forged_specs["old"]["source_thread_id"] = "forged-old-master"
+        forged_specs["old"]["task_spec_digest"] = object_digest(
+            forged_specs["old"], "task_spec_digest",
+        )
+        next(entry for entry in forged_plan["tasks"] if entry["task_id"] == "old")[
+            "task_spec_digest"
+        ] = forged_specs["old"]["task_spec_digest"]
+        forged_plan["plan_digest"] = object_digest(forged_plan, "plan_digest")
+        with self.assertRaisesRegex(ContractError, r"\[H14\].*digest"):
+            validate_plan_transition(previous, forged_plan, previous_specs, forged_specs)
+
     def test_supersession_lineage_direct_matrix(self) -> None:
         plan, specs = make_supersession_bundle(Path("/tmp/mwr-lineage-direct"))
         validate_supersession_lineage(plan, specs, self.schema)
@@ -3246,8 +3664,9 @@ class ContractScenarios(unittest.TestCase):
             ).update(task_spec_plan_revision=2),
             "not older",
         )
-        rejected(lambda _plan, candidate: candidate["new"].update(source_thread_id="other-master"),
-                 "source lineage mismatch")
+        rotated_specs = copy.deepcopy(specs)
+        rotated_specs["new"]["source_thread_id"] = "rotated-master"
+        validate_supersession_lineage(plan, rotated_specs, self.schema)
         rejected(
             lambda candidate_plan, _specs: next(
                 entry for entry in candidate_plan["tasks"] if entry["task_id"] == "old"
@@ -3323,6 +3742,26 @@ class ContractScenarios(unittest.TestCase):
                 "--previous-plan", str(previous_path), "--plan", str(current_path),
             )
             self.assertEqual(history.returncode, 0, history.stderr)
+
+            rotation_root = root / "master-rotation"
+            rotation_plan, rotation_specs = make_rotated_supersession_bundle(rotation_root)
+            rotation_path = write_graph_bundle(rotation_root, rotation_plan, rotation_specs)
+            rotation_previous = make_previous_rotation_plan(rotation_plan)
+            rotation_previous_path = rotation_root / "previous-plan.json"
+            write_json_fixture(rotation_previous_path, rotation_previous)
+            rotation = run_public_cli(
+                "--previous-plan", str(rotation_previous_path), "--plan", str(rotation_path),
+            )
+            self.assertEqual(rotation.returncode, 0, rotation.stderr)
+
+            spoof_root = root / "master-rotation-spoof"
+            spoof_plan, spoof_specs = make_rotated_supersession_bundle(spoof_root)
+            spoof_specs["new"]["source_thread_id"] = "spoofed-master"
+            spoof_path = write_graph_bundle(spoof_root, spoof_plan, spoof_specs)
+            spoof = run_public_cli("--plan", str(spoof_path))
+            self.assertEqual(spoof.returncode, 1, spoof.stdout)
+            self.assertIn("publisher mismatch", spoof.stderr)
+            self.assertNotIn("Traceback", spoof.stderr)
 
             valid_time_path = root / "valid-offset-task.json"
             valid_time = make_task_spec_at(valid_time_path)
@@ -5214,6 +5653,47 @@ def make_supersession_bundle(root: Path, *, successor_ids: tuple[str, ...] = ("n
     plan["blocked_tasks"] = []
     plan["plan_digest"] = object_digest(plan, "plan_digest")
     return plan, specs
+
+
+def make_rotated_supersession_bundle(
+        root: Path) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    plan, specs = make_supersession_bundle(root)
+    entries = {entry["task_id"]: entry for entry in plan["tasks"]}
+    plan.update({
+        "record_revision": 2,
+        "updated_at": "2026-01-01T00:01:00Z",
+        "issued_by": "master-new",
+    })
+    specs["old"]["source_thread_id"] = "master-old"
+    specs["old"]["task_spec_digest"] = object_digest(specs["old"], "task_spec_digest")
+    entries["old"]["task_spec_digest"] = specs["old"]["task_spec_digest"]
+    specs["new"]["source_thread_id"] = "master-new"
+    specs["new"]["task_spec_digest"] = object_digest(specs["new"], "task_spec_digest")
+    entries["new"]["task_spec_digest"] = specs["new"]["task_spec_digest"]
+    plan["plan_digest"] = object_digest(plan, "plan_digest")
+    return plan, specs
+
+
+def make_previous_rotation_plan(current: dict[str, Any]) -> dict[str, Any]:
+    previous = copy.deepcopy(current)
+    previous.update({
+        "record_revision": 1,
+        "plan_revision": 1,
+        "updated_at": "2026-01-01T00:00:00Z",
+        "issued_by": "master-old",
+    })
+    previous["tasks"] = [
+        next(entry for entry in previous["tasks"] if entry["task_id"] == "old")
+    ]
+    previous["tasks"][0].update({
+        "revision_decision": "NEW",
+        "dispatch_status": "PUBLISHED",
+        "task_spec_plan_revision": 1,
+    })
+    previous["ready_wave"] = 1
+    previous["blocked_tasks"] = []
+    previous["plan_digest"] = object_digest(previous, "plan_digest")
+    return previous
 
 
 def make_legacy_master_sequence(schema: dict[str, Any]) -> tuple[

@@ -86,6 +86,11 @@ Task Spec `dependencies.blocked_by` is the canonical direct graph; the Plan entr
 projection. Derive waves from the static graph, require exact Plan/Task Spec equality, validate transitive reduction and
 parallel incomparability, and recompute `blocked_tasks` plus the `READY`/`PUBLISHED` `ready_wave` frontier on every write.
 
+Apply standalone Schema-first runtime shape validation before semantic validation to every Dispatch Plan, Worker Card, and
+Master Card. Validate every top-level and nested primitive, nullable branch, object, array, and duplicate-sensitive collection.
+Booleans never satisfy integer fields, and malformed input must fail deterministically without truthiness, coercion, or
+`KeyError`.
+
 Write `allowed_paths` and `forbidden_paths` as repository-relative POSIX paths. Reject absolute paths, backslashes, empty
 segments, `.`/`..` segments, and repository escapes. Normalize one trailing directory slash before component-aware parallel
 ownership comparison, so `src/x` and `src/x/` conflict rather than becoming aliases.
@@ -104,7 +109,10 @@ their last issued task-spec plan revision and digest.
 
 Treat Task Spec `supersedes_task_id` as a checked predecessor edge. At or after the plan-revision-15 migration fence, and for
 every current nonterminal successor, require one distinct known older predecessor with terminal `SUPERSEDED` status. Reject
-self, unknown, future, cyclic, duplicate-live-successor, source-lineage, and endpoint authorization-binding failures. A
+self, unknown, future, cyclic, duplicate-live-successor, publisher-spoof, and endpoint authorization-binding failures. Each
+`NEW` or `REVISE` Task Spec binds `source_thread_id` to its own publishing Plan's `issued_by`; `GRANDFATHER` preserves its older
+publisher. A predecessor and successor may use different sources after Master conversation rotation, while historical
+validation preserves predecessor identity/digest/terminal evidence and rejects unproved source changes or forged lineage. A
 previous/current replacement transitions exactly one predecessor via `SUPERSEDE` and adds exactly one linked `NEW` successor;
 older terminal records below the fence remain immutable compatibility evidence.
 
