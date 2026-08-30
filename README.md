@@ -99,6 +99,12 @@ ln -s ~/Projects/multi-worktree-release ~/.codex/skills/multi-worktree-release
 在 Codex 中显式调用 Skill：
 
 ```text
+$multi-worktree-release 先判断这个小型文档修正是否符合 FAST；符合则在当前任务和工作目录直接完成并验证，不创建 Plan、Task Spec、Card 或额外 worktree，风险扩大时升级。
+```
+
+需要严格协作时可以这样开始：
+
+```text
 $multi-worktree-release 审查这个仓库是否适合采用 Master/Worker 多工作树流程，并给出采用计划。
 ```
 
