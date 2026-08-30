@@ -102,10 +102,19 @@ A `GRANDFATHER` entry preserves the existing task spec, digest, and its original
 task to copy the new global plan fence. `NEW` and `REVISE` task specs bind to the current plan revision. Terminal entries retain
 their last issued task-spec plan revision and digest.
 
+Treat Task Spec `supersedes_task_id` as a checked predecessor edge. At or after the plan-revision-15 migration fence, and for
+every current nonterminal successor, require one distinct known older predecessor with terminal `SUPERSEDED` status. Reject
+self, unknown, future, cyclic, duplicate-live-successor, source-lineage, and endpoint authorization-binding failures. A
+previous/current replacement transitions exactly one predecessor via `SUPERSEDE` and adds exactly one linked `NEW` successor;
+older terminal records below the fence remain immutable compatibility evidence.
+
 Persist the complete task specification atomically and verify its digest before atomically updating this plan. Increment
 `record_revision` on every plan write and `plan_revision` only for semantic plan changes. Unless repository governance defines
 another durable path, write the plan to `<MASTER_WORKTREE>/.codex/multi-worktree-release/dispatch-plan.json` and task specs to
 the sibling `tasks/` directory. Do not dispatch from a conversation-only projection or after a partial write or digest mismatch.
+All timestamp placeholders use strict timezone-bearing RFC 3339
+`YYYY-MM-DDTHH:MM:SS[.1-6 digits](Z|+HH:MM|-HH:MM)` values; never use a date-only, space separator, timezone-less value,
+non-colon offset, impossible calendar date/time, or non-string substitute.
 
 ## Candidate evidence v2
 
@@ -189,6 +198,11 @@ Never derive IDs from commands or positions.
 Validate with `--candidate-evidence-json`; use
 `--previous-candidate-evidence-json <OLD> --candidate-evidence-json <CURRENT>` for read-only invalidation scope,
 `--migrate-candidate-evidence` for the read-only legacy projection, and `--candidate-evidence-self-test` for the focused matrix.
+
+A migrated legacy-only v2 audit record may later advance to a fresh per-Gate rerun. The new record must use the same non-null
+release task and exact head, a non-regressing Master plan fence, `legacy: null`, and a complete independently valid registry,
+source/check provenance, and recomputed input/evidence digests; its aggregate is freshly `PASSED` or `FAILED`. Never copy an
+opaque legacy digest. Identity, head, plan-authority, registry, provenance, digest, or monotonic-record failures remain H25.
 
 ## New conversation read-only bootstrap
 

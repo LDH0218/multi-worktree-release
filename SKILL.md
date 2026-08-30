@@ -106,6 +106,10 @@ executable message.
   before component-aware equality or ancestor overlap checks. Invalid aliases never reach parallel ownership comparison.
 - Every plan entry records `task_spec_revision` and `task_spec_digest`. An affected changed assignment increments its task
   revision; an unchanged active assignment may continue only through an explicit grandfather record in the new plan revision.
+- Treat `supersedes_task_id` as validated lineage, not descriptive text. A strict successor points to one distinct known older
+  assignment whose Dispatch status is terminal `SUPERSEDED`; reject self/unknown/future links, cycles, duplicate live
+  successors, source-lineage mismatch, or Plan/Task-Spec authorization-digest mismatch. A plan transition that replaces an
+  immutable assignment records exactly one new linked successor. The schema migration fence preserves older terminal records.
 - A grandfathered entry preserves its persisted task spec and records that spec's original `task_spec_plan_revision`; it does
   not rewrite the task merely to copy the newer global fence.
 - Persist `model_policy` with an `enforced_from_plan_revision` migration fence before requiring profiles. At or after the fence,
@@ -119,6 +123,8 @@ executable message.
   or scope expansion.
 - Keep semantic `plan_revision` separate from `record_revision`, which increments on every persisted state update. Preserve the
   state directory as user-owned material whether repository policy tracks it or keeps it local.
+- Use the schema's strict timezone-bearing RFC 3339 grammar for every timestamp: literal `T`, seconds, and `Z` or a colonized
+  numeric offset are required, and calendar-invalid values are rejected consistently by documents, Schema, and Python.
 - Validate unique task IDs, known dependency references, acyclic dependencies, available worktrees, and no semantic file or
   contract overlap before publishing a batch.
 - If tasks have no unresolved dependency and no semantic file or contract overlap, publish them in the same parallel batch.
@@ -193,6 +199,10 @@ monotonic revisions, terminal states, immutable identity/evidence, and diagnosti
   `STALE` remains readable for deliberate recovery. Comparison returns `NONE` only when both operands are empty v1 `NONE`;
   every mixed v1/v2 comparison returns whole-candidate `ALL`. Master reruns required Gates and
   recomputes final evidence from the integrated tree.
+- A preserved legacy-only v2 record may advance through historical H25 validation to a fresh per-Gate rerun only for the same
+  non-null release task and exact head, a non-regressing Master plan fence, and independently valid current Gate/check/source
+  and evidence digests with `legacy: null`. Opaque legacy digests are never reused; rewrites, promotion without a complete
+  rerun, identity/head/authority drift, or invalid registry/provenance remain H25 failures.
 - An accepted Worker handoff may return to `IDLE` even if the global candidate is blocked by another responsibility layer.
 
 ## Deliver evidence, not ceremony

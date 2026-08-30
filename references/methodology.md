@@ -180,6 +180,19 @@ inputs, outputs, acceptance, or other executable content changes in scope, incre
 `task_spec_digest`. A changed objective, owner, worktree, frozen baseline, or authority boundary creates a new task with
 `supersedes_task_id`; it is never an in-place revision. Older plan or task revisions for an affected task are rejected.
 
+`supersedes_task_id` is an executable lineage edge. Under the schema's plan-revision-15 migration fence, and for every current
+nonterminal successor, it references one distinct known assignment issued under an older task-spec Plan fence; that predecessor
+must be terminal `SUPERSEDED`. Reject self-links, unknown or future targets, cycles, more than one live successor for one
+predecessor, mismatched issuing-source lineage, and either endpoint whose Plan authorization digest does not bind its own Task
+Spec envelope. The edge does not transfer authority: a successor's complete envelope is independently published and validated.
+Older terminal successor records below the fence remain immutable compatibility evidence rather than being retroactively
+rewritten.
+
+During previous/current Plan validation, every assignment newly transitioned by `revision_decision: SUPERSEDE` must have
+exactly one newly added Task Spec pointing back to it, and every new pointer must name a predecessor present in the previous
+Plan and terminally superseded in the current Plan. This is the proof that immutable objective, owner, worktree, frozen
+baseline, or authorization changes used a replacement task instead of an in-place mutation.
+
 `plan_revision` is a fencing token and is not part of message identity. An unaffected active task may keep its existing task
 revision only when Master records `GRANDFATHER` in the new plan, verifies that its complete persisted task-spec digest is
 unchanged, preserves the task spec's original `task_spec_plan_revision`, and sends no altered executable assignment. `NEW` and
@@ -191,6 +204,11 @@ semantic plan changes. Compute `plan_digest` with the canonical structured-data 
 while hashing. Persist each complete task specification first by writing a sibling temporary file, flushing it when supported,
 and atomically renaming it to the final path. Verify `task_spec_digest`, then persist the plan with the same atomic-replacement
 pattern, verify `plan_digest`, and only then publish the message. A partial write or digest mismatch stops dispatch.
+
+Every persisted timestamp uses one strict timezone-bearing RFC 3339 contract shared by Schema and Python:
+`YYYY-MM-DDTHH:MM:SS[.1-6 digits](Z|+HH:MM|-HH:MM)`. A literal `T`, seconds, and an explicit timezone are mandatory. Date-only,
+space-separated, timezone-less, non-colon offsets, out-of-range time/offset components, impossible calendar dates, and
+non-string values are invalid. `Z` and valid explicit offsets remain equivalent instants for ordering.
 
 Separate three completion states:
 
@@ -631,6 +649,14 @@ empty v2 `NONE`; every mixed v1/v2 comparison returns `ALL`. Applying migration 
 v2 record is idempotent. Validate standalone fixtures with `--candidate-evidence-json <PATH>`, compare old/current manifests with
 `--previous-candidate-evidence-json <OLD> --candidate-evidence-json <CURRENT>` to obtain `NONE`, `AFFECTED`, or `ALL`, and run
 the targeted matrix with `--candidate-evidence-self-test`.
+
+The preserved legacy-only v2 record is an audit waypoint, not a permanent dead end. Historical H25 permits it to advance to a
+fresh per-Gate rerun only when the new record removes `legacy`, keeps the same non-null `release_task_id` and exact
+`release_head_sha`, uses a non-regressing Master plan fence, and independently validates a complete current Gate registry,
+source provenance, check inputs/results, and all input/evidence digests. The resulting aggregate must be current `PASSED` or
+`FAILED`. No legacy aggregate or check digest may be reused. Any legacy rewrite, direct promotion, identity/head/authority
+change, incomplete registry, bad provenance, or digest mismatch remains an H25 failure; Master `record_revision` and time must
+also advance through the ordinary monotonic transition rules.
 
 ## State transitions
 

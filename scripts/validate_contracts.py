@@ -19,6 +19,12 @@ from typing import Any, Dict, List, Literal, TypedDict, Union, cast
 
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+RFC3339_PATTERN = (
+    r"^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])"
+    r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,6})?"
+    r"(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$"
+)
+RFC3339_RE = re.compile(RFC3339_PATTERN)
 SUPERSEDE_FIELDS = {"objective", "owner_role", "worktree", "expected_head", "authorization"}
 DISPATCH_TRANSITIONS = {
     "GATED": {"READY", "CANCELLED", "SUPERSEDED"},
@@ -321,12 +327,19 @@ def parse_rfc3339(value: Any, label: str, allow_null: bool = False) -> dt.dateti
         return None
     if not isinstance(value, str):
         raise ContractError(f"{label} must be an RFC 3339 timestamp")
+    if not RFC3339_RE.fullmatch(value):
+        raise ContractError(f"{label} must be a strict timezone-bearing RFC 3339 timestamp")
+    zone_start = len(value) - (1 if value.endswith("Z") else 6)
+    normalized = value
+    if zone_start > 19:
+        fraction = value[20:zone_start]
+        normalized = value[:19] + "." + fraction[:6].ljust(6, "0") + value[zone_start:]
     try:
-        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = dt.datetime.fromisoformat(
+            normalized[:-1] + "+00:00" if normalized.endswith("Z") else normalized
+        )
     except ValueError as error:
-        raise ContractError(f"{label} must be an RFC 3339 timestamp") from error
-    if parsed.tzinfo is None:
-        raise ContractError(f"{label} must include a timezone")
+        raise ContractError(f"{label} must be a valid RFC 3339 calendar timestamp") from error
     return parsed
 
 
@@ -775,11 +788,97 @@ def paths_overlap(left: str, right: str) -> bool:
     return left == right or left.startswith(right + "/") or right.startswith(left + "/")
 
 
+def supersession_lineage_enforced(entry: dict[str, Any], schema: dict[str, Any],
+                                  historical: bool) -> bool:
+    metadata = schema.get("x-supersession-lineage", {})
+    fence = metadata.get("enforced_from_plan_revision")
+    if metadata.get("schema_version") != 1 or not isinstance(fence, int) or isinstance(fence, bool) or fence < 1:
+        raise ContractError("Schema supersession-lineage migration fence is invalid")
+    return entry["task_spec_plan_revision"] >= fence or (
+        not historical and entry["dispatch_status"] not in TERMINAL_DISPATCH_STATES
+    )
+
+
+def validate_supersession_lineage(plan: dict[str, Any], specs: dict[str, dict[str, Any]],
+                                  schema: dict[str, Any], historical: bool = False) -> None:
+    """Validate explicit successor-to-predecessor assignment lineage without inheriting authority."""
+    entries = {entry["task_id"]: entry for entry in plan["tasks"]}
+    predecessors = {
+        task_id: spec["supersedes_task_id"] for task_id, spec in specs.items()
+        if spec["supersedes_task_id"] is not None
+        and supersession_lineage_enforced(entries[task_id], schema, historical)
+    }
+    for successor_id, predecessor_id in predecessors.items():
+        if successor_id == predecessor_id:
+            raise ContractError(f"supersession lineage self-link for {successor_id}")
+        if predecessor_id not in entries or predecessor_id not in specs:
+            raise ContractError(
+                f"supersession lineage for {successor_id} references unknown task {predecessor_id}"
+            )
+
+    visiting: list[str] = []
+    visited: set[str] = set()
+
+    def visit(task_id: str) -> None:
+        if task_id in visiting:
+            cycle = visiting[visiting.index(task_id):] + [task_id]
+            raise ContractError(f"supersession lineage cycle: {' -> '.join(cycle)}")
+        if task_id in visited:
+            return
+        visiting.append(task_id)
+        predecessor = predecessors.get(task_id)
+        if predecessor is not None:
+            visit(predecessor)
+        visiting.pop()
+        visited.add(task_id)
+
+    for task_id in predecessors:
+        visit(task_id)
+
+    live_successors: dict[str, list[str]] = {}
+    for successor_id, predecessor_id in predecessors.items():
+        successor_entry = entries[successor_id]
+        if successor_entry["dispatch_status"] not in TERMINAL_DISPATCH_STATES:
+            live_successors.setdefault(predecessor_id, []).append(successor_id)
+        predecessor_entry = entries[predecessor_id]
+        predecessor_spec = specs[predecessor_id]
+        successor_spec = specs[successor_id]
+        if predecessor_entry["dispatch_status"] != "SUPERSEDED":
+            raise ContractError(
+                f"supersession predecessor {predecessor_id} for {successor_id} is not terminal SUPERSEDED"
+            )
+        if predecessor_entry["task_spec_plan_revision"] >= successor_entry["task_spec_plan_revision"]:
+            raise ContractError(
+                f"supersession predecessor {predecessor_id} is not older than successor {successor_id}"
+            )
+        if predecessor_spec["source_thread_id"] != successor_spec["source_thread_id"]:
+            raise ContractError(
+                f"supersession source lineage mismatch between {predecessor_id} and {successor_id}"
+            )
+        for endpoint_id, endpoint_entry, endpoint_spec in (
+            (predecessor_id, predecessor_entry, predecessor_spec),
+            (successor_id, successor_entry, successor_spec),
+        ):
+            if endpoint_entry["authorization_envelope_digest"] != endpoint_spec["authorization"]["envelope_digest"]:
+                raise ContractError(
+                    f"supersession authority lineage mismatch for {endpoint_id}"
+                )
+
+    duplicates = {
+        predecessor: sorted_utf8(successors) for predecessor, successors in live_successors.items()
+        if len(successors) > 1
+    }
+    if duplicates:
+        raise ContractError(f"supersession lineage has duplicate live successors: {duplicates}")
+
+
 def validate_dispatch_graph_and_model_routing(plan: dict[str, Any], specs: dict[str, dict[str, Any]],
                                               schema: dict[str, Any], historical: bool = False) -> None:
     entries = {entry["task_id"]: entry for entry in plan["tasks"]}
     known = set(entries)
     policy = plan.get("model_policy")
+
+    validate_supersession_lineage(plan, specs, schema, historical=historical)
 
     for task_id, entry in entries.items():
         if specs[task_id]["commit_message"] is None and entry["dispatch_status"] == "INTEGRATED":
@@ -1071,7 +1170,8 @@ def validate_worker_card(value: dict[str, Any], schema: dict[str, Any],
             raise ContractError(f"last_task is missing completed identity fields: {missing}")
 
 
-def validate_master_card(value: dict[str, Any], schema: dict[str, Any], *, historical: bool = False) -> None:
+def validate_master_card(value: dict[str, Any], schema: dict[str, Any], *, historical: bool = False,
+                         previous_candidate: dict[str, Any] | None = None) -> None:
     require_exact_fields(value, schema_required(schema, "master_card"), "Master card")
     if value["schema_version"] != 1:
         raise ContractError("master_card.schema_version must be 1")
@@ -1104,7 +1204,13 @@ def validate_master_card(value: dict[str, Any], schema: dict[str, Any], *, histo
         if handoff["state"] != "INTEGRATED" and handoff["integrated_as_sha"] is not None:
             raise ContractError(f"{handoff['state']} Worker handoff cannot retain integrated_as_sha")
     evidence = value["candidate_evidence"]
-    validate_candidate_evidence(evidence, schema)
+    try:
+        validate_candidate_evidence(evidence, schema)
+    except (ContractError, KeyError, TypeError) as error:
+        if (previous_candidate is not None and is_migrated_legacy_only_candidate(previous_candidate)
+                and evidence.get("schema_version") == 2 and evidence.get("legacy") is None):
+            historical_error("H25", f"fresh per-Gate rerun is not independently valid: {error}")
+        raise
     if (evidence.get("schema_version") != 2 and evidence["status"] in {"PASSED", "FAILED"}
             and not historical):
         raise ContractError(
@@ -1112,8 +1218,12 @@ def validate_master_card(value: dict[str, Any], schema: dict[str, Any], *, histo
         )
     if evidence.get("schema_version") == 2 and evidence["status"] != "NONE" and evidence["legacy"] is None:
         if evidence["release_task_id"] != value["release_task_id"]:
+            if previous_candidate is not None and is_migrated_legacy_only_candidate(previous_candidate):
+                historical_error("H25", "fresh per-Gate rerun changed the Master release authority")
             raise ContractError("candidate release_task_id differs from the Master release lock")
         if evidence["plan_revision"] != value["plan_revision"]:
+            if previous_candidate is not None and is_migrated_legacy_only_candidate(previous_candidate):
+                historical_error("H25", "fresh per-Gate rerun uses a different Master plan authority")
             raise ContractError("candidate plan_revision mixes a different Master semantic fence")
     if value["state"] == "IDLE" and any(value[field] is not None for field in
                                            ("release_task_id", "plan_revision", "dispatch_plan_path", "dispatch_plan_digest",
@@ -1831,7 +1941,9 @@ def validate_dispatch_status_transition(previous: str, current: str, task_id: st
         historical_error("H12", f"task {task_id} has illegal Dispatch transition {previous} -> {current}")
 
 
-def validate_plan_transition(previous: dict[str, Any], current: dict[str, Any]) -> str:
+def validate_plan_transition(previous: dict[str, Any], current: dict[str, Any],
+                             previous_specs: dict[str, dict[str, Any]] | None = None,
+                             current_specs: dict[str, dict[str, Any]] | None = None) -> str:
     transition = validate_record_transition(previous, current, "Dispatch Plan")
     previous_plan_revision = previous["plan_revision"]
     current_plan_revision = current["plan_revision"]
@@ -1898,6 +2010,37 @@ def validate_plan_transition(previous: dict[str, Any], current: dict[str, Any]) 
     for task_id in added:
         if current_tasks[task_id]["revision_decision"] != "NEW":
             historical_error("H14", f"new task {task_id} must use revision_decision NEW")
+
+    if previous_specs is not None and current_specs is not None:
+        successor_links = {
+            task_id: current_specs[task_id]["supersedes_task_id"] for task_id in added
+            if current_specs[task_id]["supersedes_task_id"] is not None
+        }
+        for successor_id, predecessor_id in successor_links.items():
+            if predecessor_id not in previous_tasks:
+                historical_error(
+                    "H14", f"new successor {successor_id} references non-historical task {predecessor_id}"
+                )
+            if current_tasks[predecessor_id]["dispatch_status"] != "SUPERSEDED":
+                historical_error(
+                    "H14", f"new successor {successor_id} did not terminally supersede {predecessor_id}"
+                )
+        newly_superseded = [
+            task_id for task_id, previous_task in previous_tasks.items()
+            if previous_task["dispatch_status"] != "SUPERSEDED"
+            and current_tasks[task_id]["dispatch_status"] == "SUPERSEDED"
+            and current_tasks[task_id]["revision_decision"] == "SUPERSEDE"
+        ]
+        for predecessor_id in newly_superseded:
+            successors = sorted_utf8([
+                successor_id for successor_id, linked_id in successor_links.items()
+                if linked_id == predecessor_id
+            ])
+            if len(successors) != 1:
+                historical_error(
+                    "H14", f"superseded assignment {predecessor_id} requires exactly one new successor; "
+                    f"found={successors}"
+                )
 
     if current_plan_revision == previous_plan_revision and plan_semantic_projection(current) != plan_semantic_projection(previous):
         historical_error("H11", "semantic Dispatch Plan content changed without incrementing plan_revision")
@@ -1988,7 +2131,62 @@ def handoff_identity(handoff: dict[str, Any]) -> tuple[Any, ...]:
     return tuple(handoff[field] for field in HANDOFF_IDENTITY_FIELDS)
 
 
-def validate_candidate_transition(previous: dict[str, Any], current: dict[str, Any]) -> None:
+def is_migrated_legacy_only_candidate(value: dict[str, Any]) -> bool:
+    return (
+        value.get("schema_version") == 2
+        and isinstance(value.get("legacy"), dict)
+        and not value.get("gate_registry")
+        and not value.get("gates")
+        and value.get("gate_registry_digest") is None
+        and value.get("gate_input_digest") is None
+        and value.get("status") in {"NONE", "STALE"}
+    )
+
+
+def validate_fresh_rerun_after_legacy(previous: dict[str, Any], current: dict[str, Any],
+                                      schema: dict[str, Any]) -> None:
+    if not is_migrated_legacy_only_candidate(previous):
+        historical_error("H25", "legacy candidate is not a canonical preserved migration record")
+    if current.get("legacy") is not None:
+        historical_error("H25", "fresh per-Gate rerun retained opaque legacy material")
+    previous_identity = (previous.get("release_task_id"), previous.get("release_head_sha"))
+    current_identity = (current.get("release_task_id"), current.get("release_head_sha"))
+    if None in previous_identity or current_identity != previous_identity:
+        historical_error("H25", "fresh per-Gate rerun changed the migrated release authority or HEAD")
+    previous_plan_revision = previous.get("plan_revision")
+    current_plan_revision = current.get("plan_revision")
+    if (not isinstance(previous_plan_revision, int) or isinstance(previous_plan_revision, bool)
+            or not isinstance(current_plan_revision, int) or isinstance(current_plan_revision, bool)
+            or current_plan_revision < previous_plan_revision):
+        historical_error("H25", "fresh per-Gate rerun regressed or lost its Master plan authority")
+    if current.get("status") not in {"PASSED", "FAILED"}:
+        historical_error("H25", "legacy audit may be retired only by complete fresh per-Gate evidence")
+    try:
+        validate_candidate_v2(current, schema)
+    except (ContractError, KeyError, TypeError) as error:
+        historical_error("H25", f"fresh per-Gate rerun is not independently valid: {error}")
+    if not current.get("gate_registry") or not current.get("gates"):
+        historical_error("H25", "fresh per-Gate rerun has no independently registered Gate evidence")
+    legacy_original = previous["legacy"]["original"]
+    opaque_digests = {
+        check["evidence_digest"] for check in legacy_original.get("checks", [])
+        if isinstance(check, dict) and isinstance(check.get("evidence_digest"), str)
+    }
+    if isinstance(legacy_original.get("gate_input_digest"), str):
+        opaque_digests.add(legacy_original["gate_input_digest"])
+    fresh_digests = {
+        digest for gate in current["gates"] for digest in (
+            gate.get("input_digest"), gate.get("evidence_digest"),
+            *(check.get("input_digest") for check in gate.get("checks", [])),
+            *(check.get("evidence_digest") for check in gate.get("checks", [])),
+        ) if isinstance(digest, str)
+    }
+    if opaque_digests & fresh_digests:
+        historical_error("H25", "fresh per-Gate rerun reused an opaque legacy digest")
+
+
+def validate_candidate_transition(previous: dict[str, Any], current: dict[str, Any],
+                                  schema: dict[str, Any] | None = None) -> None:
     previous_version = previous.get("schema_version", 1)
     current_version = current.get("schema_version", 1)
     if previous_version == 1 and current_version == 2:
@@ -2001,6 +2199,12 @@ def validate_candidate_transition(previous: dict[str, Any], current: dict[str, A
     if previous_version == 2 and current_version == 1:
         historical_error("H25", "candidate evidence cannot downgrade from per-Gate v2 to aggregate v1")
     if previous_version == 2 and current_version == 2:
+        if previous.get("legacy") is not None and current.get("legacy") is None:
+            effective_schema = schema or ACTIVE_SCHEMA
+            if not effective_schema:
+                historical_error("H25", "fresh per-Gate rerun requires the active candidate Schema")
+            validate_fresh_rerun_after_legacy(previous, current, effective_schema)
+            return
         if previous.get("legacy") is not None or current.get("legacy") is not None:
             if previous != current:
                 historical_error("H25", "migrated legacy audit evidence was rewritten")
@@ -2051,7 +2255,8 @@ def validate_candidate_transition(previous: dict[str, Any], current: dict[str, A
         historical_error("H26", "candidate result flipped without new check evidence")
 
 
-def validate_master_transition(previous: dict[str, Any], current: dict[str, Any]) -> str:
+def validate_master_transition(previous: dict[str, Any], current: dict[str, Any],
+                               schema: dict[str, Any] | None = None) -> str:
     transition = validate_record_transition(previous, current, "Master Card")
     previous_state = previous["state"]
     current_state = current["state"]
@@ -2094,7 +2299,7 @@ def validate_master_transition(previous: dict[str, Any], current: dict[str, Any]
             historical_error("H22", f"illegal handoff transition {old_state} -> {new_state} for {identity}")
         if old_state in {"INTEGRATED", "REWORK_REQUESTED"} and current_handoff != previous_handoff:
             historical_error("H22", f"terminal handoff changed for {identity}")
-    validate_candidate_transition(previous["candidate_evidence"], current["candidate_evidence"])
+    validate_candidate_transition(previous["candidate_evidence"], current["candidate_evidence"], schema)
     return transition
 
 
@@ -2348,6 +2553,13 @@ def validate_documented_contracts(repo_root: Path, schema: dict[str, Any]) -> No
     master = extract_code_block(methodology, "Master card uses a list")
     plan = extract_code_block(methodology, "The plan is versioned and contains at least:")
     template_plan = extract_code_block(templates, "## Task Dependency and Dispatch Plan")
+    timestamp_schema = schema.get("$defs", {}).get("rfc3339_timestamp", {})
+    if timestamp_schema.get("pattern") != RFC3339_PATTERN or timestamp_schema.get("format") != "date-time":
+        raise ContractError("Schema RFC 3339 grammar drifted from the Python validator")
+    if schema.get("x-supersession-lineage") != {
+        "schema_version": 1, "enforced_from_plan_revision": 15,
+    }:
+        raise ContractError("Schema supersession-lineage migration fence drifted from the validator")
     required = schema_required(schema, "authorization_v2")
     for label, block in (("canonical authorization", canonical), ("task authorization", task), ("Worker authorization", worker)):
         keys = nested_mapping_keys(block, "authorization")
@@ -2441,6 +2653,29 @@ def validate_documented_contracts(repo_root: Path, schema: dict[str, Any]) -> No
             raise ContractError(
                 f"final-audit hardening contract missing from {relative}: {missing_hardening_terms}"
             )
+        reaudit_terms = (
+            "supersedes_task_id", "strict timezone-bearing RFC 3339", "fresh per-Gate rerun",
+        )
+        missing_reaudit_terms = [term for term in reaudit_terms if term not in contents]
+        if missing_reaudit_terms:
+            raise ContractError(
+                f"final-reaudit contract missing from {relative}: {missing_reaudit_terms}"
+            )
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+    obsolete_identity_terms = (
+        "<plan_id>:<task_id>:r<task_spec_revision>:<message_type>",
+        "消息 ID 由任务、任务规格修订号与消息类型共同决定",
+    )
+    retained_obsolete = [term for term in obsolete_identity_terms if term in readme]
+    if retained_obsolete:
+        raise ContractError(f"README retains obsolete message identity guidance: {retained_obsolete}")
+    readme_identity_terms = (
+        "task_id + task_spec_revision + source_thread_id", "task_spec_digest", "plan_revision",
+        "fencing token",
+    )
+    missing_readme_identity = [term for term in readme_identity_terms if term not in readme]
+    if missing_readme_identity:
+        raise ContractError(f"README message identity projection drifted: {missing_readme_identity}")
 
 
 def default_authorization() -> dict[str, Any]:
@@ -2951,6 +3186,162 @@ class ContractScenarios(unittest.TestCase):
         moved = copy.deepcopy(revised)
         moved["worktree"] = "/other"
         self.assertEqual(classify_task_change(old, moved), "SUPERSEDE")
+
+    def test_strict_rfc3339_schema_python_parity(self) -> None:
+        timestamp_schema = self.schema["$defs"]["rfc3339_timestamp"]
+        self.assertEqual(timestamp_schema, {
+            "type": "string", "format": "date-time", "pattern": RFC3339_PATTERN,
+        })
+        for value in (
+            "2026-01-01T00:00:00Z",
+            "2024-02-29T23:59:59.123456+05:30",
+            "2026-08-30T05:40:00-07:00",
+        ):
+            with self.subTest(valid=value):
+                self.assertIsNotNone(RFC3339_RE.fullmatch(value))
+                validate_rfc3339(value, "timestamp")
+        for value in (
+            "2026-01-01", "2026-01-01 00:00:00Z", "2026-01-01T00:00:00",
+            "2026-01-01T00:00:00+0000", "2026-01-01T00:00:00+24:00",
+            "2026-02-29T00:00:00Z", "2026-04-31T00:00:00Z", "2026-01-01T24:00:00Z",
+            "2026-01-01T00:00:00.1234567Z",
+            1, False, None,
+        ):
+            with self.subTest(invalid=value), self.assertRaises(ContractError):
+                validate_rfc3339(value, "timestamp")
+
+    def test_supersession_lineage_direct_matrix(self) -> None:
+        plan, specs = make_supersession_bundle(Path("/tmp/mwr-lineage-direct"))
+        validate_supersession_lineage(plan, specs, self.schema)
+
+        historical_plan = copy.deepcopy(plan)
+        historical_specs = copy.deepcopy(specs)
+        historical_successor = next(
+            entry for entry in historical_plan["tasks"] if entry["task_id"] == "new"
+        )
+        historical_successor.update(task_spec_plan_revision=14, dispatch_status="INTEGRATED")
+        historical_specs["new"]["supersedes_task_id"] = "unresolved-descriptive-legacy-value"
+        validate_supersession_lineage(
+            historical_plan, historical_specs, self.schema, historical=True,
+        )
+
+        def rejected(mutator: Any, pattern: str) -> None:
+            candidate_plan = copy.deepcopy(plan)
+            candidate_specs = copy.deepcopy(specs)
+            mutator(candidate_plan, candidate_specs)
+            with self.assertRaisesRegex(ContractError, pattern):
+                validate_supersession_lineage(candidate_plan, candidate_specs, self.schema)
+
+        rejected(lambda _plan, candidate: candidate["new"].update(supersedes_task_id="missing"), "unknown")
+        rejected(lambda _plan, candidate: candidate["new"].update(supersedes_task_id="new"), "self-link")
+        rejected(
+            lambda candidate_plan, _specs: next(
+                entry for entry in candidate_plan["tasks"] if entry["task_id"] == "old"
+            ).update(dispatch_status="INTEGRATED"),
+            "not terminal SUPERSEDED",
+        )
+        rejected(
+            lambda candidate_plan, _specs: next(
+                entry for entry in candidate_plan["tasks"] if entry["task_id"] == "old"
+            ).update(task_spec_plan_revision=2),
+            "not older",
+        )
+        rejected(lambda _plan, candidate: candidate["new"].update(source_thread_id="other-master"),
+                 "source lineage mismatch")
+        rejected(
+            lambda candidate_plan, _specs: next(
+                entry for entry in candidate_plan["tasks"] if entry["task_id"] == "old"
+            ).update(authorization_envelope_digest="sha256:" + "f" * 64),
+            "authority lineage mismatch",
+        )
+        def add_enforced_cycle(candidate_plan: dict[str, Any], candidate_specs: dict[str, Any]) -> None:
+            next(
+                entry for entry in candidate_plan["tasks"] if entry["task_id"] == "old"
+            )["task_spec_plan_revision"] = 15
+            candidate_specs["old"]["supersedes_task_id"] = "new"
+
+        rejected(add_enforced_cycle, "cycle")
+
+        duplicate_plan, duplicate_specs = make_supersession_bundle(
+            Path("/tmp/mwr-lineage-duplicate"), successor_ids=("new-a", "new-b"),
+        )
+        with self.assertRaisesRegex(ContractError, "duplicate live successors"):
+            validate_supersession_lineage(duplicate_plan, duplicate_specs, self.schema)
+
+        previous = copy.deepcopy(plan)
+        previous["record_revision"] = 1
+        previous["plan_revision"] = 1
+        previous["updated_at"] = "2026-01-01T00:00:00Z"
+        previous["tasks"] = [next(item for item in previous["tasks"] if item["task_id"] == "old")]
+        previous["tasks"][0].update({"revision_decision": "NEW", "dispatch_status": "PUBLISHED"})
+        previous["ready_wave"] = 1
+        previous["plan_digest"] = object_digest(previous, "plan_digest")
+        current = copy.deepcopy(plan)
+        current["record_revision"] = 2
+        current["updated_at"] = "2026-01-01T00:01:00Z"
+        current["plan_digest"] = object_digest(current, "plan_digest")
+        self.assertEqual(validate_plan_transition(previous, current, {"old": specs["old"]}, specs), "FORWARD")
+        missing_relation = copy.deepcopy(specs)
+        missing_relation["new"]["supersedes_task_id"] = None
+        with self.assertRaisesRegex(ContractError, r"\[H14\].*exactly one new successor"):
+            validate_plan_transition(previous, current, {"old": specs["old"]}, missing_relation)
+
+    def test_public_cli_supersession_and_timestamp_regressions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            positive_root = root / "lineage-positive"
+            plan, specs = make_supersession_bundle(positive_root)
+            plan_path = write_graph_bundle(positive_root, plan, specs)
+            positive = run_public_cli("--plan", str(plan_path))
+            self.assertEqual(positive.returncode, 0, positive.stderr)
+
+            negative_root = root / "lineage-unknown"
+            bad_plan, bad_specs = make_supersession_bundle(negative_root)
+            bad_specs["new"]["supersedes_task_id"] = "missing"
+            bad_path = write_graph_bundle(negative_root, bad_plan, bad_specs)
+            negative = run_public_cli("--plan", str(bad_path))
+            self.assertEqual(negative.returncode, 1, negative.stdout)
+            self.assertIn("supersession lineage", negative.stderr)
+
+            history_root = root / "lineage-history"
+            history_plan, history_specs = make_supersession_bundle(history_root)
+            history_plan["record_revision"] = 2
+            history_plan["updated_at"] = "2026-01-01T00:01:00Z"
+            history_plan["plan_digest"] = object_digest(history_plan, "plan_digest")
+            current_path = write_graph_bundle(history_root, history_plan, history_specs)
+            previous = copy.deepcopy(history_plan)
+            previous["record_revision"] = 1
+            previous["plan_revision"] = 1
+            previous["updated_at"] = "2026-01-01T00:00:00Z"
+            previous["tasks"] = [next(item for item in previous["tasks"] if item["task_id"] == "old")]
+            previous["tasks"][0].update({"revision_decision": "NEW", "dispatch_status": "PUBLISHED"})
+            previous["ready_wave"] = 1
+            previous["plan_digest"] = object_digest(previous, "plan_digest")
+            previous_path = history_root / "previous-plan.json"
+            write_json_fixture(previous_path, previous)
+            history = run_public_cli(
+                "--previous-plan", str(previous_path), "--plan", str(current_path),
+            )
+            self.assertEqual(history.returncode, 0, history.stderr)
+
+            valid_time_path = root / "valid-offset-task.json"
+            valid_time = make_task_spec_at(valid_time_path)
+            valid_time["issued_at"] = "2024-02-29T23:59:59.5+05:30"
+            valid_time["task_spec_digest"] = object_digest(valid_time, "task_spec_digest")
+            write_json_fixture(valid_time_path, valid_time)
+            self.assertEqual(run_public_cli("--task-spec", str(valid_time_path)).returncode, 0)
+            for index, invalid in enumerate((
+                "2026-01-01", "2026-01-01 00:00:00Z", "2026-01-01T00:00:00",
+                "2026-01-01T00:00:00+0000", "2026-02-29T00:00:00Z", 1,
+            )):
+                path = root / f"invalid-time-{index}.json"
+                spec = make_task_spec_at(path)
+                spec["issued_at"] = invalid
+                spec["task_spec_digest"] = object_digest(spec, "task_spec_digest")
+                write_json_fixture(path, spec)
+                result = run_public_cli("--task-spec", str(path))
+                with self.subTest(invalid_timestamp=invalid):
+                    self.assertEqual(result.returncode, 1, result.stdout)
 
     def test_state_transitions_and_terminals(self) -> None:
         self.assertIn("PUBLISHED", DISPATCH_TRANSITIONS["READY"])
@@ -3567,6 +3958,34 @@ class CandidateEvidenceScenarios(unittest.TestCase):
         ))
         self.assertTrue(all(gate["status"] == "STALE" for gate in current["gates"]))
 
+    def test_migrated_legacy_can_advance_only_to_fresh_per_gate_evidence(self) -> None:
+        _legacy_master, migrated_master, fresh_master = make_legacy_master_sequence(self.schema)
+        migrated = migrated_master["candidate_evidence"]
+        fresh = fresh_master["candidate_evidence"]
+        validate_candidate_transition(migrated, fresh, self.schema)
+
+        mutations = {
+            "identity": lambda value: value.update(release_task_id="other-release"),
+            "head": lambda value: value.update(release_head_sha="b" * 40),
+            "plan-authority": lambda value: value.update(plan_revision=0),
+            "registry": lambda value: value["gate_registry"][0].update(gate_revision=2),
+            "provenance": lambda value: value["gates"][0]["input_sources"][1].update(revision="b" * 40),
+            "digest": lambda value: value["gates"][0].update(evidence_digest="sha256:" + "0" * 64),
+        }
+        for label, mutator in mutations.items():
+            candidate = copy.deepcopy(fresh)
+            mutator(candidate)
+            with self.subTest(mutation=label), self.assertRaisesRegex(ContractError, r"\[H25\]"):
+                validate_candidate_transition(migrated, candidate, self.schema)
+
+        opaque = make_candidate("PASSED", "a" * 40, "PASS")
+        opaque["checks"][0]["evidence_digest"] = fresh["gates"][0]["checks"][0]["evidence_digest"]
+        opaque_migrated = migrate_candidate_evidence(
+            opaque, self.schema, release_task_id="release-1", plan_revision=1,
+        )
+        with self.assertRaisesRegex(ContractError, r"\[H25\].*opaque legacy digest"):
+            validate_candidate_transition(opaque_migrated, fresh, self.schema)
+
     def test_migration_is_idempotent(self) -> None:
         legacy = make_candidate("FAILED", "a" * 40, "FAIL")
         once = migrate_candidate_evidence(legacy, self.schema, release_task_id="release-1", plan_revision=1)
@@ -4056,6 +4475,61 @@ class HistoricalContractScenarios(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("historical master-card: PASS transition=NOOP", result.stdout)
             self.assertIn("historical cross-record current plan-master: PASS", result.stdout)
+
+    def test_public_cli_legacy_migration_to_fresh_master_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            legacy, migrated, fresh = make_legacy_master_sequence(self.schema)
+            legacy_path = root / "master-v1.json"
+            migrated_path = root / "master-migrated.json"
+            fresh_path = root / "master-fresh.json"
+            write_json_fixture(legacy_path, legacy)
+            write_json_fixture(migrated_path, migrated)
+            write_json_fixture(fresh_path, fresh)
+
+            migration = run_public_cli(
+                "--previous-master-card", str(legacy_path),
+                "--master-card-json", str(migrated_path),
+            )
+            self.assertEqual(migration.returncode, 0, migration.stderr)
+            self.assertEqual(migrated["candidate_evidence"]["status"], "STALE")
+
+            rerun = run_public_cli(
+                "--previous-master-card", str(migrated_path),
+                "--master-card-json", str(fresh_path),
+            )
+            self.assertEqual(rerun.returncode, 0, rerun.stderr)
+            self.assertEqual(fresh["candidate_evidence"]["status"], "PASSED")
+
+            tampered: dict[str, dict[str, Any]] = {}
+            identity = copy.deepcopy(fresh)
+            identity["candidate_evidence"]["release_task_id"] = "other-release"
+            tampered["identity"] = identity
+            head = copy.deepcopy(fresh)
+            head["candidate_evidence"] = make_candidate_v2(head="b" * 40, plan_revision=2)
+            tampered["head"] = head
+            plan_authority = copy.deepcopy(fresh)
+            plan_authority["candidate_evidence"]["plan_revision"] = 1
+            tampered["plan-authority"] = plan_authority
+            registry = copy.deepcopy(fresh)
+            registry["candidate_evidence"]["gate_registry"][0]["gate_revision"] = 2
+            tampered["registry"] = registry
+            provenance = copy.deepcopy(fresh)
+            provenance["candidate_evidence"]["gates"][0]["input_sources"][1]["revision"] = "b" * 40
+            tampered["provenance"] = provenance
+            digest = copy.deepcopy(fresh)
+            digest["candidate_evidence"]["gates"][0]["evidence_digest"] = "sha256:" + "0" * 64
+            tampered["digest"] = digest
+            for label, card in tampered.items():
+                path = root / f"master-tampered-{label}.json"
+                write_json_fixture(path, card)
+                result = run_public_cli(
+                    "--previous-master-card", str(migrated_path),
+                    "--master-card-json", str(path),
+                )
+                with self.subTest(mutation=label):
+                    self.assertEqual(result.returncode, 1, result.stdout)
+                    self.assertIn("[H25]", result.stderr)
 
     def test_public_cli_current_only_grandfather_history_regression(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -4715,6 +5189,51 @@ def make_graph_bundle(root: Path, nodes: dict[str, dict[str, Any]], *,
     return plan, specs
 
 
+def make_supersession_bundle(root: Path, *, successor_ids: tuple[str, ...] = ("new",)
+                             ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    nodes = {"old": {"status": "SUPERSEDED"}}
+    nodes.update({task_id: {"status": "PUBLISHED"} for task_id in successor_ids})
+    plan, specs = make_graph_bundle(root, nodes)
+    plan["plan_revision"] = 2
+    entries = {entry["task_id"]: entry for entry in plan["tasks"]}
+    entries["old"].update({
+        "revision_decision": "SUPERSEDE", "dispatch_status": "SUPERSEDED",
+        "task_spec_plan_revision": 1,
+    })
+    specs["old"]["plan_revision"] = 1
+    specs["old"]["task_spec_digest"] = object_digest(specs["old"], "task_spec_digest")
+    entries["old"]["task_spec_digest"] = specs["old"]["task_spec_digest"]
+    for task_id in successor_ids:
+        specs[task_id].update({"plan_revision": 2, "supersedes_task_id": "old"})
+        specs[task_id]["task_spec_digest"] = object_digest(specs[task_id], "task_spec_digest")
+        entries[task_id].update({
+            "revision_decision": "NEW", "dispatch_status": "PUBLISHED",
+            "task_spec_plan_revision": 2, "task_spec_digest": specs[task_id]["task_spec_digest"],
+        })
+    plan["ready_wave"] = 1
+    plan["blocked_tasks"] = []
+    plan["plan_digest"] = object_digest(plan, "plan_digest")
+    return plan, specs
+
+
+def make_legacy_master_sequence(schema: dict[str, Any]) -> tuple[
+        dict[str, Any], dict[str, Any], dict[str, Any]]:
+    legacy = make_candidate("PASSED", "a" * 40, "PASS")
+    previous = make_active_master_card()
+    previous["candidate_evidence"] = legacy
+    migrated = advance_record(previous)
+    migrated["candidate_evidence"] = migrate_candidate_evidence(
+        legacy, schema, release_task_id="release-1", plan_revision=1,
+        plan_digest=previous["dispatch_plan_digest"],
+    )
+    fresh = advance_record(migrated)
+    fresh["updated_at"] = "2026-01-01T00:02:00Z"
+    fresh["plan_revision"] = 2
+    fresh["dispatch_plan_digest"] = value_digest({"plan": 2})
+    fresh["candidate_evidence"] = make_candidate_v2(head="a" * 40, plan_revision=2)
+    return previous, migrated, fresh
+
+
 def write_graph_bundle(root: Path, plan: dict[str, Any], specs: dict[str, dict[str, Any]]) -> Path:
     entries = {entry["task_id"]: entry for entry in plan["tasks"]}
     for task_id, spec in specs.items():
@@ -4812,7 +5331,16 @@ def main() -> int:
             validate_worker_card(current_worker, schema)
         if args.master_card_json:
             current_master = load_json(args.master_card_json)
-            validate_master_card(current_master, schema)
+            if args.previous_master_card:
+                previous_master = load_previous_json(args.previous_master_card, "Master Card")
+                validate_historical_schema_pair(previous_master, current_master, "Master Card")
+                validate_master_card(previous_master, schema, historical=True)
+                validate_master_card(
+                    current_master, schema,
+                    previous_candidate=previous_master["candidate_evidence"],
+                )
+            else:
+                validate_master_card(current_master, schema)
         if args.candidate_evidence_json:
             candidate = load_json(args.candidate_evidence_json)
             if args.migrate_candidate_evidence:
@@ -4836,7 +5364,9 @@ def main() -> int:
             validate_plan(previous_plan, schema)
             previous_specs = load_persisted_plan_specs(previous_plan, schema, historical=True)
             pair_results.append(("dispatch-plan", previous_plan, current_plan,
-                                 validate_plan_transition(previous_plan, current_plan)))
+                                 validate_plan_transition(
+                                     previous_plan, current_plan, previous_specs, current_specs,
+                                 )))
         if args.previous_worker_card:
             previous_worker = load_previous_json(args.previous_worker_card, "Worker Card")
             validate_historical_schema_pair(previous_worker, current_worker, "Worker Card")
@@ -4844,11 +5374,8 @@ def main() -> int:
             pair_results.append(("worker-card", previous_worker, current_worker,
                                  validate_worker_transition(previous_worker, current_worker)))
         if args.previous_master_card:
-            previous_master = load_previous_json(args.previous_master_card, "Master Card")
-            validate_historical_schema_pair(previous_master, current_master, "Master Card")
-            validate_master_card(previous_master, schema, historical=True)
             pair_results.append(("master-card", previous_master, current_master,
-                                 validate_master_transition(previous_master, current_master)))
+                                 validate_master_transition(previous_master, current_master, schema)))
 
         if is_historical:
             previous_cross = validate_cross_record_set(previous_plan, previous_worker, previous_master,

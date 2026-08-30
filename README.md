@@ -25,7 +25,7 @@
 - **Master / Worker 分工**：Master 拥有计划、派发、验收与集成权；Worker 只处理已授权任务。
 - **持久化 Dispatch Plan**：默认把机器可读的协调状态保存到 Master 工作树，而不是只留在对话中。
 - **Durable Worker Card**：每个 Worker 都有可恢复的任务卡，包含目标、边界、修订号、预算与授权。
-- **稳定的消息身份**：消息 ID 由任务、任务规格修订号与消息类型共同决定，便于去重和恢复。
+- **稳定的消息身份**：消息由任务、任务规格修订号与发布源共同标识，并用规格摘要约束重复投递。
 - **修订传播规则**：影响任务语义的计划变化必须同步提升对应的 `task_spec_revision`。
 - **交付与集成门禁**：要求证据、测试、工作树清洁度和依赖状态达到约定标准后再集成。
 - **默认拒绝外部操作**：没有明确授权时，不允许推送、发布、发消息、改远端状态或产生额外费用。
@@ -128,7 +128,7 @@ $multi-worktree-release 检查所有 Worker 的 handoff、验证证据和工作�
 
 Dispatch Plan 是跨任务协作的机器契约，至少记录：
 
-- `plan_id` 与 `plan_revision`；
+- `release_task_id`、语义 `plan_revision` 与每次写入递增的 `record_revision`；
 - 每个任务的 `task_id` 与 `task_spec_revision`；
 - Worker、分支、worktree、状态和依赖；
 - 验收标准、验证命令与证据；
@@ -149,10 +149,12 @@ Dispatch Plan 是跨任务协作的机器契约，至少记录：
 任务消息使用稳定身份：
 
 ```text
-<plan_id>:<task_id>:r<task_spec_revision>:<message_type>
+task_id + task_spec_revision + source_thread_id
 ```
 
-因此，任务内容发生实质变化时提升 `task_spec_revision`，才能避免“消息身份没变，但执行内容已经变了”的歧义。
+`task_spec_digest` 必须与该身份对应的完整持久化规格完全一致；只有身份与摘要都相同时，重复投递才是幂等的。
+`plan_revision` 是 fencing token，不属于消息身份：它阻止受影响任务接受旧计划语义，但不会把状态写入变成一条新消息。
+因此，任务内容发生实质变化时提升 `task_spec_revision` 并重算摘要，才能避免“消息身份没变，但执行内容已经变了”的歧义。
 
 ## 授权模型
 
