@@ -1,6 +1,6 @@
 ---
 name: multi-worktree-release
-description: Audit, design, adopt, or operate a Master/Worker collaboration model across persistent Codex tasks and Git worktrees, including task state cards, handoffs, integration gates, conversation rotation, and default-deny external authorization. Use for multi-thread or multi-worktree delivery governance, not ordinary single-branch coding.
+description: Audit, design, adopt, or operate a Master/Worker collaboration model across persistent Codex tasks and Git worktrees, including task state cards, handoffs, integration gates, conversation rotation, and default-deny external authorization; route eligible bounded low-risk delivery through FAST before strict coordination. Use for delivery governance, not unrelated generic coding.
 ---
 
 # Multi-Worktree Release
@@ -9,6 +9,35 @@ Coordinate long-lived Codex tasks and Git worktrees without confusing conversati
 or authorization.
 
 ## Select the operating mode
+
+For ordinary delivery, classify **FAST** before creating a Dispatch Plan or starting heavy
+Master/Worker setup. **FAST** requires all of these conditions:
+
+- One current Codex task and work directory can complete the change, with no independent
+  parallel responsibility or extra worktree.
+- The change has no governance, protocol, Schema, state-machine, authorization,
+  security-boundary, persistence, release-semantics, irreversible migration, complex
+  production, or long-recovery impact.
+- Verification is clear and bounded locally, and every external write has separate explicit
+  authorization.
+
+Escalate to the existing **ISOLATED / STRICT** workflow before risky action for any parallel
+responsibility; governance, security, persistence, or release change; long-lived recovery;
+production or irreversible action; material scope expansion; more than one local correction
+after failed acceptance; or uncertain classification.
+
+FAST executes entirely in the current task and work directory: preserve user material, inspect
+the actual baseline, make the scoped change, run proportional local checks, review the diff,
+create one scoped commit when repository workflow calls for it, and report. It creates no
+Dispatch Plan, Task Spec, Worker/Master Card, extra task or worktree, cycle fence, repository
+adoption, or Operation Receipt.
+
+FAST never grants push, publication, external-call, execution/job, destructive, synchronization,
+or scope-expansion authority. Request the exact external mutation immediately before it unless
+already explicitly authorized; local tests are not `create_execution` authority. v1 remains
+authoritative; v2 adoption/binding modules remain experimental and unrouted. FAST adds no v2
+CLI, cycle fence, Schema, validator, runtime state, migration, or compatibility behavior, and
+is not a generic coding mode.
 
 - **Audit:** inspect the current repository, worktrees, branches, responsibilities, task state, and release process. Make no
   changes unless the user also requests implementation.
