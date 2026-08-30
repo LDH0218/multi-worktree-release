@@ -2326,6 +2326,16 @@ def validate_fresh_rerun_after_legacy(previous: dict[str, Any], current: dict[st
         historical_error("H25", f"fresh per-Gate rerun is not independently valid: {error}")
     if not current.get("gate_registry") or not current.get("gates"):
         historical_error("H25", "fresh per-Gate rerun has no independently registered Gate evidence")
+    incomplete_gates = sorted_utf8([
+        gate["gate_id"] for gate in current["gates"]
+        if gate["status"] not in {"PASSED", "FAILED"}
+    ])
+    if incomplete_gates:
+        historical_error(
+            "H25",
+            "fresh per-Gate rerun is incomplete for current Gate registry: "
+            f"{', '.join(incomplete_gates)}",
+        )
     legacy_original = previous["legacy"]["original"]
     opaque_digests = {
         check["evidence_digest"] for check in legacy_original.get("checks", [])
@@ -2848,12 +2858,28 @@ def validate_documented_contracts(repo_root: Path, schema: dict[str, Any]) -> No
             raise ContractError(
                 f"candidate-head rerun contract missing from {relative}: {missing_head_rerun_terms}"
             )
+        optional_gate_freshness_terms = ("every current Gate", "optional Gate", "checkless")
+        missing_optional_gate_freshness_terms = [
+            term for term in optional_gate_freshness_terms if term not in contents
+        ]
+        if missing_optional_gate_freshness_terms:
+            raise ContractError(
+                "optional-Gate freshness contract missing from "
+                f"{relative}: {missing_optional_gate_freshness_terms}"
+            )
     design = (repo_root / "design" / "per-gate-evidence.md").read_text(encoding="utf-8")
     head_rerun_terms = ("different `release_head_sha`", "zero opaque digest reuse")
     missing_design_terms = [term for term in head_rerun_terms if term not in design]
     if missing_design_terms:
         raise ContractError(
             f"candidate-head rerun contract missing from design/per-gate-evidence.md: {missing_design_terms}"
+        )
+    optional_gate_freshness_terms = ("every current Gate", "optional Gate", "checkless")
+    missing_design_freshness_terms = [term for term in optional_gate_freshness_terms if term not in design]
+    if missing_design_freshness_terms:
+        raise ContractError(
+            "optional-Gate freshness contract missing from design/per-gate-evidence.md: "
+            f"{missing_design_freshness_terms}"
         )
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
     obsolete_identity_terms = (
@@ -4493,6 +4519,98 @@ class CandidateEvidenceScenarios(unittest.TestCase):
         )
         with self.assertRaisesRegex(ContractError, r"\[H25\].*opaque legacy digest"):
             validate_candidate_transition(copied_source_digest, fresh, self.schema)
+
+    def test_migrated_legacy_requires_fresh_optional_gate_evidence(self) -> None:
+        _legacy_master, migrated_master, _fresh_master = make_legacy_master_sequence(
+            self.schema, legacy_head="a" * 40, fresh_head="b" * 40, legacy_status="STALE",
+        )
+        migrated = migrated_master["candidate_evidence"]
+
+        complete_optional_pass = make_candidate_v2(
+            head="b" * 40, plan_revision=2, optional_targeted=True,
+        )
+        validate_candidate_transition(migrated, complete_optional_pass, self.schema)
+        complete_optional_fail = make_candidate_v2(
+            head="b" * 40, plan_revision=2, optional_targeted=True,
+            failed_gates={"targeted-tests"},
+        )
+        self.assertEqual(complete_optional_fail["status"], "PASSED")
+        validate_candidate_transition(migrated, complete_optional_fail, self.schema)
+
+        optional_stale = make_candidate_v2(
+            head="b" * 40, plan_revision=2, optional_targeted=True,
+            stale_gates={"targeted-tests"},
+        )
+        optional_none = copy.deepcopy(optional_stale)
+        optional_none["gates"][1]["status"] = "NONE"
+        optional_checkless = copy.deepcopy(complete_optional_pass)
+        optional_checkless["gates"][1]["checks"] = []
+        optional_unverified_evidence = copy.deepcopy(complete_optional_pass)
+        optional_unverified_evidence["gates"][1]["checks"][0]["evidence_digest"] = (
+            "sha256:" + "0" * 64
+        )
+        optional_wrong_head = copy.deepcopy(complete_optional_pass)
+        optional_wrong_head["gates"][1]["input_sources"][1]["revision"] = "a" * 40
+        optional_missing_row = copy.deepcopy(complete_optional_pass)
+        optional_missing_row["gates"].pop()
+        variants = {
+            "optional-stale": optional_stale,
+            "optional-none": optional_none,
+            "optional-checkless": optional_checkless,
+            "optional-unverified-check-evidence": optional_unverified_evidence,
+            "optional-wrong-head": optional_wrong_head,
+            "optional-missing-row": optional_missing_row,
+        }
+        for label, candidate in variants.items():
+            with self.subTest(mutation=label), self.assertRaisesRegex(ContractError, r"\[H25\]"):
+                validate_candidate_transition(migrated, candidate, self.schema)
+
+    def test_public_cli_legacy_rerun_rejects_incomplete_optional_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _legacy, migrated, fresh = make_legacy_master_sequence(
+                self.schema, legacy_head="a" * 40, fresh_head="b" * 40,
+                legacy_status="STALE",
+            )
+            migrated_path = root / "master-migrated.json"
+            write_json_fixture(migrated_path, migrated)
+
+            complete = make_candidate_v2(
+                head="b" * 40, plan_revision=2, optional_targeted=True,
+            )
+            optional_stale = make_candidate_v2(
+                head="b" * 40, plan_revision=2, optional_targeted=True,
+                stale_gates={"targeted-tests"},
+            )
+            optional_none = copy.deepcopy(optional_stale)
+            optional_none["gates"][1]["status"] = "NONE"
+            optional_checkless = copy.deepcopy(complete)
+            optional_checkless["gates"][1]["checks"] = []
+            optional_unverified_evidence = copy.deepcopy(complete)
+            optional_unverified_evidence["gates"][1]["checks"][0]["evidence_digest"] = (
+                "sha256:" + "0" * 64
+            )
+            optional_wrong_head = copy.deepcopy(complete)
+            optional_wrong_head["gates"][1]["input_sources"][1]["revision"] = "a" * 40
+            variants = {
+                "optional-stale": optional_stale,
+                "optional-none": optional_none,
+                "optional-checkless": optional_checkless,
+                "optional-unverified-check-evidence": optional_unverified_evidence,
+                "optional-wrong-head": optional_wrong_head,
+            }
+            for label, candidate in variants.items():
+                card = copy.deepcopy(fresh)
+                card["candidate_evidence"] = candidate
+                card_path = root / f"master-{label}.json"
+                write_json_fixture(card_path, card)
+                result = run_public_cli(
+                    "--previous-master-card", str(migrated_path),
+                    "--master-card-json", str(card_path),
+                )
+                with self.subTest(mutation=label):
+                    self.assertEqual(result.returncode, 1, result.stdout)
+                    self.assertIn("[H25]", result.stderr)
 
     def test_migration_is_idempotent(self) -> None:
         legacy = make_candidate("FAILED", "a" * 40, "FAIL")

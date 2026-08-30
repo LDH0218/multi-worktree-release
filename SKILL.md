@@ -207,10 +207,12 @@ monotonic revisions, terminal states, immutable identity/evidence, and diagnosti
   recomputes final evidence from the integrated tree.
 - A preserved legacy-only v2 record may advance through historical H25 validation to a fresh per-Gate rerun only for the same
   non-null release task and a non-regressing Master plan fence. The rerun may use a different `release_head_sha` after the old
-  head has invalidated all legacy material, but every current Gate must independently bind its sole `integrated-tree` source,
-  inputs, results, provenance, and evidence to that exact new head with `legacy: null` and zero opaque digest reuse. Legacy
-  rewrites, release-task or authority drift, promotion without a complete rerun, mismatched head provenance, or invalid
-  registry/digests remain H25 failures.
+  head has invalidated all legacy material, but every current Gate, including every optional Gate, must independently bind its
+  sole `integrated-tree` source, inputs, results, provenance, and evidence to that exact new head with `legacy: null`.
+  Require zero opaque digest reuse. A `STALE`, `NONE`, checkless, missing-evidence, or head-mismatched Gate cannot retire the
+  legacy audit waypoint even when that Gate is excluded from aggregate required status. Legacy rewrites, release-task or
+  authority drift, promotion without a complete rerun, mismatched head provenance, or invalid registry/digests remain H25
+  failures.
 - An accepted Worker handoff may return to `IDLE` even if the global candidate is blocked by another responsibility layer.
 
 ## Deliver evidence, not ceremony

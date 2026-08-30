@@ -209,11 +209,12 @@ Validate with `--candidate-evidence-json`; use
 
 A migrated legacy-only v2 audit record may later advance to a fresh per-Gate rerun. The new record must use the same non-null
 release task and a non-regressing Master plan fence. It may use a different `release_head_sha` only after treating the head
-change as whole-candidate invalidation and independently rerunning every required Gate. Require `legacy: null`, one exact
-`integrated-tree` source per Gate bound to the new head, complete registry/source/check provenance, recomputed input/evidence
-digests, a freshly `PASSED` or `FAILED` aggregate, and zero opaque digest reuse. Release-task or plan-authority drift, legacy
-rewrite/direct promotion, incomplete rerun, mismatched head provenance, registry, digest, or monotonic-record failures remain
-H25.
+change as whole-candidate invalidation and independently rerunning every current Gate, including every optional Gate. Require
+`legacy: null`, one exact `integrated-tree` source per Gate bound to the new head, complete registry/source/check provenance,
+recomputed input/evidence digests, a freshly `PASSED` or `FAILED` aggregate, and zero opaque digest reuse. A `STALE`, `NONE`,
+checkless, missing-evidence, or head-mismatched Gate cannot retire the legacy audit waypoint merely because it is optional.
+Release-task or plan-authority drift, legacy rewrite/direct promotion, incomplete rerun, mismatched head provenance, registry,
+digest, or monotonic-record failures remain H25.
 
 ## New conversation read-only bootstrap
 
