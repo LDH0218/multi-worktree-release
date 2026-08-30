@@ -123,22 +123,17 @@ Explicit exclusions
 - <NON-GOAL>
 
 Authorization envelope
-- Schema version: <1>
-- External call: <false OR true>
-- Create execution/job: <false OR true>
-- Publish: <false OR true>
-- Destructive action: <false OR true>
-- Exact target: <TARGET_OR_NULL>
+- Schema version: 2
+- External-call grant: <allowed, structured service target, route/provider, max_calls, max_cost, cost_unit>
+- Create-execution grant: <allowed, structured execution target, route/provider, max_calls, max_cost, cost_unit,
+  fresh_execution_required, exact resume_execution_id-or-null>
+- Publish grant: <allowed, structured publication target, route/provider, max_calls=0, max_cost, cost_unit>
+- Destructive-operation grant: <allowed, structured resource target, route/provider, max_calls=0, max_cost, cost_unit>
+- Each structured target: <kind, non-empty id, local-or-remote transport, exact paths/refs scope>
 - Controlled input: <INPUT_OR_NULL; NEVER A SECRET>
 - Controlled-input digest: <SHA256_DIGEST_OR_NULL>
-- Route: <ROUTE_OR_NULL>
-- Provider: <PROVIDER_OR_NULL>
-- Maximum calls: <NON_NEGATIVE_INTEGER>
-- Maximum cost and unit: <NON_NEGATIVE_INTEGER / EXACT_ATOMIC_UNIT_OR_NULL>
-- Fresh execution required: <true OR false>
-- Resume execution ID: <EXACT_ID_OR_NULL; NULL PROHIBITS RESUMPTION>
 - Expiry: <RFC3339_TIMESTAMP_OR_NULL>
-- Envelope digest: <SHA256_DIGEST_OR_NULL>
+- Envelope digest: <COMPUTED_SHA256_DIGEST>
 - Scope expansion and synchronization: denied unless separately listed above.
 
 Acceptance
@@ -159,6 +154,12 @@ Commit and handoff
 - Write the compact task card as ACTIVE after verification; after committing, record AWAITING_INTEGRATION and do not rewrite
   the handed-off commit.
 ```
+
+For each denied v2 grant, spell out `allowed: false`, `target/route/provider/cost_unit: null`, and zero call/cost budgets;
+the denied execution grant additionally uses `fresh_execution_required: true` and `resume_execution_id: null`. Put
+fresh/resume fields nowhere else. Use non-empty route/provider only for remote targets and null values for local targets. A
+schema-version-1 envelope may be quoted only as an unchanged grandfathered record. To migrate it, use the read-only adapter
+only for canonical default-deny, then have Master publish a superseding task and recompute every downstream digest.
 
 ## Worker to Master handoff
 

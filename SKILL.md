@@ -44,10 +44,13 @@ contract revision, release credential, or permission.
 
 External calls, new executions/jobs, production publication, destructive actions, cross-worktree synchronization, and scope
 expansion are default-deny. Use the canonical authorization envelope in [references/methodology.md](references/methodology.md)
-to bind the task, exact target, controlled input and digest, route/provider, call and cost limits, fresh-run requirement,
-prohibited resumptions, and expiry. Keep every required field even when denied by recording `false`, `null`, or `0`; omission
-never grants authority. Never store secrets in prompts, task cards, or handoff reports. An authority-boundary change cannot
-widen an existing task in place; publish a superseding task with a new authorization envelope.
+to bind four independent v2 grants to capability-specific structured targets, controlled input and digest, local/remote
+route/provider rules, capability-local call and cost limits, execution-only fresh/resume semantics, and expiry. Keep every
+required field even when denied by recording `false`, `null`, or `0`; omission never grants authority, and one grant cannot
+lend target or budget fields to another. Persisted v1 flat envelopes remain valid only under their original contract. The
+read-only adapter converts only canonical v1 default-deny to a newly hashed v2 default-deny envelope; allowed or ambiguous v1
+authority requires a superseding task. Never store secrets in prompts, task cards, or handoff reports. Any authority-boundary
+change requires Master to publish a superseding Task Spec and recompute all dependent digests.
 
 ## Name persistent conversations
 

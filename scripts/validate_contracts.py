@@ -14,7 +14,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Literal, TypedDict, Union, cast
 
 
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -68,6 +68,52 @@ class ContractError(ValueError):
 
 class HistoricalUsageError(ValueError):
     pass
+
+
+CanonicalValue = Union[None, bool, int, str, List["CanonicalValue"], Dict[str, "CanonicalValue"]]
+
+
+class TargetScope(TypedDict):
+    paths: list[str]
+    refs: list[str]
+
+
+class StructuredTarget(TypedDict):
+    kind: Literal["service", "execution", "publication", "resource"]
+    id: str
+    transport: Literal["local", "remote"]
+    scope: TargetScope
+
+
+class CapabilityGrant(TypedDict):
+    allowed: bool
+    target: StructuredTarget | None
+    route: str | None
+    provider: str | None
+    max_calls: int
+    max_cost: int
+    cost_unit: str | None
+
+
+class ExecutionCapabilityGrant(CapabilityGrant):
+    fresh_execution_required: bool
+    resume_execution_id: str | None
+
+
+class AuthorizationCapabilities(TypedDict):
+    external_call: CapabilityGrant
+    create_execution: ExecutionCapabilityGrant
+    publish: CapabilityGrant
+    destructive_operation: CapabilityGrant
+
+
+class AuthorizationV2(TypedDict):
+    schema_version: Literal[2]
+    capabilities: AuthorizationCapabilities
+    controlled_input: CanonicalValue
+    controlled_input_digest: str | None
+    expires_at: str | None
+    envelope_digest: str
 
 
 def historical_error(diagnostic_id: str, message: str) -> None:
@@ -172,9 +218,9 @@ def validate_rfc3339(value: Any, label: str, allow_null: bool = False) -> None:
     parse_rfc3339(value, label, allow_null=allow_null)
 
 
-def validate_authorization(value: dict[str, Any], schema: dict[str, Any]) -> None:
-    require_exact_fields(value, schema_required(schema, "authorization"), "authorization")
-    if value["schema_version"] != 1:
+def validate_authorization_v1(value: dict[str, Any], schema: dict[str, Any]) -> None:
+    require_exact_fields(value, schema_required(schema, "authorization_v1"), "authorization v1")
+    if not isinstance(value["schema_version"], int) or isinstance(value["schema_version"], bool) or value["schema_version"] != 1:
         raise ContractError("authorization.schema_version must be 1")
     for field in ("real_external_call", "create_execution", "publish", "destructive_operation", "fresh_execution_required"):
         if not isinstance(value[field], bool):
@@ -183,6 +229,9 @@ def validate_authorization(value: dict[str, Any], schema: dict[str, Any]) -> Non
         raise ContractError("authorization.max_calls must be a non-negative integer")
     if not isinstance(value["max_cost"], int) or isinstance(value["max_cost"], bool) or value["max_cost"] < 0:
         raise ContractError("authorization.max_cost must be a non-negative integer")
+    for field in ("target", "route", "provider", "cost_unit", "resume_execution_id"):
+        if value[field] is not None and not isinstance(value[field], str):
+            raise ContractError(f"authorization.{field} must be null or a string")
     if value["fresh_execution_required"] and value["resume_execution_id"] is not None:
         raise ContractError("fresh execution and resume ID are mutually exclusive")
     validate_digest(value["controlled_input_digest"], "controlled_input_digest", allow_null=True)
@@ -192,6 +241,7 @@ def validate_authorization(value: dict[str, Any], schema: dict[str, Any]) -> Non
         expected = object_digest(value, "envelope_digest")
         if value["envelope_digest"] != expected:
             raise ContractError("authorization envelope digest mismatch")
+    ensure_canonical_value(value["controlled_input"], "authorization.controlled_input")
     if value["controlled_input"] is not None:
         if value["controlled_input_digest"] != value_digest(value["controlled_input"]):
             raise ContractError("controlled-input digest mismatch")
@@ -208,14 +258,200 @@ def validate_authorization(value: dict[str, Any], schema: dict[str, Any]) -> Non
         raise ContractError("positive max_cost requires cost_unit")
 
 
-def validate_task_spec(value: dict[str, Any], schema: dict[str, Any]) -> None:
+def validate_non_negative_integer(value: Any, label: str) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ContractError(f"{label} must be a non-negative integer")
+
+
+def validate_nullable_nonempty_string(value: Any, label: str) -> None:
+    if value is not None and (not isinstance(value, str) or not value):
+        raise ContractError(f"{label} must be null or a non-empty string")
+
+
+def validate_authorization_scope(value: Any, schema: dict[str, Any], label: str) -> None:
+    if not isinstance(value, dict):
+        raise ContractError(f"{label} must be an object")
+    require_exact_fields(value, schema_required(schema, "target_scope"), label)
+    for field in ("paths", "refs"):
+        entries = value[field]
+        if not isinstance(entries, list):
+            raise ContractError(f"{label}.{field} must be an array")
+        if any(not isinstance(item, str) or not item for item in entries):
+            raise ContractError(f"{label}.{field} entries must be non-empty strings")
+        if any("*" in item for item in entries):
+            raise ContractError(f"{label}.{field} may not contain wildcard scope")
+        if len(set(entries)) != len(entries):
+            raise ContractError(f"{label}.{field} must not contain duplicates")
+        if entries != sorted(entries, key=lambda item: item.encode("utf-8")):
+            raise ContractError(f"{label}.{field} must use canonical UTF-8 order")
+
+
+def validate_authorization_target(value: Any, schema: dict[str, Any], capability: str,
+                                  expected_kind: str, require_scope: bool) -> str:
+    label = f"authorization.capabilities.{capability}.target"
+    if not isinstance(value, dict):
+        raise ContractError(f"{label} must be a structured object")
+    definition = f"authorization_target_{expected_kind}"
+    require_exact_fields(value, schema_required(schema, definition), label)
+    if value["kind"] != expected_kind:
+        raise ContractError(f"{label}.kind must be {expected_kind}")
+    if not isinstance(value["id"], str) or not value["id"]:
+        raise ContractError(f"{label}.id must be a non-empty string")
+    transport = value["transport"]
+    allowed_transports = {"remote"} if capability == "external_call" else {"local", "remote"}
+    if transport not in allowed_transports:
+        raise ContractError(f"{label}.transport must be one of {sorted(allowed_transports)}")
+    validate_authorization_scope(value["scope"], schema, f"{label}.scope")
+    if require_scope and not (value["scope"]["paths"] or value["scope"]["refs"]):
+        raise ContractError(f"{label}.scope must contain at least one path or ref")
+    return transport
+
+
+def validate_authorization_grant(value: Any, schema: dict[str, Any], capability: str,
+                                 expected_kind: str) -> bool:
+    label = f"authorization.capabilities.{capability}"
+    definition = f"authorization_grant_{capability}"
+    if not isinstance(value, dict):
+        raise ContractError(f"{label} must be an object")
+    require_exact_fields(value, schema_required(schema, definition), label)
+    if not isinstance(value["allowed"], bool):
+        raise ContractError(f"{label}.allowed must be boolean")
+    for field in ("route", "provider", "cost_unit"):
+        validate_nullable_nonempty_string(value[field], f"{label}.{field}")
+    validate_non_negative_integer(value["max_calls"], f"{label}.max_calls")
+    validate_non_negative_integer(value["max_cost"], f"{label}.max_cost")
+    if value["max_cost"] == 0 and value["cost_unit"] is not None:
+        raise ContractError(f"{label}.cost_unit must be null when max_cost is zero")
+    if value["max_cost"] > 0 and value["cost_unit"] is None:
+        raise ContractError(f"{label}.cost_unit is required when max_cost is positive")
+
+    is_execution = capability == "create_execution"
+    if is_execution:
+        if not isinstance(value["fresh_execution_required"], bool):
+            raise ContractError(f"{label}.fresh_execution_required must be boolean")
+        validate_nullable_nonempty_string(value["resume_execution_id"], f"{label}.resume_execution_id")
+
+    if not value["allowed"]:
+        canonical = {
+            "allowed": False,
+            "target": None,
+            "route": None,
+            "provider": None,
+            "max_calls": 0,
+            "max_cost": 0,
+            "cost_unit": None,
+        }
+        if is_execution:
+            canonical.update({"fresh_execution_required": True, "resume_execution_id": None})
+        if value != canonical:
+            raise ContractError(f"{label} denied grant must use canonical default-deny values")
+        return False
+
+    transport = validate_authorization_target(
+        value["target"], schema, capability, expected_kind,
+        require_scope=capability in {"publish", "destructive_operation"},
+    )
+    if transport == "remote":
+        if value["route"] is None or value["provider"] is None:
+            raise ContractError(f"{label} remote target requires route and provider")
+    elif value["route"] is not None or value["provider"] is not None:
+        raise ContractError(f"{label} local target requires null route and provider")
+    if capability in {"external_call", "create_execution"}:
+        if value["max_calls"] < 1:
+            raise ContractError(f"{label} requires a positive max_calls limit")
+    elif value["max_calls"] != 0:
+        raise ContractError(f"{label}.max_calls must be zero")
+    if is_execution:
+        fresh = value["fresh_execution_required"]
+        resume_id = value["resume_execution_id"]
+        if fresh and resume_id is not None:
+            raise ContractError(f"{label} fresh execution requires null resume_execution_id")
+        if not fresh and resume_id is None:
+            raise ContractError(f"{label} resumed execution requires an exact resume_execution_id")
+    return True
+
+
+def validate_authorization_v2(value: dict[str, Any], schema: dict[str, Any],
+                              now: dt.datetime | None = None, enforce_expiry: bool = True) -> None:
+    require_exact_fields(value, schema_required(schema, "authorization_v2"), "authorization v2")
+    if not isinstance(value["schema_version"], int) or isinstance(value["schema_version"], bool) or value["schema_version"] != 2:
+        raise ContractError("authorization.schema_version must be 2")
+    capabilities = value["capabilities"]
+    if not isinstance(capabilities, dict):
+        raise ContractError("authorization.capabilities must be an object")
+    expected_capabilities = {"external_call", "create_execution", "publish", "destructive_operation"}
+    require_exact_fields(capabilities, expected_capabilities, "authorization.capabilities")
+    kinds = {
+        "external_call": "service",
+        "create_execution": "execution",
+        "publish": "publication",
+        "destructive_operation": "resource",
+    }
+    allowed = [name for name, kind in kinds.items()
+               if validate_authorization_grant(capabilities[name], schema, name, kind)]
+    ensure_canonical_value(value["controlled_input"], "authorization.controlled_input")
+    validate_digest(value["controlled_input_digest"], "authorization.controlled_input_digest", allow_null=True)
+    expiration = parse_rfc3339(value["expires_at"], "authorization.expires_at", allow_null=True)
+    validate_digest(value["envelope_digest"], "authorization.envelope_digest")
+    if value["envelope_digest"] != object_digest(value, "envelope_digest"):
+        raise ContractError("authorization envelope digest mismatch")
+    if allowed:
+        if value["controlled_input"] is None or value["controlled_input_digest"] is None or expiration is None:
+            raise ContractError("allowed v2 authority requires controlled input, its digest, and expiry")
+        if value["controlled_input_digest"] != value_digest(value["controlled_input"]):
+            raise ContractError("controlled-input digest mismatch")
+        if enforce_expiry:
+            current = now or dt.datetime.now(dt.timezone.utc)
+            if current.tzinfo is None:
+                raise ContractError("authorization validation time must include a timezone")
+            if expiration <= current:
+                raise ContractError("authorization v2 envelope is expired")
+    elif any(value[field] is not None for field in ("controlled_input", "controlled_input_digest", "expires_at")):
+        raise ContractError("all-denied v2 authorization must clear controlled input, digest, and expiry")
+
+
+def validate_authorization(value: dict[str, Any], schema: dict[str, Any],
+                           now: dt.datetime | None = None, enforce_expiry: bool = True) -> None:
+    if not isinstance(value, dict):
+        raise ContractError("authorization must be an object")
+    version = value.get("schema_version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise ContractError("authorization.schema_version must be an integer")
+    if version == 1:
+        validate_authorization_v1(value, schema)
+    elif version == 2:
+        validate_authorization_v2(value, schema, now=now, enforce_expiry=enforce_expiry)
+    else:
+        raise ContractError("authorization.schema_version must be 1 or 2")
+
+
+def validate_execution_request(value: dict[str, Any], schema: dict[str, Any],
+                               requested_resume_execution_id: str | None,
+                               now: dt.datetime | None = None) -> None:
+    """Bind an execution request to the v2 grant's exact fresh/resume mode."""
+    validate_authorization(value, schema, now=now)
+    if value["schema_version"] != 2:
+        raise ContractError("execution request matching requires authorization v2")
+    grant = value["capabilities"]["create_execution"]
+    if not grant["allowed"]:
+        raise ContractError("create_execution is not authorized")
+    validate_nullable_nonempty_string(requested_resume_execution_id, "requested_resume_execution_id")
+    if grant["fresh_execution_required"]:
+        if requested_resume_execution_id is not None:
+            raise ContractError("fresh execution request cannot resume an execution")
+    elif requested_resume_execution_id != grant["resume_execution_id"]:
+        raise ContractError("requested resume execution ID does not match the authorized exact ID")
+
+
+def validate_task_spec(value: dict[str, Any], schema: dict[str, Any],
+                       enforce_authorization_expiry: bool = True) -> None:
     require_exact_fields(value, schema_required(schema, "task_spec"), "task spec")
     if value["schema_version"] != 1:
         raise ContractError("task_spec.schema_version must be 1")
     validate_positive_integer(value["task_spec_revision"], "task_spec.task_spec_revision")
     validate_positive_integer(value["plan_revision"], "task_spec.plan_revision")
     validate_positive_integer(value["dispatch_wave"], "task_spec.dispatch_wave")
-    validate_authorization(value["authorization"], schema)
+    validate_authorization(value["authorization"], schema, enforce_expiry=enforce_authorization_expiry)
     validate_rfc3339(value["issued_at"], "task_spec.issued_at")
     for field in ("task_spec_path", "worktree"):
         if not Path(value[field]).is_absolute():
@@ -322,7 +558,8 @@ def load_persisted_plan_specs(value: dict[str, Any], schema: dict[str, Any],
             raise ContractError(f"persisted task spec not found: {path}")
         try:
             spec = load_json(path)
-            validate_task_spec(spec, schema)
+            enforce_expiry = not historical and entry["dispatch_status"] not in TERMINAL_DISPATCH_STATES
+            validate_task_spec(spec, schema, enforce_authorization_expiry=enforce_expiry)
         except (ContractError, OSError, json.JSONDecodeError) as error:
             if historical:
                 historical_error("H16", f"historical persisted task spec is unverifiable at {path}: {error}")
@@ -360,12 +597,13 @@ def validate_persisted_plan_specs(value: dict[str, Any], schema: dict[str, Any])
     load_persisted_plan_specs(value, schema)
 
 
-def validate_worker_card(value: dict[str, Any], schema: dict[str, Any]) -> None:
+def validate_worker_card(value: dict[str, Any], schema: dict[str, Any],
+                         enforce_authorization_expiry: bool = True) -> None:
     require_exact_fields(value, schema_required(schema, "worker_card"), "Worker card")
     if value["schema_version"] != 1:
         raise ContractError("worker_card.schema_version must be 1")
     validate_positive_integer(value["record_revision"], "worker_card.record_revision")
-    validate_authorization(value["authorization"], schema)
+    validate_authorization(value["authorization"], schema, enforce_expiry=enforce_authorization_expiry)
     validate_rfc3339(value["updated_at"], "worker_card.updated_at")
     validate_rfc3339(value["issued_at"], "worker_card.issued_at", allow_null=True)
     states = set(schema["$defs"]["worker_state"]["enum"])
@@ -389,8 +627,8 @@ def validate_worker_card(value: dict[str, Any], schema: dict[str, Any]) -> None:
         uncleared = [field for field in nullable_lock_fields if value[field] is not None]
         if uncleared or value["allowed_paths"] or value["forbidden_paths"] or value["acceptance_commands"]:
             raise ContractError(f"IDLE Worker card retains active lock fields: {uncleared}")
-        denied = default_authorization()
-        if value["authorization"] != denied:
+        denied_envelopes = (default_authorization(), default_authorization_v2())
+        if value["authorization"] not in denied_envelopes:
             raise ContractError("IDLE Worker card authorization must be the canonical default-deny envelope")
     else:
         required_lock_fields = ("task_id", "task_spec_revision", "task_spec_digest", "task_spec_path", "plan_revision",
@@ -1031,6 +1269,22 @@ def nested_mapping_keys(block: str, parent: str) -> set[str]:
     return yaml_like_keys("\n".join(nested), 2)
 
 
+def child_mapping_keys(block: str, parent: str, parent_indent: int) -> set[str]:
+    lines = block.splitlines()
+    marker = " " * parent_indent + f"{parent}:"
+    try:
+        start = lines.index(marker) + 1
+    except ValueError as error:
+        raise ContractError(f"missing {parent} mapping at indentation {parent_indent}") from error
+    child_indent = parent_indent + 2
+    children: list[str] = []
+    for line in lines[start:]:
+        if line.strip() and len(line) - len(line.lstrip(" ")) <= parent_indent:
+            break
+        children.append(line)
+    return yaml_like_keys("\n".join(children), child_indent)
+
+
 def validate_documented_contracts(repo_root: Path, schema: dict[str, Any]) -> None:
     methodology = (repo_root / "references" / "methodology.md").read_text(encoding="utf-8")
     canonical = extract_code_block(methodology, "## Canonical authorization envelope")
@@ -1038,11 +1292,21 @@ def validate_documented_contracts(repo_root: Path, schema: dict[str, Any]) -> No
     worker = extract_code_block(methodology, "Worker card:")
     master = extract_code_block(methodology, "Master card uses a list")
     plan = extract_code_block(methodology, "The plan is versioned and contains at least:")
-    required = schema_required(schema, "authorization")
+    required = schema_required(schema, "authorization_v2")
     for label, block in (("canonical authorization", canonical), ("task authorization", task), ("Worker authorization", worker)):
         keys = nested_mapping_keys(block, "authorization")
         if keys != required:
             raise ContractError(f"{label} fields drifted from schema; missing={sorted(required-keys)}, extra={sorted(keys-required)}")
+        capability_keys = child_mapping_keys(block, "capabilities", 2)
+        expected_capabilities = {"external_call", "create_execution", "publish", "destructive_operation"}
+        if capability_keys != expected_capabilities:
+            raise ContractError(f"{label} capability fields drifted from schema")
+        for capability in expected_capabilities:
+            grant_keys = child_mapping_keys(block, capability, 4)
+            schema_keys = schema_required(schema, f"authorization_grant_{capability}")
+            if grant_keys != schema_keys:
+                raise ContractError(f"{label} {capability} grant fields drifted from schema; "
+                                    f"missing={sorted(schema_keys-grant_keys)}, extra={sorted(grant_keys-schema_keys)}")
     projections = (("task spec", task, "task_spec"), ("Worker card", worker, "worker_card"),
                    ("Master card", master, "master_card"), ("Dispatch Plan", plan, "dispatch_plan"))
     for label, block, definition in projections:
@@ -1112,6 +1376,96 @@ def default_authorization() -> dict[str, Any]:
     return value
 
 
+def default_authorization_grant(execution: bool = False) -> CapabilityGrant | ExecutionCapabilityGrant:
+    grant: dict[str, Any] = {
+        "allowed": False,
+        "target": None,
+        "route": None,
+        "provider": None,
+        "max_calls": 0,
+        "max_cost": 0,
+        "cost_unit": None,
+    }
+    if execution:
+        grant.update({"fresh_execution_required": True, "resume_execution_id": None})
+    return grant
+
+
+def default_authorization_v2() -> AuthorizationV2:
+    value = {
+        "schema_version": 2,
+        "capabilities": {
+            "external_call": default_authorization_grant(),
+            "create_execution": default_authorization_grant(execution=True),
+            "publish": default_authorization_grant(),
+            "destructive_operation": default_authorization_grant(),
+        },
+        "controlled_input": None,
+        "controlled_input_digest": None,
+        "expires_at": None,
+        "envelope_digest": None,
+    }
+    value["envelope_digest"] = object_digest(value, "envelope_digest")
+    return cast(AuthorizationV2, value)
+
+
+def adapt_authorization_v1_to_v2(value: dict[str, Any], schema: dict[str, Any]) -> AuthorizationV2:
+    """Return a new v2 default-deny value for the only unambiguous v1 envelope."""
+    source = copy.deepcopy(value)
+    validate_authorization_v1(source, schema)
+    capability_fields = ("real_external_call", "create_execution", "publish", "destructive_operation")
+    allowed = [field for field in capability_fields if source[field]]
+    if len(allowed) > 1:
+        raise ContractError("v1 adapter rejects envelopes with multiple allowed capabilities")
+    if allowed:
+        raise ContractError(
+            f"v1 adapter cannot prove structured kind, transport, and scope for allowed string target: {allowed[0]}"
+        )
+    if source != default_authorization():
+        raise ContractError("v1 adapter accepts only the canonical all-denied envelope")
+    adapted = default_authorization_v2()
+    if adapted["envelope_digest"] == source["envelope_digest"]:
+        raise ContractError("v1 adapter must compute a distinct v2 envelope digest")
+    return adapted
+
+
+def make_allowed_authorization_v2(*capability_names: str,
+                                  resume_execution_id: str | None = None) -> AuthorizationV2:
+    value = default_authorization_v2()
+    targets = {
+        "external_call": {
+            "kind": "service", "id": "service.example", "transport": "remote",
+            "scope": {"paths": [], "refs": ["operation.read"]},
+        },
+        "create_execution": {
+            "kind": "execution", "id": "runner.local", "transport": "local",
+            "scope": {"paths": ["jobs/build"], "refs": []},
+        },
+        "publish": {
+            "kind": "publication", "id": "registry.example", "transport": "remote",
+            "scope": {"paths": [], "refs": ["release/candidate"]},
+        },
+        "destructive_operation": {
+            "kind": "resource", "id": "workspace.cache", "transport": "local",
+            "scope": {"paths": ["cache/item"], "refs": []},
+        },
+    }
+    for name in capability_names:
+        grant = value["capabilities"][name]
+        grant.update({"allowed": True, "target": copy.deepcopy(targets[name])})
+        if grant["target"]["transport"] == "remote":
+            grant.update({"route": "api", "provider": "example"})
+        if name in {"external_call", "create_execution"}:
+            grant["max_calls"] = 1
+        if name == "create_execution" and resume_execution_id is not None:
+            grant.update({"fresh_execution_required": False, "resume_execution_id": resume_execution_id})
+    value["controlled_input"] = {"request": "bounded", "sequence": 1}
+    value["controlled_input_digest"] = value_digest(value["controlled_input"])
+    value["expires_at"] = "2100-01-01T00:00:00Z"
+    value["envelope_digest"] = object_digest(value, "envelope_digest")
+    return value
+
+
 class ContractScenarios(unittest.TestCase):
     def setUp(self) -> None:
         self.schema = ACTIVE_SCHEMA
@@ -1145,6 +1499,255 @@ class ContractScenarios(unittest.TestCase):
         value["envelope_digest"] = object_digest(value, "envelope_digest")
         validate_authorization(value, self.schema)
 
+    def test_v2_default_deny_and_every_capability_shape(self) -> None:
+        denied = default_authorization_v2()
+        validate_authorization(denied, self.schema)
+        value = make_allowed_authorization_v2(
+            "external_call", "create_execution", "publish", "destructive_operation",
+        )
+        value["capabilities"]["external_call"].update({"max_cost": 25, "cost_unit": "USD-cent"})
+        value["envelope_digest"] = object_digest(value, "envelope_digest")
+        validate_authorization(value, self.schema)
+        self.assertEqual(value["capabilities"]["external_call"]["target"]["kind"], "service")
+        self.assertEqual(value["capabilities"]["create_execution"]["target"]["kind"], "execution")
+        self.assertEqual(value["capabilities"]["publish"]["target"]["kind"], "publication")
+        self.assertEqual(value["capabilities"]["destructive_operation"]["target"]["kind"], "resource")
+
+    def test_v2_fresh_and_exact_resume_semantics(self) -> None:
+        fresh = make_allowed_authorization_v2("create_execution")
+        validate_authorization(fresh, self.schema)
+        validate_execution_request(fresh, self.schema, None)
+        with self.assertRaises(ContractError):
+            validate_execution_request(fresh, self.schema, "run-unexpected")
+        resumed = make_allowed_authorization_v2("create_execution", resume_execution_id="run-exact-123")
+        validate_authorization(resumed, self.schema)
+        validate_execution_request(resumed, self.schema, "run-exact-123")
+        with self.assertRaises(ContractError):
+            validate_execution_request(resumed, self.schema, "run-other")
+        for field, invalid in (("resume_execution_id", "run-unexpected"),
+                               ("fresh_execution_required", False)):
+            value = make_allowed_authorization_v2("create_execution")
+            value["capabilities"]["create_execution"][field] = invalid
+            value["envelope_digest"] = object_digest(value, "envelope_digest")
+            with self.subTest(field=field), self.assertRaises(ContractError):
+                validate_authorization(value, self.schema)
+
+    def test_v2_capabilities_are_independent(self) -> None:
+        value = make_allowed_authorization_v2("external_call")
+        value["capabilities"]["create_execution"]["max_calls"] = 1
+        value["envelope_digest"] = object_digest(value, "envelope_digest")
+        with self.assertRaises(ContractError):
+            validate_authorization(value, self.schema)
+        value = make_allowed_authorization_v2("publish")
+        value["capabilities"]["publish"]["target"] = copy.deepcopy(
+            make_allowed_authorization_v2("external_call")["capabilities"]["external_call"]["target"]
+        )
+        value["envelope_digest"] = object_digest(value, "envelope_digest")
+        with self.assertRaises(ContractError):
+            validate_authorization(value, self.schema)
+
+    def test_v2_negative_field_target_scope_route_budget_and_digest_cases(self) -> None:
+        cases: list[tuple[str, Any]] = []
+
+        missing_root = default_authorization_v2()
+        del missing_root["expires_at"]
+        cases.append(("missing root field", missing_root))
+        extra_root = default_authorization_v2()
+        extra_root["legacy_target"] = None
+        cases.append(("extra root field", extra_root))
+        wrong_version = default_authorization_v2()
+        wrong_version["schema_version"] = True
+        cases.append(("wrong schema version type", wrong_version))
+        missing_capability = default_authorization_v2()
+        del missing_capability["capabilities"]["publish"]
+        cases.append(("missing capability", missing_capability))
+        missing_grant_field = default_authorization_v2()
+        del missing_grant_field["capabilities"]["publish"]["max_cost"]
+        cases.append(("missing grant field", missing_grant_field))
+        leaked_field = default_authorization_v2()
+        leaked_field["capabilities"]["external_call"]["fresh_execution_required"] = True
+        cases.append(("execution field leakage", leaked_field))
+
+        mutations = {
+            "allowed wrong type": ("allowed", 1),
+            "target wrong type": ("target", "service.example"),
+            "wrong target kind": ("target.kind", "execution"),
+            "wrong target transport": ("target.transport", "local"),
+            "empty target id": ("target.id", ""),
+            "missing route": ("route", None),
+            "missing provider": ("provider", None),
+            "zero calls": ("max_calls", 0),
+            "boolean calls": ("max_calls", True),
+            "floating calls": ("max_calls", 1.5),
+            "negative cost": ("max_cost", -1),
+            "floating cost": ("max_cost", 1.5),
+            "unit without cost": ("cost_unit", "USD-cent"),
+        }
+        for label, (path, replacement) in mutations.items():
+            value = make_allowed_authorization_v2("external_call")
+            if path.startswith("target."):
+                value["capabilities"]["external_call"]["target"][path.split(".")[1]] = replacement
+            else:
+                value["capabilities"]["external_call"][path] = replacement
+            if not isinstance(replacement, float):
+                value["envelope_digest"] = object_digest(value, "envelope_digest")
+            cases.append((label, value))
+
+        for label, paths in (
+            ("wildcard scope", ["*"]),
+            ("unsorted scope", ["z", "a"]),
+            ("duplicate scope", ["a", "a"]),
+            ("empty scope entry", [""]),
+        ):
+            value = make_allowed_authorization_v2("external_call")
+            value["capabilities"]["external_call"]["target"]["scope"]["paths"] = paths
+            value["envelope_digest"] = object_digest(value, "envelope_digest")
+            cases.append((label, value))
+        scope_missing = make_allowed_authorization_v2("external_call")
+        del scope_missing["capabilities"]["external_call"]["target"]["scope"]["refs"]
+        scope_missing["envelope_digest"] = object_digest(scope_missing, "envelope_digest")
+        cases.append(("missing scope field", scope_missing))
+        scope_wrong_type = make_allowed_authorization_v2("external_call")
+        scope_wrong_type["capabilities"]["external_call"]["target"]["scope"]["paths"] = [1]
+        scope_wrong_type["envelope_digest"] = object_digest(scope_wrong_type, "envelope_digest")
+        cases.append(("wrong scope member type", scope_wrong_type))
+        extra_target = make_allowed_authorization_v2("external_call")
+        extra_target["capabilities"]["external_call"]["target"]["namespace"] = "unexpected"
+        extra_target["envelope_digest"] = object_digest(extra_target, "envelope_digest")
+        cases.append(("extra target field", extra_target))
+
+        local_route = make_allowed_authorization_v2("create_execution")
+        local_route["capabilities"]["create_execution"].update({"route": "local", "provider": "host"})
+        local_route["envelope_digest"] = object_digest(local_route, "envelope_digest")
+        cases.append(("local route leakage", local_route))
+        publish_calls = make_allowed_authorization_v2("publish")
+        publish_calls["capabilities"]["publish"]["max_calls"] = 1
+        publish_calls["envelope_digest"] = object_digest(publish_calls, "envelope_digest")
+        cases.append(("publish call budget", publish_calls))
+        empty_publish_scope = make_allowed_authorization_v2("publish")
+        empty_publish_scope["capabilities"]["publish"]["target"]["scope"] = {"paths": [], "refs": []}
+        empty_publish_scope["envelope_digest"] = object_digest(empty_publish_scope, "envelope_digest")
+        cases.append(("empty publish scope", empty_publish_scope))
+        positive_without_unit = make_allowed_authorization_v2("external_call")
+        positive_without_unit["capabilities"]["external_call"]["max_cost"] = 1
+        positive_without_unit["envelope_digest"] = object_digest(positive_without_unit, "envelope_digest")
+        cases.append(("positive cost without unit", positive_without_unit))
+
+        bad_input_digest = make_allowed_authorization_v2("external_call")
+        bad_input_digest["controlled_input_digest"] = "sha256:" + "0" * 64
+        bad_input_digest["envelope_digest"] = object_digest(bad_input_digest, "envelope_digest")
+        cases.append(("controlled input digest mismatch", bad_input_digest))
+        missing_input_digest = make_allowed_authorization_v2("external_call")
+        missing_input_digest["controlled_input_digest"] = None
+        missing_input_digest["envelope_digest"] = object_digest(missing_input_digest, "envelope_digest")
+        cases.append(("controlled input digest missing", missing_input_digest))
+        bad_envelope_digest = make_allowed_authorization_v2("external_call")
+        bad_envelope_digest["envelope_digest"] = "sha256:" + "0" * 64
+        cases.append(("envelope digest mismatch", bad_envelope_digest))
+        old_digest = make_allowed_authorization_v2("external_call")
+        old_digest["envelope_digest"] = default_authorization()["envelope_digest"]
+        cases.append(("v1 digest reuse", old_digest))
+        float_input = make_allowed_authorization_v2("external_call")
+        float_input["controlled_input"] = {"cost": 1.5}
+        cases.append(("floating controlled input", float_input))
+        malformed_expiry = make_allowed_authorization_v2("external_call")
+        malformed_expiry["expires_at"] = "not-a-time"
+        malformed_expiry["envelope_digest"] = object_digest(malformed_expiry, "envelope_digest")
+        cases.append(("malformed expiry", malformed_expiry))
+
+        for label, value in cases:
+            with self.subTest(case=label), self.assertRaises(ContractError):
+                validate_authorization(value, self.schema)
+
+    def test_v2_expiry_and_global_default_deny_rules(self) -> None:
+        expired = make_allowed_authorization_v2("external_call")
+        expired["expires_at"] = "2025-01-01T00:00:00Z"
+        expired["envelope_digest"] = object_digest(expired, "envelope_digest")
+        with self.assertRaises(ContractError):
+            validate_authorization(expired, self.schema, now=dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc))
+        validate_authorization(expired, self.schema, enforce_expiry=False)
+        at_expiry = make_allowed_authorization_v2("external_call")
+        at_expiry["expires_at"] = "2026-01-01T00:00:00Z"
+        at_expiry["envelope_digest"] = object_digest(at_expiry, "envelope_digest")
+        with self.assertRaises(ContractError):
+            validate_authorization(at_expiry, self.schema,
+                                   now=dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc))
+        missing = make_allowed_authorization_v2("external_call")
+        missing["expires_at"] = None
+        missing["envelope_digest"] = object_digest(missing, "envelope_digest")
+        with self.assertRaises(ContractError):
+            validate_authorization(missing, self.schema)
+        denied = default_authorization_v2()
+        denied["controlled_input"] = {"stale": True}
+        denied["controlled_input_digest"] = value_digest(denied["controlled_input"])
+        denied["envelope_digest"] = object_digest(denied, "envelope_digest")
+        with self.assertRaises(ContractError):
+            validate_authorization(denied, self.schema)
+
+    def test_v1_adapter_is_read_only_strict_and_rehashes_v2(self) -> None:
+        source = default_authorization()
+        before = copy.deepcopy(source)
+        adapted = adapt_authorization_v1_to_v2(source, self.schema)
+        self.assertEqual(source, before)
+        self.assertEqual(adapted, default_authorization_v2())
+        self.assertNotEqual(adapted["envelope_digest"], source["envelope_digest"])
+        validate_authorization(adapted, self.schema)
+
+        ambiguous = default_authorization()
+        ambiguous.update({
+            "real_external_call": True, "target": "service.example", "controlled_input": {"request": 1},
+            "route": "api", "provider": "example", "max_calls": 1, "expires_at": "2100-01-01T00:00:00Z",
+        })
+        ambiguous["controlled_input_digest"] = value_digest(ambiguous["controlled_input"])
+        ambiguous["envelope_digest"] = object_digest(ambiguous, "envelope_digest")
+        with self.assertRaisesRegex(ContractError, "cannot prove structured"):
+            adapt_authorization_v1_to_v2(ambiguous, self.schema)
+
+        multi = copy.deepcopy(ambiguous)
+        multi["create_execution"] = True
+        multi["envelope_digest"] = object_digest(multi, "envelope_digest")
+        with self.assertRaisesRegex(ContractError, "multiple allowed"):
+            adapt_authorization_v1_to_v2(multi, self.schema)
+
+        noncanonical_deny = default_authorization()
+        noncanonical_deny["target"] = "stale"
+        noncanonical_deny["envelope_digest"] = object_digest(noncanonical_deny, "envelope_digest")
+        with self.assertRaisesRegex(ContractError, "canonical all-denied"):
+            adapt_authorization_v1_to_v2(noncanonical_deny, self.schema)
+
+    def test_authorization_schema_python_exact_field_parity(self) -> None:
+        self.assertEqual(schema_required(self.schema, "authorization_v2"), {
+            "schema_version", "capabilities", "controlled_input", "controlled_input_digest", "expires_at",
+            "envelope_digest",
+        })
+        common = {"allowed", "target", "route", "provider", "max_calls", "max_cost", "cost_unit"}
+        self.assertEqual(schema_required(self.schema, "authorization_grant_external_call"), common)
+        self.assertEqual(schema_required(self.schema, "authorization_grant_publish"), common)
+        self.assertEqual(schema_required(self.schema, "authorization_grant_destructive_operation"), common)
+        self.assertEqual(schema_required(self.schema, "authorization_grant_create_execution"),
+                         common | {"fresh_execution_required", "resume_execution_id"})
+        for definition in (
+            "authorization_v1", "authorization_v2", "target_scope", "structured_target", "authorization_target_service",
+            "authorization_target_execution", "authorization_target_publication", "authorization_target_resource",
+            "authorization_grant_external_call", "authorization_grant_create_execution",
+            "authorization_grant_publish", "authorization_grant_destructive_operation",
+        ):
+            self.assertFalse(self.schema["$defs"][definition]["additionalProperties"])
+
+    def test_public_cli_accepts_v1_and_v2_task_specs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for version in (1, 2):
+                path = root / f"task-v{version}.json"
+                spec = make_task_spec_at(path)
+                if version == 2:
+                    spec["authorization"] = make_allowed_authorization_v2("external_call", "create_execution")
+                spec["task_spec_digest"] = object_digest(spec, "task_spec_digest")
+                write_json_fixture(path, spec)
+                result = run_public_cli("--task-spec", str(path))
+                with self.subTest(version=version):
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_floating_point_digest_input_is_rejected(self) -> None:
         with self.assertRaises(ContractError):
             value_digest({"cost": 1.5})
@@ -1175,6 +1778,9 @@ class ContractScenarios(unittest.TestCase):
     def test_idle_worker_card_must_clear_lock_and_authority(self) -> None:
         card = make_idle_worker_card()
         validate_worker_card(card, self.schema)
+        v2_card = copy.deepcopy(card)
+        v2_card["authorization"] = default_authorization_v2()
+        validate_worker_card(v2_card, self.schema)
         card["task_id"] = "stale-task"
         with self.assertRaises(ContractError):
             validate_worker_card(card, self.schema)
@@ -2000,7 +2606,7 @@ def main() -> int:
         if args.previous_worker_card:
             previous_worker = load_previous_json(args.previous_worker_card, "Worker Card")
             validate_historical_schema_pair(previous_worker, current_worker, "Worker Card")
-            validate_worker_card(previous_worker, schema)
+            validate_worker_card(previous_worker, schema, enforce_authorization_expiry=False)
             pair_results.append(("worker-card", previous_worker, current_worker,
                                  validate_worker_transition(previous_worker, current_worker)))
         if args.previous_master_card:

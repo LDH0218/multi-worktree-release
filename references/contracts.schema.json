@@ -26,7 +26,17 @@
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
     },
-    "authorization": {
+    "canonical_value": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "boolean"},
+        {"type": "integer"},
+        {"type": "string"},
+        {"type": "array", "items": {"$ref": "#/$defs/canonical_value"}},
+        {"type": "object", "additionalProperties": {"$ref": "#/$defs/canonical_value"}}
+      ]
+    },
+    "authorization_v1": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -55,7 +65,7 @@
         "publish": {"type": "boolean"},
         "destructive_operation": {"type": "boolean"},
         "target": {"type": ["string", "null"]},
-        "controlled_input": {},
+        "controlled_input": {"$ref": "#/$defs/canonical_value"},
         "controlled_input_digest": {"$ref": "#/$defs/digest"},
         "route": {"type": ["string", "null"]},
         "provider": {"type": ["string", "null"]},
@@ -67,6 +77,172 @@
         "expires_at": {"type": ["string", "null"], "format": "date-time"},
         "envelope_digest": {"$ref": "#/$defs/digest"}
       }
+    },
+    "target_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paths", "refs"],
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true,
+          "x-canonical-order": "utf8"
+        },
+        "refs": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true,
+          "x-canonical-order": "utf8"
+        }
+      }
+    },
+    "structured_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "transport", "scope"],
+      "properties": {
+        "kind": {"enum": ["service", "execution", "publication", "resource"]},
+        "id": {"type": "string", "minLength": 1},
+        "transport": {"enum": ["local", "remote"]},
+        "scope": {"$ref": "#/$defs/target_scope"}
+      }
+    },
+    "authorization_target_service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "transport", "scope"],
+      "properties": {
+        "kind": {"const": "service"},
+        "id": {"type": "string", "minLength": 1},
+        "transport": {"const": "remote"},
+        "scope": {"$ref": "#/$defs/target_scope"}
+      }
+    },
+    "authorization_target_execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "transport", "scope"],
+      "properties": {
+        "kind": {"const": "execution"},
+        "id": {"type": "string", "minLength": 1},
+        "transport": {"enum": ["local", "remote"]},
+        "scope": {"$ref": "#/$defs/target_scope"}
+      }
+    },
+    "authorization_target_publication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "transport", "scope"],
+      "properties": {
+        "kind": {"const": "publication"},
+        "id": {"type": "string", "minLength": 1},
+        "transport": {"enum": ["local", "remote"]},
+        "scope": {"$ref": "#/$defs/target_scope"}
+      }
+    },
+    "authorization_target_resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "transport", "scope"],
+      "properties": {
+        "kind": {"const": "resource"},
+        "id": {"type": "string", "minLength": 1},
+        "transport": {"enum": ["local", "remote"]},
+        "scope": {"$ref": "#/$defs/target_scope"}
+      }
+    },
+    "authorization_grant_external_call": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed", "target", "route", "provider", "max_calls", "max_cost", "cost_unit"],
+      "properties": {
+        "allowed": {"type": "boolean"},
+        "target": {"oneOf": [{"$ref": "#/$defs/authorization_target_service"}, {"type": "null"}]},
+        "route": {"type": ["string", "null"], "minLength": 1},
+        "provider": {"type": ["string", "null"], "minLength": 1},
+        "max_calls": {"type": "integer", "minimum": 0},
+        "max_cost": {"type": "integer", "minimum": 0},
+        "cost_unit": {"type": ["string", "null"], "minLength": 1}
+      }
+    },
+    "authorization_grant_create_execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed", "target", "route", "provider", "max_calls", "max_cost", "cost_unit",
+        "fresh_execution_required", "resume_execution_id"
+      ],
+      "properties": {
+        "allowed": {"type": "boolean"},
+        "target": {"oneOf": [{"$ref": "#/$defs/authorization_target_execution"}, {"type": "null"}]},
+        "route": {"type": ["string", "null"], "minLength": 1},
+        "provider": {"type": ["string", "null"], "minLength": 1},
+        "max_calls": {"type": "integer", "minimum": 0},
+        "max_cost": {"type": "integer", "minimum": 0},
+        "cost_unit": {"type": ["string", "null"], "minLength": 1},
+        "fresh_execution_required": {"type": "boolean"},
+        "resume_execution_id": {"type": ["string", "null"], "minLength": 1}
+      }
+    },
+    "authorization_grant_publish": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed", "target", "route", "provider", "max_calls", "max_cost", "cost_unit"],
+      "properties": {
+        "allowed": {"type": "boolean"},
+        "target": {"oneOf": [{"$ref": "#/$defs/authorization_target_publication"}, {"type": "null"}]},
+        "route": {"type": ["string", "null"], "minLength": 1},
+        "provider": {"type": ["string", "null"], "minLength": 1},
+        "max_calls": {"type": "integer", "minimum": 0},
+        "max_cost": {"type": "integer", "minimum": 0},
+        "cost_unit": {"type": ["string", "null"], "minLength": 1}
+      }
+    },
+    "authorization_grant_destructive_operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed", "target", "route", "provider", "max_calls", "max_cost", "cost_unit"],
+      "properties": {
+        "allowed": {"type": "boolean"},
+        "target": {"oneOf": [{"$ref": "#/$defs/authorization_target_resource"}, {"type": "null"}]},
+        "route": {"type": ["string", "null"], "minLength": 1},
+        "provider": {"type": ["string", "null"], "minLength": 1},
+        "max_calls": {"type": "integer", "minimum": 0},
+        "max_cost": {"type": "integer", "minimum": 0},
+        "cost_unit": {"type": ["string", "null"], "minLength": 1}
+      }
+    },
+    "authorization_v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "capabilities", "controlled_input", "controlled_input_digest", "expires_at", "envelope_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": 2},
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["external_call", "create_execution", "publish", "destructive_operation"],
+          "properties": {
+            "external_call": {"$ref": "#/$defs/authorization_grant_external_call"},
+            "create_execution": {"$ref": "#/$defs/authorization_grant_create_execution"},
+            "publish": {"$ref": "#/$defs/authorization_grant_publish"},
+            "destructive_operation": {"$ref": "#/$defs/authorization_grant_destructive_operation"}
+          }
+        },
+        "controlled_input": {"$ref": "#/$defs/canonical_value"},
+        "controlled_input_digest": {"$ref": "#/$defs/digest"},
+        "expires_at": {"type": ["string", "null"], "format": "date-time"},
+        "envelope_digest": {"$ref": "#/$defs/required_digest"}
+      }
+    },
+    "authorization": {
+      "oneOf": [
+        {"$ref": "#/$defs/authorization_v1"},
+        {"$ref": "#/$defs/authorization_v2"}
+      ]
     },
     "task_spec": {
       "type": "object",

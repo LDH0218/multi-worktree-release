@@ -207,30 +207,69 @@ field is invalid and never grants authority.
 
 ```yaml
 authorization:
-  schema_version: 1
-  real_external_call: false
-  create_execution: false
-  publish: false
-  destructive_operation: false
-  target: null
+  schema_version: 2
+  capabilities:
+    external_call:
+      allowed: false
+      target: null
+      route: null
+      provider: null
+      max_calls: 0
+      max_cost: 0
+      cost_unit: null
+    create_execution:
+      allowed: false
+      target: null
+      route: null
+      provider: null
+      max_calls: 0
+      max_cost: 0
+      cost_unit: null
+      fresh_execution_required: true
+      resume_execution_id: null
+    publish:
+      allowed: false
+      target: null
+      route: null
+      provider: null
+      max_calls: 0
+      max_cost: 0
+      cost_unit: null
+    destructive_operation:
+      allowed: false
+      target: null
+      route: null
+      provider: null
+      max_calls: 0
+      max_cost: 0
+      cost_unit: null
   controlled_input: null
   controlled_input_digest: null
-  route: null
-  provider: null
-  max_calls: 0
-  max_cost: 0
-  cost_unit: null
-  fresh_execution_required: true
-  resume_execution_id: null
   expires_at: null
-  envelope_digest: null
+  envelope_digest: <computed-sha256-digest>
 ```
 
-When a capability is allowed, `target`, `controlled_input`, `controlled_input_digest`, route/provider, applicable limits, and
-an RFC 3339 `expires_at` must be concrete. `max_cost` is a non-negative integer count and `cost_unit` identifies the exact
-atomic unit, such as `USD-cent` or a provider credit. `resume_execution_id: null` prohibits resumption. A non-null resume ID
-authorizes only that exact execution and only when the task explicitly permits resumption; `fresh_execution_required: true`
-and a non-null resume ID are mutually exclusive. Secrets are never valid controlled inputs or state-card values.
+Authorization v2 has exactly four independent grants. Each grant has `allowed`, `target`, `route`, `provider`, `max_calls`,
+`max_cost`, and `cost_unit`; only `create_execution` also has `fresh_execution_required` and `resume_execution_id`. A denied
+grant uses exactly the values above. It cannot retain a target, route, provider, call or cost budget. Grants cannot borrow any
+field or budget from another capability.
+
+An allowed target is an exact object `{kind, id, transport, scope}`. `id` is non-empty; `transport` is `local` or `remote`;
+`scope` is exactly `{paths, refs}` with unique non-empty strings in canonical UTF-8 byte order and no wildcard. External calls
+use `kind: service` and `transport: remote`; executions use `kind: execution`; publication uses `kind: publication`; destructive
+operations use `kind: resource`. Publication and destructive targets require at least one path or ref. Remote targets require
+non-empty route and provider; local targets require both to be null. External-call and execution grants require
+`max_calls >= 1`; publication and destructive grants require `max_calls: 0`. `max_cost` is a non-negative integer count. Zero
+cost requires a null unit; positive cost requires the exact non-empty atomic unit, such as `USD-cent` or a provider credit.
+
+Fresh/resume semantics exist only in `create_execution`. `fresh_execution_required: true` requires
+`resume_execution_id: null`; `false` requires one exact non-empty ID and authorizes only that execution. Any allowed grant
+requires non-null canonical `controlled_input`, its matching digest, and a future RFC 3339 `expires_at`. An all-denied envelope
+requires those three fields to be null. Secrets are never valid controlled inputs or state-card values.
+
+Historical validation still parses an expired envelope and verifies its shape and digests as immutable evidence, but never
+treats it as executable authority. Current nonterminal Task Specs and Worker locks compare expiry with the current time;
+terminal and previous snapshots use structural/digest validation so retained history remains verifiable after time passes.
 
 Digests use `sha256:<64-lowercase-hex>`. Structured digest inputs use only null, booleans, integers, strings, arrays, and objects
 with string keys; floating-point values are invalid and decimals use strings or integer units. Hash UTF-8 JSON with object keys
@@ -238,6 +277,13 @@ recursively sorted, arrays kept in order, strings preserved exactly as stored, a
 byte streams, hash the exact bytes. Compute `envelope_digest` over the authorization object with `envelope_digest` itself set
 to `null`. The digest is an integrity check, not a grant of authority. Any change to the authorization envelope is an
 authority-boundary change and requires a superseding task rather than an in-place revision.
+
+Persisted schema-version-1 envelopes remain valid under their original flat contract; this is grandfather validation, not a
+reinterpretation as v2. The read-only v1 adapter first validates the complete source and never mutates it. It converts only the
+canonical all-denied v1 envelope to canonical all-denied v2 and computes a new v2 digest. It rejects multiple allowed v1
+capabilities, any allowed string target whose structured kind, transport, and scope cannot be proven, and noncanonical denied
+state. The old digest never becomes a v2 digest. Migrating an assignment is an authority-boundary change: Master publishes a
+superseding Task Spec and recomputes the Task Spec, Plan authorization, acceptance, and evidence digests before dispatch.
 
 Compute `task_spec_digest` with the same structured-data rule over the complete persisted task specification, with
 `task_spec_digest` itself set to `null`. Messages may render that specification as prose, but they must carry its digest and may
@@ -279,23 +325,46 @@ dependencies:
   parallel_with: [<task-id>]
   blocked_by: [<task-id>]
 authorization:
-  schema_version: 1
-  real_external_call: false
-  create_execution: false
-  publish: false
-  destructive_operation: false
-  target: null
+  schema_version: 2
+  capabilities:
+    external_call:
+      allowed: false
+      target: null
+      route: null
+      provider: null
+      max_calls: 0
+      max_cost: 0
+      cost_unit: null
+    create_execution:
+      allowed: false
+      target: null
+      route: null
+      provider: null
+      max_calls: 0
+      max_cost: 0
+      cost_unit: null
+      fresh_execution_required: true
+      resume_execution_id: null
+    publish:
+      allowed: false
+      target: null
+      route: null
+      provider: null
+      max_calls: 0
+      max_cost: 0
+      cost_unit: null
+    destructive_operation:
+      allowed: false
+      target: null
+      route: null
+      provider: null
+      max_calls: 0
+      max_cost: 0
+      cost_unit: null
   controlled_input: null
   controlled_input_digest: null
-  route: null
-  provider: null
-  max_calls: 0
-  max_cost: 0
-  cost_unit: null
-  fresh_execution_required: true
-  resume_execution_id: null
   expires_at: null
-  envelope_digest: null
+  envelope_digest: <computed-sha256-digest>
 acceptance: [<targeted-test>, <layer-audit>, <base-relative-audit>, <diff-check>]
 commit_message: <message>
 stop_conditions: [<baseline-mismatch>, <overlapping-dirty-files>, <unexpected-dependency>, <wrong-assignment>,
@@ -328,23 +397,46 @@ frozen_baseline_sha: <full-sha-or-null>
 allowed_paths: [<path>]
 forbidden_paths: [<path>]
 authorization:
-  schema_version: 1
-  real_external_call: false
-  create_execution: false
-  publish: false
-  destructive_operation: false
-  target: null
+  schema_version: 2
+  capabilities:
+    external_call:
+      allowed: false
+      target: null
+      route: null
+      provider: null
+      max_calls: 0
+      max_cost: 0
+      cost_unit: null
+    create_execution:
+      allowed: false
+      target: null
+      route: null
+      provider: null
+      max_calls: 0
+      max_cost: 0
+      cost_unit: null
+      fresh_execution_required: true
+      resume_execution_id: null
+    publish:
+      allowed: false
+      target: null
+      route: null
+      provider: null
+      max_calls: 0
+      max_cost: 0
+      cost_unit: null
+    destructive_operation:
+      allowed: false
+      target: null
+      route: null
+      provider: null
+      max_calls: 0
+      max_cost: 0
+      cost_unit: null
   controlled_input: null
   controlled_input_digest: null
-  route: null
-  provider: null
-  max_calls: 0
-  max_cost: 0
-  cost_unit: null
-  fresh_execution_required: true
-  resume_execution_id: null
   expires_at: null
-  envelope_digest: null
+  envelope_digest: <computed-sha256-digest>
 acceptance_commands: [<command>]
 blocker_kind: DEPENDENCY | ASSIGNMENT | BASELINE | OWNERSHIP | ENVIRONMENT | AUTHORITY | WORKTREE | null
 blocked_since: <timestamp-or-null>
