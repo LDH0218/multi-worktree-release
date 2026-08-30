@@ -886,9 +886,16 @@ def validate_plan_master_consistency(plan: dict[str, Any], master: dict[str, Any
         handoff_revision = handoff["task_spec_revision"]
         current_revision = entry["task_spec_revision"]
         if handoff_revision < current_revision:
+            revision_lineage = (
+                entry["revision_decision"] == "REVISE"
+                or (
+                    entry["revision_decision"] == "GRANDFATHER"
+                    and entry["task_spec_plan_revision"] < plan["plan_revision"]
+                )
+            )
             preserved_rework = (
                 handoff["state"] == "REWORK_REQUESTED"
-                and entry["revision_decision"] == "REVISE"
+                and revision_lineage
                 and handoff["task_spec_digest"] != entry["task_spec_digest"]
                 and handoff["plan_revision"] < entry["task_spec_plan_revision"]
                 and handoff["plan_revision"] <= plan["plan_revision"]
@@ -1466,6 +1473,44 @@ class HistoricalContractScenarios(unittest.TestCase):
         master["worker_handoffs"] = [make_prior_rework_handoff(spec)]
         validate_plan_master_consistency(plan, master, Path("/state/dispatch-plan.json"), {"A": spec})
 
+    def test_preserved_prior_rework_handoff_matches_later_grandfather_entry(self) -> None:
+        spec = make_revised_task_spec()
+        plan = make_plan_for_spec(spec, "PUBLISHED", plan_revision=3, revision_decision="GRANDFATHER")
+        master = make_active_master_card(plan)
+        master["worker_handoffs"] = [make_prior_rework_handoff(spec)]
+        validate_plan_master_consistency(plan, master, Path("/state/dispatch-plan.json"), {"A": spec})
+
+    def test_incompatible_grandfather_rework_history_remains_rejected(self) -> None:
+        spec = make_revised_task_spec()
+        plan = make_plan_for_spec(spec, "PUBLISHED", plan_revision=3, revision_decision="GRANDFATHER")
+        mutations = {
+            "nonterminal": {"state": "RECEIVED"},
+            "integrated": {"state": "INTEGRATED", "integrated_as_sha": "c" * 40},
+            "equal-revision": {"task_spec_revision": 2},
+            "future-revision": {"task_spec_revision": 3},
+            "same-digest": {"task_spec_digest": spec["task_spec_digest"]},
+            "changed-authority": {"authorization_envelope_digest": "sha256:" + "f" * 64},
+            "changed-source": {"source_thread_id": "other-master"},
+            "changed-role": {"role": "other-role"},
+            "changed-baseline": {"frozen_baseline_sha": "c" * 40},
+            "lost-revise-fence": {"plan_revision": spec["plan_revision"]},
+        }
+        for label, changes in mutations.items():
+            with self.subTest(label=label):
+                handoff = make_prior_rework_handoff(spec)
+                handoff.update(changes)
+                master = make_active_master_card(plan)
+                master["worker_handoffs"] = [handoff]
+                self.assert_historical("H27", lambda: validate_plan_master_consistency(
+                    plan, master, Path("/state/dispatch-plan.json"), {"A": spec}))
+
+        invalid_plan = copy.deepcopy(plan)
+        invalid_plan["tasks"][0]["task_spec_plan_revision"] = invalid_plan["plan_revision"]
+        master = make_active_master_card(invalid_plan)
+        master["worker_handoffs"] = [make_prior_rework_handoff(spec)]
+        self.assert_historical("H27", lambda: validate_plan_master_consistency(
+            invalid_plan, master, Path("/state/dispatch-plan.json"), {"A": spec}))
+
     def test_incompatible_prior_revision_handoffs_remain_rejected(self) -> None:
         spec = make_revised_task_spec()
         plan = make_plan_for_spec(spec, "PUBLISHED", plan_revision=2, revision_decision="REVISE")
@@ -1551,6 +1596,33 @@ class HistoricalContractScenarios(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("historical master-card: PASS transition=NOOP", result.stdout)
             self.assertIn("historical cross-record current plan-master: PASS", result.stdout)
+
+    def test_public_cli_current_only_grandfather_history_regression(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            spec = make_revised_task_spec(root / "task-r2.json")
+            write_json_fixture(Path(spec["task_spec_path"]), spec)
+            plan = make_plan_for_spec(spec, "PUBLISHED", plan_revision=3, revision_decision="GRANDFATHER")
+            plan_path = root / "dispatch-plan.json"
+            write_json_fixture(plan_path, plan)
+            master = make_active_master_card(plan, str(plan_path))
+            master["worker_handoffs"] = [make_prior_rework_handoff(spec)]
+            master_path = root / "master-card.json"
+            write_json_fixture(master_path, master)
+
+            result = run_public_cli("--plan", str(plan_path), "--master-card-json", str(master_path))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "contract validation: PASS\n")
+
+            mismatched_master = copy.deepcopy(master)
+            mismatched_master["dispatch_plan_digest"] = "sha256:" + "f" * 64
+            mismatched_master_path = root / "mismatched-master-card.json"
+            write_json_fixture(mismatched_master_path, mismatched_master)
+            negative = run_public_cli(
+                "--plan", str(plan_path), "--master-card-json", str(mismatched_master_path),
+            )
+            self.assertEqual(negative.returncode, 1)
+            self.assertIn("contract validation failed: [H27] Plan/Master release lock mismatch", negative.stderr)
 
 
 def make_dispatch_task(task_id: str, blocked_by: list[str] | None = None) -> dict[str, Any]:
@@ -1941,8 +2013,8 @@ def main() -> int:
         if is_historical:
             previous_cross = validate_cross_record_set(previous_plan, previous_worker, previous_master,
                                                         args.previous_plan, previous_specs)
-            current_cross = validate_cross_record_set(current_plan, current_worker, current_master,
-                                                       args.plan, current_specs)
+        current_cross = validate_cross_record_set(current_plan, current_worker, current_master,
+                                                   args.plan, current_specs)
     except (ContractError, KeyError, TypeError, OSError, json.JSONDecodeError) as error:
         prefix = "historical validation: FAIL" if is_historical else "contract validation failed:"
         print(f"{prefix} {error}", file=sys.stderr)

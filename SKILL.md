@@ -120,11 +120,12 @@ Use previous/current validation when retained snapshots must prove a state chang
 input is a complete JSON Worker Card, never an implicit parse of `WORKTREE_TASK.md`. Each supplied snapshot is validated
 independently before its transition, and historical Plan validation requires the exact Task Specs referenced by that Plan.
 
-Run cross-record checks separately for the previous set and current set. A relationship missing either record is `NOT_RUN`,
+Run cross-record checks separately for the previous set and current set. Current Plan/Worker/Master consistency runs whenever
+at least two current records are supplied, even without a previous option. A relationship missing either record is `NOT_RUN`,
 not `PASS`; complete history requires all three pairs. Reports distinguish `PASS`, `FAIL`, and `NOT_RUN` and include canonical
-snapshot digests. Omitting every previous option preserves current-only CLI behavior, while `--skip-self-test` never skips a
-requested historical check. See [references/methodology.md](references/methodology.md) for monotonic revisions, terminal
-states, immutable identity/evidence, and diagnostic rules.
+snapshot digests. Omitting every previous option preserves single-record output behavior, while `--skip-self-test` never skips
+requested snapshot, transition, or cross-record checks. See [references/methodology.md](references/methodology.md) for
+monotonic revisions, terminal states, immutable identity/evidence, and diagnostic rules.
 
 ## Exceptions and recovery
 
