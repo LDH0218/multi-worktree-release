@@ -17,8 +17,17 @@
 
 - v1 仍是正式协议和唯一规范行为。
 - repository adoption 存储原型已经完成，但尚未正式启用。
-- FAST request / receipt 身份绑定原型已经完成，但尚未接入公开路由。
+- 轻量 FAST 路由已经在 Skill 中生效；FAST request / receipt 身份绑定仍是实验原型，不参与当前路由。
 - 完整 v2 迁移保持冻结；cycle fence、v2 CLI、Schema 迁移和正式 adoption 不进入当前范围。
+
+## 当前进度
+
+- Phase 0～2：已完成。
+- Phase 3：进行中，真实 Pilot `1/5`。
+- Pilot 1：同步本文件中过期的阶段与 FAST 基线说明。
+  - 范围：只修改当前工作目录中的 `ROADMAP.md`。
+  - 验收：本地差异和工作树检查。
+  - 治理成本：没有 Plan、Task Spec、Card、额外任务或 worktree；没有升级，也没有使用外部写权限。
 
 ## 路线原则
 
