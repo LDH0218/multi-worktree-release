@@ -27,6 +27,7 @@
 - Phase 3 共完成 5 个真实低风险维护任务：正确分类 `5/5`，额外治理步骤 `0`，中途升级 `0`，测试、授权或用户材料遗漏 `0`。
 - 试点提交：`d628c83`、`4959390`、`9853834`、`c76a8dd`、`9c644c3`。正常 push 只复用了用户明确授予的持续授权。
 - 现有 ISOLATED / STRICT 流程继续处理复杂和高风险任务；完整 v2 停车区继续冻结。
+- 2026-08-31 已完成持续测试基线；下一阶段只等待真实 FAST/STRICT 任务和旧 Master 发布批次决策，不制造测试任务。
 
 ## 路线原则
 
@@ -158,13 +159,67 @@
 
 只有真实使用证明现有 v1 + FAST 无法解决问题，并且用户明确批准后，才从停车区取回对应工作。不得仅因旧设计列出了后续步骤而继续实现。
 
-## 目标模式执行边界
+## 持续测试路线：目标模式任务
 
-后续使用目标模式时，建议目标为：
+FAST 已正式采用，后续目标模式不再重新实现 Phase 0～4，而是从以下持续测试基线继续。测试复用当前 `MWR｜Master-1.0`、现有 Worker 对话和五个既有 worktree；除非用户明确要求新增长期责任角色，不创建新对话或 worktree。
 
-> 在不启动正式 v2 迁移的前提下，交付并试点一个轻量 FAST MVP，使低风险单任务无需 Dispatch Plan、Task Spec、Card 或额外 worktree，并在范围、风险或权限变化时安全升级到现有严格流程。
+### 已验证基线
 
-目标模式按 Phase 0 → Phase 4 推进。每个 Phase 都是一个检查点；未达到当前阶段完成标准时不得进入下一阶段。完整 v2 停车区不属于该目标，也不能因目标持续运行而自动扩大范围。
+- [x] **T0：状态基线**：Master 与远端 SHA 一致；五个 Worker 工作树 tracked clean，五张 Worker Card 均为 `IDLE`；当前 Plan/Task Spec/Master Card 契约校验通过。
+- [x] **T1：路由与权限**：独立 Worker 完成 7/7 路由场景；危险任务不会留在 FAST，FAST、模型 profile 和消息运输均不授予 external call、create execution、publish 或 destructive 权限。
+- [x] **T2：契约与实验隔离回归**：主契约测试 88/88，通过 34 项 Gate 聚焦复跑；v2 adoption 11/11、FAST binding 15/15，且两个原型未进入正式路由。
+- [x] **T3：历史恢复证据**：已有真实 baseline mismatch 在 Worker `ACTIVE` 前停止；状态历史 1.0→1.1 轮换、返工 successor commit、并行 wave、候选 HEAD 失效和重新验收均有持久记录与测试证据。
+
+基线保留两个兼容事实，不把它们误报为失败：Dispatch 图 Worker 的空闲 Card 仍是合法 v1 flat default-deny；旧 Master Card 仍为 `ACTIVE`，其旧 HEAD 候选为 `STALE`，表示该严格发布批次尚未正式关闭。
+
+### Test Phase A：下一次真实 FAST 现场验证
+
+- [ ] 选择下一个真实、低风险、单任务改动；不得为了完成测试制造文案或占位修改。
+- [ ] 在当前 Master 对话和工作目录完成，不创建 Dispatch Plan、Task Spec、Card、新对话或额外 worktree。
+- [ ] 记录分类依据、实际修改时间、验证命令、一次局部修正次数、外部授权使用和用户材料保护结果。
+- [ ] 创建一个范围清晰的提交；若仍有用户授予的正常 push 持续授权，验证后自动推送 `origin/main`。
+
+通过标准：没有危险范围留在 FAST；额外治理记录为 0；验证、授权和用户材料没有遗漏；范围扩大或第二次验收失败时在外部动作前升级。
+
+### Test Phase B：下一次真实 STRICT 现场验证
+
+- [ ] 只在出现真实治理、Schema、授权、状态机、持久化、发布语义或多责任任务时启动，不制造契约变更。
+- [ ] 由 Master 在现有空闲 Worker 中选择长期责任最匹配者，冻结完整 SHA，并持久化 Plan、Task Spec 和默认拒绝授权。
+- [ ] Master 使用 `gpt-5.6-sol / high / default`；所有 Worker 使用 `gpt-5.6-luna / max / priority`。
+- [ ] Worker 完成 preflight、实现、验收、原子提交和结构化 handoff；不得自集成、同步、push 或发布。
+- [ ] Master 独立审查、集成、重算证据并关闭 Worker Card；生产发布仍需单独明确授权。
+
+通过标准：Plan/Task Spec/Card/digest 完全一致；错误 baseline 在 `ACTIVE` 前停止；handoff 提交保持不可变；返工使用 successor commit；完成后 Worker 返回 `IDLE`。
+
+### Test Phase C：并行、恢复与故障路径
+
+- [ ] 仅当同时存在两个真实且路径、语义所有权和依赖互不重叠的任务时验证并行 wave；否则使用现有历史证据，不创建假并行任务。
+- [ ] 故障注入只使用临时 fixture、现有负向矩阵或只读历史，不改坏 live `.codex` 状态。
+- [ ] 自然发生范围扩大、unexpected dependency、baseline mismatch 或 rework 时，记录停止点、保留材料、修订或 supersede 决策及最终锁状态。
+- [ ] 集成树 HEAD 变化后验证旧候选证据为 `STALE`，重新运行受影响 Gate；禁止复用旧 HEAD 的通过结果。
+
+通过标准：独立任务不会被错误阻塞；受影响 Worker 在风险动作前停止；未授权动作保持 0；恢复完成后所有工作树 tracked clean。
+
+### Test Phase D：旧 Master 批次决策
+
+- [ ] 只读复核 `mwr-hardening-2026-08-30`：Plan 已无非终态任务，但 Master Card 仍为 `ACTIVE`，候选为旧 HEAD 上的 `STALE`。
+- [ ] 由用户决定该批次是继续认证、取消，还是被新的严格发布批次 supersede。目标模式不得自行把 `ACTIVE` 改成 `IDLE`。
+- [ ] 获得决定后，按严格状态转换保存证据并验证 Plan/Master/Worker 一致性；不得删除历史 Task Spec、Card 或候选证据。
+
+### Test Phase E：测试结论
+
+- [ ] 汇总 FAST 分类准确率、额外治理步骤、升级次数、baseline mismatch、handoff/rework、Gate 失效和未授权动作。
+- [ ] 只有 Test Phase A、B 完成且 Phase D 有明确决定后，才能结束持续测试目标。
+- [ ] 若没有严重失败，保持当前 FAST + v1 STRICT，不启动完整 v2；若失败，只修复被证据证明的最窄问题。
+- [ ] 测试报告只更新本路线图或一个明确指定的报告文件；验证后提交，并按已有正常 push 授权自动推送。
+
+### 目标模式入口
+
+建议目标为：
+
+> 在不启动正式 v2、不制造无意义任务、不破坏 live `.codex` 状态的前提下，按 ROADMAP.md 的 Test Phase A→E 持续验证现有 FAST + v1 STRICT。复用现有 MWR Master/Worker 对话和 worktree；已完成的 T0～T3 只在当前状态变化时复验。等待并记录下一次真实 FAST 和真实 STRICT 任务，完成旧 Master 批次的用户决策，最终提交可核验测试结论。普通验证后提交可使用已授予的 `origin/main` 正常 push 权限，但 force-push、Tag、GitHub Release、生产发布、破坏性操作和其他外部系统写入仍需单独授权。
+
+若当前没有符合 Phase A 或 B 的真实任务，目标模式必须停止本轮并报告“等待真实任务”，不得创建占位修改、假 Worker 任务或额外基础设施来推动计数。
 
 ## 停止条件
 
