@@ -23,11 +23,15 @@
 ## 当前进度
 
 - Phase 0～2：已完成。
-- Phase 3：进行中，真实 Pilot `1/5`。
+- Phase 3：进行中，真实 Pilot `2/5`。
 - Pilot 1：同步本文件中过期的阶段与 FAST 基线说明。
   - 范围：只修改当前工作目录中的 `ROADMAP.md`。
   - 验收：本地差异和工作树检查。
   - 治理成本：没有 Plan、Task Spec、Card、额外任务或 worktree；没有升级，也没有使用外部写权限。
+- Pilot 2：为 README 增加本路线图入口，并同步 Pilot 进度。
+  - 范围：只修改当前工作目录中的 `README.md` 和 `ROADMAP.md`。
+  - 验收：链接目标、Markdown 差异和工作树检查。
+  - 治理成本：没有 Plan、Task Spec、Card、额外任务或 worktree；没有升级。完成后使用用户已明确授予的正常 push 权限。
 
 ## 路线原则
 
