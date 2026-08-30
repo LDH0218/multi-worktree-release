@@ -36,6 +36,32 @@
         {"type": "object", "additionalProperties": {"$ref": "#/$defs/canonical_value"}}
       ]
     },
+    "repository_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\\\)(?!\\.{1,2}(?:/|$))(?!.*\\/\\.{1,2}(?:\\/|$))(?!.*//)[^/\\\\]+(?:/[^/\\\\]+)*/?$"
+    },
+    "task_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "revision"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "revision": {"type": "string", "minLength": 1}
+      }
+    },
+    "task_derived_outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recompute_on_master"],
+      "properties": {
+        "recompute_on_master": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        }
+      }
+    },
     "model_profile": {
       "type": "object",
       "additionalProperties": false,
@@ -345,32 +371,55 @@
         "task_id": {"type": "string", "minLength": 1},
         "task_spec_revision": {"type": "integer", "minimum": 1},
         "task_spec_digest": {"$ref": "#/$defs/required_digest"},
-        "task_spec_path": {"type": "string", "minLength": 1},
+        "task_spec_path": {"type": "string", "minLength": 1, "pattern": "^/"},
         "plan_revision": {"type": "integer", "minimum": 1},
         "dispatch_wave": {"type": "integer", "minimum": 1},
         "source_thread_id": {"type": "string", "minLength": 1},
         "issued_at": {"type": "string", "format": "date-time"},
-        "supersedes_task_id": {"type": ["string", "null"]},
+        "supersedes_task_id": {"type": ["string", "null"], "minLength": 1},
         "generation": {"type": "string", "minLength": 1},
         "owner_role": {"type": "string", "minLength": 1},
-        "worktree": {"type": "string", "minLength": 1},
+        "worktree": {"type": "string", "minLength": 1, "pattern": "^/"},
         "branch": {"type": "string", "minLength": 1},
         "expected_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
         "task_class": {"type": "string", "minLength": 1},
         "objective": {"type": "string", "minLength": 1},
-        "current_state": {},
-        "allowed_paths": {"type": "array", "items": {"type": "string"}},
-        "forbidden_paths": {"type": "array", "items": {"type": "string"}},
-        "inputs": {"type": "array", "items": {"type": "object"}},
-        "outputs": {"type": "array"},
-        "derived_outputs": {"type": "object"},
+        "current_state": {"$ref": "#/$defs/canonical_value"},
+        "allowed_paths": {
+          "type": "array", "items": {"$ref": "#/$defs/repository_path"}, "uniqueItems": true
+        },
+        "forbidden_paths": {
+          "type": "array", "items": {"$ref": "#/$defs/repository_path"}, "uniqueItems": true
+        },
+        "inputs": {"type": "array", "items": {"$ref": "#/$defs/task_input"}},
+        "outputs": {
+          "type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true
+        },
+        "derived_outputs": {"$ref": "#/$defs/task_derived_outputs"},
         "dependencies": {"$ref": "#/$defs/task_dependencies"},
         "model_profile": {"$ref": "#/$defs/model_profile"},
         "authorization": {"$ref": "#/$defs/authorization"},
-        "acceptance": {"type": "array"},
-        "commit_message": {"type": "string", "minLength": 1},
-        "stop_conditions": {"type": "array"}
-      }
+        "acceptance": {
+          "type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true
+        },
+        "commit_message": {"type": ["string", "null"], "minLength": 1},
+        "stop_conditions": {
+          "type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"commit_message": {"type": "null"}},
+            "required": ["commit_message"]
+          },
+          "then": {
+            "properties": {
+              "task_class": {"type": "string", "pattern": "^independent-read-only(?:-|$)"}
+            }
+          }
+        }
+      ]
     },
     "task_dependencies": {
       "type": "object",
@@ -382,8 +431,12 @@
           "items": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
           "uniqueItems": true
         },
-        "parallel_with": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "blocked_by": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+        "parallel_with": {
+          "type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true
+        },
+        "blocked_by": {
+          "type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true
+        }
       }
     },
     "dispatch_task": {

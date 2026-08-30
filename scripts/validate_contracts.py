@@ -83,6 +83,7 @@ MODEL_OWNER_DEFAULTS = {
 MODEL_REASON_TO_OWNER = {
     profile["selection_reason"]: owner for owner, profile in MODEL_OWNER_DEFAULTS.items()
 }
+READ_ONLY_TASK_CLASS_RE = re.compile(r"^independent-read-only(?:-|$)")
 
 
 class ContractError(ValueError):
@@ -228,6 +229,38 @@ def validate_string_list(value: Any, label: str, *, canonical: bool = False) -> 
         raise ContractError(f"{label} must not contain duplicates")
     if canonical and value != sorted(value, key=lambda item: item.encode("utf-8")):
         raise ContractError(f"{label} must use canonical UTF-8 order")
+
+
+def validate_nonempty_string(value: Any, label: str) -> None:
+    if not isinstance(value, str) or not value:
+        raise ContractError(f"{label} must be a non-empty string")
+
+
+def canonical_repository_path(value: Any, label: str) -> str:
+    """Validate and normalize one repository-relative POSIX ownership path."""
+    validate_nonempty_string(value, label)
+    path = cast(str, value)
+    if path.startswith("/"):
+        raise ContractError(f"{label} must be repository-relative, not absolute")
+    if "\\" in path:
+        raise ContractError(f"{label} must use POSIX '/' separators")
+    normalized = path[:-1] if path.endswith("/") else path
+    segments = normalized.split("/")
+    if any(segment == "" for segment in segments):
+        raise ContractError(f"{label} must not contain empty path segments")
+    if any(segment in {".", ".."} for segment in segments):
+        raise ContractError(f"{label} must not contain dot or dot-dot path segments")
+    return "/".join(segments)
+
+
+def validate_repository_path_list(value: Any, label: str) -> list[str]:
+    if not isinstance(value, list):
+        raise ContractError(f"{label} must be an array")
+    normalized = [canonical_repository_path(item, f"{label}[{index}]")
+                  for index, item in enumerate(value)]
+    if len(set(normalized)) != len(normalized):
+        raise ContractError(f"{label} contains duplicate canonical repository paths")
+    return normalized
 
 
 def validate_model_profile(value: Any, schema: dict[str, Any], label: str = "model_profile") -> None:
@@ -528,12 +561,42 @@ def validate_execution_request(value: dict[str, Any], schema: dict[str, Any],
 
 def validate_task_spec(value: dict[str, Any], schema: dict[str, Any],
                        enforce_authorization_expiry: bool = True) -> None:
+    if not isinstance(value, dict):
+        raise ContractError("task spec must be an object")
     require_schema_fields(value, schema, "task_spec", "task spec")
-    if value["schema_version"] != 1:
+    if (not isinstance(value["schema_version"], int) or isinstance(value["schema_version"], bool)
+            or value["schema_version"] != 1):
         raise ContractError("task_spec.schema_version must be 1")
     validate_positive_integer(value["task_spec_revision"], "task_spec.task_spec_revision")
     validate_positive_integer(value["plan_revision"], "task_spec.plan_revision")
     validate_positive_integer(value["dispatch_wave"], "task_spec.dispatch_wave")
+    for field in (
+        "task_id", "task_spec_path", "source_thread_id", "generation", "owner_role", "worktree",
+        "branch", "task_class", "objective",
+    ):
+        validate_nonempty_string(value[field], f"task_spec.{field}")
+    validate_nullable_nonempty_string(value["supersedes_task_id"], "task_spec.supersedes_task_id")
+    ensure_canonical_value(value["current_state"], "task_spec.current_state")
+    validate_repository_path_list(value["allowed_paths"], "task_spec.allowed_paths")
+    validate_repository_path_list(value["forbidden_paths"], "task_spec.forbidden_paths")
+    inputs = value["inputs"]
+    if not isinstance(inputs, list):
+        raise ContractError("task_spec.inputs must be an array")
+    for index, item in enumerate(inputs):
+        label = f"task_spec.inputs[{index}]"
+        if not isinstance(item, dict):
+            raise ContractError(f"{label} must be an object")
+        require_exact_fields(item, schema_required(schema, "task_input"), label)
+        validate_nonempty_string(item["path"], f"{label}.path")
+        validate_nonempty_string(item["revision"], f"{label}.revision")
+    validate_string_list(value["outputs"], "task_spec.outputs")
+    derived = value["derived_outputs"]
+    if not isinstance(derived, dict):
+        raise ContractError("task_spec.derived_outputs must be an object")
+    require_exact_fields(derived, schema_required(schema, "task_derived_outputs"),
+                         "task_spec.derived_outputs")
+    validate_string_list(derived["recompute_on_master"],
+                         "task_spec.derived_outputs.recompute_on_master")
     validate_authorization(value["authorization"], schema, enforce_expiry=enforce_authorization_expiry)
     dependencies = value["dependencies"]
     if not isinstance(dependencies, dict):
@@ -546,6 +609,16 @@ def validate_task_spec(value: dict[str, Any], schema: dict[str, Any],
         validate_sha(sha, "task_spec.dependencies.upstream_commits entry")
     if "model_profile" in value:
         validate_model_profile(value["model_profile"], schema, "task_spec.model_profile")
+    validate_string_list(value["acceptance"], "task_spec.acceptance")
+    commit_message = value["commit_message"]
+    if commit_message is None:
+        if not READ_ONLY_TASK_CLASS_RE.match(value["task_class"]):
+            raise ContractError(
+                "task_spec.commit_message may be null only for an independent-read-only task"
+            )
+    else:
+        validate_nonempty_string(commit_message, "task_spec.commit_message")
+    validate_string_list(value["stop_conditions"], "task_spec.stop_conditions")
     validate_rfc3339(value["issued_at"], "task_spec.issued_at")
     for field in ("task_spec_path", "worktree"):
         if not Path(value[field]).is_absolute():
@@ -690,10 +763,11 @@ def graph_enforcement_applies(plan: dict[str, Any], entry: dict[str, Any],
 
 def owned_paths(spec: dict[str, Any]) -> list[str]:
     paths: list[str] = []
-    for item in spec["allowed_paths"]:
-        if not isinstance(item, str) or not item or item == "WORKTREE_TASK.md":
+    for index, item in enumerate(spec["allowed_paths"]):
+        normalized = canonical_repository_path(item, f"task_spec.allowed_paths[{index}]")
+        if normalized == "WORKTREE_TASK.md":
             continue
-        paths.append(item.rstrip("/"))
+        paths.append(normalized)
     return paths
 
 
@@ -706,6 +780,13 @@ def validate_dispatch_graph_and_model_routing(plan: dict[str, Any], specs: dict[
     entries = {entry["task_id"]: entry for entry in plan["tasks"]}
     known = set(entries)
     policy = plan.get("model_policy")
+
+    for task_id, entry in entries.items():
+        if specs[task_id]["commit_message"] is None and entry["dispatch_status"] == "INTEGRATED":
+            raise ContractError(
+                f"independent read-only task {task_id} requires a new revision with a non-empty "
+                "attestation commit message before successful integration"
+            )
 
     if policy is None:
         profiled_specs = sorted(task_id for task_id, spec in specs.items() if "model_profile" in spec)
@@ -1360,7 +1441,13 @@ def validate_candidate_check(check: Any, gate: dict[str, Any], registry_check: d
         validate_digest(check[field], f"{label}.{field}")
     if check["input_digest"] != expected_input_digest:
         raise ContractError(f"{label}.input_digest does not match its canonical input envelope")
-    validate_bounded_text(check["execution_ref"], f"{label}.execution_ref", maximum=256)
+    validate_bounded_text(check["execution_ref"], f"{label}.execution_ref", maximum=256, allow_null=True)
+    runner_policy = registry_check["runner_policy"]
+    if isinstance(runner_policy, dict) and "execution_ref_required" in runner_policy:
+        if not isinstance(runner_policy["execution_ref_required"], bool):
+            raise ContractError(f"{label} registered execution_ref_required policy must be boolean")
+        if runner_policy["execution_ref_required"] and check["execution_ref"] is None:
+            raise ContractError(f"{label}.execution_ref is required by the registered runner policy")
     if not isinstance(check["exit_code"], int) or isinstance(check["exit_code"], bool):
         raise ContractError(f"{label}.exit_code must be an integer")
     validate_rfc3339(check["observed_at"], f"{label}.observed_at")
@@ -1561,6 +1648,10 @@ def validate_candidate_v2(value: dict[str, Any], schema: dict[str, Any]) -> None
             if (gate["input_digest"] is not None or gate["evidence_digest"] is not None or gate["checks"]
                     or gate["invalidation_reason"] is None):
                 raise ContractError(f"{label} stale/none row must clear evidence and record a reason")
+            allowed_reasons = set(schema["$defs"]["candidate_gate_v2"]["properties"]
+                                  ["invalidation_reason"]["enum"])
+            if gate["invalidation_reason"] not in allowed_reasons:
+                raise ContractError(f"{label}.invalidation_reason is unknown")
         else:
             raise ContractError(f"{label}.status is unknown")
     expected_summary = candidate_gate_input_summary(value, gate_inputs)
@@ -1619,6 +1710,9 @@ def evaluate_candidate_invalidation(previous: dict[str, Any], current: dict[str,
         if is_empty_legacy_v1_none(previous) and is_empty_legacy_v1_none(current):
             return "NONE", []
         return "ALL", current_gate_ids
+    if (previous["status"] == "NONE" and current["status"] == "NONE"
+            and previous["legacy"] is None and current["legacy"] is None):
+        return "NONE", []
     if previous.get("legacy") is not None or current.get("legacy") is not None:
         if previous == current:
             return "NONE", []
@@ -2338,6 +2432,15 @@ def validate_documented_contracts(repo_root: Path, schema: dict[str, Any]) -> No
         missing_model_terms = [term for term in model_terms if term not in contents]
         if missing_model_terms:
             raise ContractError(f"model-routing contract missing from {relative}: {missing_model_terms}")
+        audit_hardening_terms = (
+            "repository-relative POSIX", "independent-read-only", "metadata-only empty commit",
+            "tree-equivalence", "execution_ref_required", "empty v2",
+        )
+        missing_hardening_terms = [term for term in audit_hardening_terms if term not in contents]
+        if missing_hardening_terms:
+            raise ContractError(
+                f"final-audit hardening contract missing from {relative}: {missing_hardening_terms}"
+            )
 
 
 def default_authorization() -> dict[str, Any]:
@@ -2722,6 +2825,99 @@ class ContractScenarios(unittest.TestCase):
         ):
             self.assertFalse(self.schema["$defs"][definition]["additionalProperties"])
 
+    def test_task_spec_schema_python_field_and_read_only_parity(self) -> None:
+        properties = self.schema["$defs"]["task_spec"]["properties"]
+        self.assertEqual(properties["commit_message"]["type"], ["string", "null"])
+        self.assertEqual(properties["allowed_paths"]["items"]["$ref"], "#/$defs/repository_path")
+        self.assertEqual(properties["forbidden_paths"]["items"]["$ref"], "#/$defs/repository_path")
+        self.assertFalse(self.schema["$defs"]["task_input"]["additionalProperties"])
+        self.assertFalse(self.schema["$defs"]["task_derived_outputs"]["additionalProperties"])
+
+        read_only = make_read_only_task_spec()
+        validate_task_spec(read_only, self.schema)
+
+        for alias in (
+            "./src/x", "src/a/../x", "/src/x", "src\\x", "src//x", "src/./x", "src/../x",
+        ):
+            candidate = make_task_spec()
+            candidate["allowed_paths"] = [alias]
+            candidate["task_spec_digest"] = object_digest(candidate, "task_spec_digest")
+            with self.subTest(direct_path_alias=alias), self.assertRaises(ContractError):
+                validate_task_spec(candidate, self.schema)
+
+        trailing_path = make_task_spec()
+        trailing_path["allowed_paths"] = ["src/x/"]
+        trailing_path["task_spec_digest"] = object_digest(trailing_path, "task_spec_digest")
+        validate_task_spec(trailing_path, self.schema)
+        self.assertEqual(owned_paths(trailing_path), ["src/x"])
+
+        non_read_only = make_task_spec()
+        non_read_only["commit_message"] = None
+        non_read_only["task_spec_digest"] = object_digest(non_read_only, "task_spec_digest")
+        with self.assertRaisesRegex(ContractError, "independent-read-only"):
+            validate_task_spec(non_read_only, self.schema)
+
+        for invalid in ("", False, 0, [], {}):
+            candidate = copy.deepcopy(read_only)
+            candidate["commit_message"] = invalid
+            candidate["task_spec_digest"] = object_digest(candidate, "task_spec_digest")
+            with self.subTest(commit_message=invalid), self.assertRaises(ContractError):
+                validate_task_spec(candidate, self.schema)
+
+        mutations = {
+            "schema_version": True,
+            "task_id": 1,
+            "task_spec_revision": False,
+            "task_spec_digest": 1,
+            "task_spec_path": [],
+            "plan_revision": "1",
+            "dispatch_wave": 1.0,
+            "source_thread_id": {},
+            "issued_at": 1,
+            "supersedes_task_id": [],
+            "generation": None,
+            "owner_role": 1,
+            "worktree": {},
+            "branch": [],
+            "expected_head": 1,
+            "task_class": None,
+            "objective": [],
+            "allowed_paths": {},
+            "forbidden_paths": "src/x",
+            "inputs": {},
+            "outputs": {},
+            "derived_outputs": [],
+            "dependencies": [],
+            "model_profile": [],
+            "authorization": [],
+            "acceptance": {},
+            "stop_conditions": {},
+        }
+        for field, invalid in mutations.items():
+            candidate = copy.deepcopy(read_only)
+            candidate[field] = invalid
+            if field != "task_spec_digest":
+                try:
+                    candidate["task_spec_digest"] = object_digest(candidate, "task_spec_digest")
+                except ContractError:
+                    continue
+            with self.subTest(field=field), self.assertRaises(ContractError):
+                validate_task_spec(candidate, self.schema)
+
+        floating = copy.deepcopy(read_only)
+        floating["current_state"] = {"confidence": 1.5}
+        with self.assertRaisesRegex(ContractError, "floating-point"):
+            object_digest(floating, "task_spec_digest")
+
+        attested = copy.deepcopy(read_only)
+        attested["commit_message"] = "chore: attest independent release review"
+        attested["task_spec_digest"] = object_digest(attested, "task_spec_digest")
+        with self.assertRaisesRegex(ContractError, "higher task revision"):
+            classify_task_change(read_only, attested)
+        attested["task_spec_revision"] = 2
+        attested["task_spec_digest"] = object_digest(attested, "task_spec_digest")
+        self.assertEqual(classify_task_change(read_only, attested), "REVISE")
+
     def test_public_cli_accepts_v1_and_v2_task_specs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2984,6 +3180,68 @@ class ContractScenarios(unittest.TestCase):
             self.assertEqual(cancelled.returncode, 1)
             self.assertIn("status READY requires resolved dependencies", cancelled.stderr)
 
+    def test_public_cli_rejects_path_aliases_and_unattested_read_only_success(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, alias in enumerate((
+                "./src/x", "src/a/../x", "/src/x", "src\\x", "src//x", "src/./x", "src/../x",
+            )):
+                path = root / f"invalid-path-{index}.json"
+                spec = make_task_spec_at(path)
+                spec["allowed_paths"] = [alias]
+                spec["task_spec_digest"] = object_digest(spec, "task_spec_digest")
+                write_json_fixture(path, spec)
+                rejected = run_public_cli("--task-spec", str(path))
+                with self.subTest(alias=alias):
+                    self.assertEqual(rejected.returncode, 1, rejected.stdout)
+
+            trailing = root / "trailing-path.json"
+            trailing_spec = make_task_spec_at(trailing)
+            trailing_spec["allowed_paths"] = ["src/x/"]
+            trailing_spec["task_spec_digest"] = object_digest(trailing_spec, "task_spec_digest")
+            write_json_fixture(trailing, trailing_spec)
+            accepted = run_public_cli("--task-spec", str(trailing))
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+            overlap_root = root / "trailing-overlap"
+            plan, specs = make_graph_bundle(overlap_root, {
+                "A": {"parallel": ["B"], "allowed_paths": ["src/shared"]},
+                "B": {"parallel": ["A"], "allowed_paths": ["src/shared/"]},
+            })
+            overlap = run_public_cli("--plan", str(write_graph_bundle(overlap_root, plan, specs)))
+            self.assertEqual(overlap.returncode, 1, overlap.stdout)
+            self.assertIn("parallel semantic ownership conflict", overlap.stderr)
+
+            read_only_path = root / "mwr-final-release-audit.json"
+            read_only = make_read_only_task_spec(read_only_path)
+            write_json_fixture(read_only_path, read_only)
+            accepted_read_only = run_public_cli("--task-spec", str(read_only_path))
+            self.assertEqual(accepted_read_only.returncode, 0, accepted_read_only.stderr)
+
+            integrated_root = root / "unattested-integration"
+            plan, specs = make_graph_bundle(integrated_root, {
+                "audit": {
+                    "status": "INTEGRATED",
+                    "task_class": "independent-read-only-release-review",
+                    "commit_message": None,
+                },
+            })
+            unattested = run_public_cli("--plan", str(write_graph_bundle(integrated_root, plan, specs)))
+            self.assertEqual(unattested.returncode, 1, unattested.stdout)
+            self.assertIn("attestation commit message", unattested.stderr)
+
+            attested_root = root / "attested-integration"
+            plan, specs = make_graph_bundle(attested_root, {
+                "audit": {
+                    "status": "INTEGRATED",
+                    "task_class": "independent-read-only-release-review",
+                    "task_spec_revision": 2,
+                    "commit_message": "chore: attest independent release review",
+                },
+            })
+            attested = run_public_cli("--plan", str(write_graph_bundle(attested_root, plan, specs)))
+            self.assertEqual(attested.returncode, 0, attested.stderr)
+
     def test_model_routing_policy_fence_and_exact_profiles(self) -> None:
         self.assertEqual(MODEL_OWNER_DEFAULTS, {
             "master": {"model": "gpt-5.6-sol", "reasoning_effort": "high", "service_tier": "default",
@@ -3222,19 +3480,7 @@ class CandidateEvidenceScenarios(unittest.TestCase):
 
     def test_mixed_v1_v2_comparison_is_always_conservative(self) -> None:
         empty_v1 = {"release_head_sha": None, "gate_input_digest": None, "status": "NONE", "checks": []}
-        empty_v2 = {
-            "schema_version": 2,
-            "release_task_id": None,
-            "release_head_sha": None,
-            "plan_revision": None,
-            "plan_digest": None,
-            "gate_registry_digest": None,
-            "gate_registry": [],
-            "gate_input_digest": None,
-            "status": "NONE",
-            "legacy": None,
-            "gates": [],
-        }
+        empty_v2 = make_empty_candidate_v2()
         v2_records = (
             empty_v2,
             make_candidate_v2(stale_gates={"targeted-tests"}),
@@ -3253,6 +3499,30 @@ class CandidateEvidenceScenarios(unittest.TestCase):
                     evaluate_candidate_invalidation(empty_v1, v2_record, self.schema),
                     ("ALL", expected_gates),
                 )
+
+    def test_empty_v2_reason_enum_and_nullable_execution_reference(self) -> None:
+        empty = make_empty_candidate_v2()
+        self.assertEqual(
+            evaluate_candidate_invalidation(empty, copy.deepcopy(empty), self.schema),
+            ("NONE", []),
+        )
+
+        invalid_reason = make_candidate_v2(stale_gates={"targeted-tests"})
+        invalid_reason["gates"][1]["invalidation_reason"] = "NOT_A_REASON"
+        self.assert_rejected(invalid_reason)
+
+        nullable = make_candidate_v2()
+        nullable["gates"][0]["checks"][0]["execution_ref"] = None
+        refresh_candidate_inputs(nullable, refresh_evidence=True)
+        validate_candidate_evidence(nullable, self.schema)
+
+        required = copy.deepcopy(nullable)
+        policy = required["gate_registry"][0]["checks"][0]["runner_policy"]
+        policy["execution_ref_required"] = True
+        required["gate_registry"][0]["checks"][0]["runner_policy_digest"] = value_digest(policy)
+        refresh_candidate_inputs(required, refresh_evidence=True)
+        with self.assertRaisesRegex(ContractError, "required by the registered runner policy"):
+            validate_candidate_evidence(required, self.schema)
 
     def test_n16_explicit_optional_failure_does_not_fail_candidate(self) -> None:
         candidate = make_candidate_v2(optional_targeted=True, failed_gates={"targeted-tests"})
@@ -3310,6 +3580,30 @@ class CandidateEvidenceScenarios(unittest.TestCase):
             write_json_fixture(valid_path, make_candidate_v2())
             valid = run_public_cli("--candidate-evidence-json", str(valid_path))
             self.assertEqual(valid.returncode, 0, valid.stderr)
+
+            empty_v2_path = root / "candidate-v2-none.json"
+            write_json_fixture(empty_v2_path, make_empty_candidate_v2())
+            empty_v2_comparison = run_public_cli(
+                "--previous-candidate-evidence-json", str(empty_v2_path),
+                "--candidate-evidence-json", str(empty_v2_path),
+            )
+            self.assertEqual(empty_v2_comparison.returncode, 0, empty_v2_comparison.stderr)
+            self.assertIn("candidate invalidation: NONE gates=none", empty_v2_comparison.stdout)
+
+            invalid_reason = make_candidate_v2(stale_gates={"targeted-tests"})
+            invalid_reason["gates"][1]["invalidation_reason"] = "NOT_A_REASON"
+            invalid_reason_path = root / "candidate-invalid-reason.json"
+            write_json_fixture(invalid_reason_path, invalid_reason)
+            reason_rejected = run_public_cli("--candidate-evidence-json", str(invalid_reason_path))
+            self.assertEqual(reason_rejected.returncode, 1, reason_rejected.stdout)
+
+            nullable_execution = make_candidate_v2()
+            nullable_execution["gates"][0]["checks"][0]["execution_ref"] = None
+            refresh_candidate_inputs(nullable_execution, refresh_evidence=True)
+            nullable_path = root / "candidate-null-execution-ref.json"
+            write_json_fixture(nullable_path, nullable_execution)
+            nullable_accepted = run_public_cli("--candidate-evidence-json", str(nullable_path))
+            self.assertEqual(nullable_accepted.returncode, 0, nullable_accepted.stderr)
 
             selective_path = root / "candidate-selective.json"
             write_json_fixture(selective_path, make_candidate_v2(
@@ -4052,6 +4346,22 @@ def make_candidate(status: str, head: str, result: str) -> dict[str, Any]:
     }
 
 
+def make_empty_candidate_v2() -> dict[str, Any]:
+    return {
+        "schema_version": 2,
+        "release_task_id": None,
+        "release_head_sha": None,
+        "plan_revision": None,
+        "plan_digest": None,
+        "gate_registry_digest": None,
+        "gate_registry": [],
+        "gate_input_digest": None,
+        "status": "NONE",
+        "legacy": None,
+        "gates": [],
+    }
+
+
 def make_candidate_registry_gate(gate_id: str, check_id: str, source_ids: list[str], *,
                                  required: bool = True) -> dict[str, Any]:
     command_spec = {
@@ -4245,6 +4555,22 @@ def make_task_spec_at(path: Path) -> dict[str, Any]:
     return spec
 
 
+def make_read_only_task_spec(path: Path | None = None) -> dict[str, Any]:
+    spec = make_task_spec_at(path or Path("/state/tasks/mwr-final-release-audit.json"))
+    spec.update({
+        "task_id": "mwr-final-release-audit",
+        "task_class": "independent-read-only-release-review",
+        "objective": "independently review the integrated release without tracked changes",
+        "current_state": {"audit_result": "NOT_RUN"},
+        "allowed_paths": ["WORKTREE_TASK.md"],
+        "forbidden_paths": ["scripts/", "references/"],
+        "outputs": ["severity-ranked independent findings", "release recommendation"],
+        "commit_message": None,
+    })
+    spec["task_spec_digest"] = object_digest(spec, "task_spec_digest")
+    return spec
+
+
 def make_revised_task_spec(path: Path | None = None) -> dict[str, Any]:
     spec = make_task_spec_at(path or Path("/state/tasks/A-r2.json"))
     spec.update({
@@ -4328,7 +4654,9 @@ def make_graph_bundle(root: Path, nodes: dict[str, dict[str, Any]], *,
             "worktree": node.get("worktree", str(root / "worktrees" / task_id)),
             "branch": f"task/{task_id}",
             "expected_head": f"{index:040x}",
+            "task_spec_revision": node.get("task_spec_revision", 1),
             "objective": f"implement {task_id}",
+            "task_class": node.get("task_class", "implementation"),
             "allowed_paths": node.get("allowed_paths", [f"src/{task_id}"]),
             "forbidden_paths": [],
             "outputs": node.get("allowed_paths", [f"src/{task_id}"]),
@@ -4338,7 +4666,7 @@ def make_graph_bundle(root: Path, nodes: dict[str, dict[str, Any]], *,
                 "blocked_by": list(node.get("dependencies", [])),
             },
             "acceptance": [f"test {task_id}"],
-            "commit_message": f"feat: implement {task_id}",
+            "commit_message": node.get("commit_message", f"feat: implement {task_id}"),
         })
         if persist_model_policy:
             spec["model_profile"] = make_model_profile(node.get("model_owner", "ordinary_worker"))
@@ -4358,6 +4686,7 @@ def make_graph_bundle(root: Path, nodes: dict[str, dict[str, Any]], *,
         live = node.get("live", unresolved if status in {"GATED", "BLOCKED"} else [])
         entry = make_dispatch_task(task_id)
         entry.update({
+            "task_spec_revision": spec["task_spec_revision"],
             "task_spec_digest": spec["task_spec_digest"],
             "task_spec_path": spec["task_spec_path"],
             "owner_role": spec["owner_role"],

@@ -86,6 +86,10 @@ Task Spec `dependencies.blocked_by` is the canonical direct graph; the Plan entr
 projection. Derive waves from the static graph, require exact Plan/Task Spec equality, validate transitive reduction and
 parallel incomparability, and recompute `blocked_tasks` plus the `READY`/`PUBLISHED` `ready_wave` frontier on every write.
 
+Write `allowed_paths` and `forbidden_paths` as repository-relative POSIX paths. Reject absolute paths, backslashes, empty
+segments, `.`/`..` segments, and repository escapes. Normalize one trailing directory slash before component-aware parallel
+ownership comparison, so `src/x` and `src/x/` conflict rather than becoming aliases.
+
 `model_policy` and `model_profile` may be omitted only for legacy records. After `enforced_from_plan_revision`, every `NEW` or
 `REVISE` task must persist the same exact profile in its Task Spec and Plan entry. Older digest-preserved records below the
 fence remain untouched. The exact defaults are Master `gpt-5.6-sol`/`high`/`default`
@@ -154,7 +158,7 @@ gates:
         result: PASS | FAIL
         input_digest: <RECOMPUTED_SHA256>
         evidence_digest: <RECOMPUTED_SHA256>
-        execution_ref: <NON_SECRET_REFERENCE>
+        execution_ref: <NON_SECRET_REFERENCE_OR_NULL; NON_NULL_IF_EXECUTION_REF_REQUIRED>
         exit_code: <INTEGER>
         stdout_digest: <SHA256>
         stderr_digest: <SHA256>
@@ -171,6 +175,10 @@ status-only Plan write does not stale Gates whose selected semantic source manif
 Gate stale. Same-head selective reuse is allowed only with complete registered membership, revisions, requiredness, and source
 mapping; otherwise clear asserted Gate/check evidence and use the all-Gate `STALE` fallback. Aggregate required Gates with
 `STALE` before `FAILED`; explicitly optional Gates are reported but do not change the required-Gate result.
+
+A mapped `STALE` or `NONE` row uses only a Schema-enumerated `invalidation_reason`. A null `execution_ref` is valid only when
+the registered runner policy does not declare `execution_ref_required: true`; every other provenance field remains mandatory.
+Two canonical empty v2 `NONE` records compare as `NONE`.
 
 For a legacy v1 record, preserve the exact original object and canonical digest under `legacy` with reason
 `LEGACY_AGGREGATE_ONLY`, leave `gate_registry`, `gates`, and per-Gate digests empty, and set evidence-bearing records to
@@ -269,7 +277,7 @@ Stop conditions
   dirty files, or missing authorization: stop, preserve the current state, and report to Master.
 
 Commit and handoff
-- Commit message: <MESSAGE>
+- Commit message: <NON_EMPTY_MESSAGE; NULL_ONLY_FOR_AN_INDEPENDENT_READ_ONLY_REPORT_REVISION>
 - Commit only allowed paths.
 - Include plan revision <PLAN_REVISION> and dispatch wave <DISPATCH_WAVE> in the task report.
 - Report full baseline and result SHAs, changed paths, every check and result, unresolved cross-layer findings, and actual use of
@@ -277,6 +285,11 @@ Commit and handoff
 - Write the compact task card as ACTIVE after verification; after committing, record AWAITING_INTEGRATION and do not rewrite
   the handed-off commit.
 ```
+
+An `independent-read-only` Task Spec with `commit_message: null` may report `BLOCKED` or be `CANCELLED`; it cannot produce a
+successful integrated handoff. For a successful re-review, Master publishes a higher Task Spec revision with a non-empty
+attestation commit message and explicitly permits a metadata-only empty commit. The handoff records that Worker SHA and Master
+records an attestation commit or an existing tree-equivalence mapping. Do not apply this exception to implementation tasks.
 
 For each denied v2 grant, spell out `allowed: false`, `target/route/provider/cost_unit: null`, and zero call/cost budgets;
 the denied execution grant additionally uses `fresh_execution_required: true` and `resume_execution_id: null`. Put

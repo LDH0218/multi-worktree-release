@@ -141,6 +141,11 @@ duplicate, self, unknown, redundant-transitive, cyclic, and dependency/parallel-
 persisted task-spec path and digest, the plan digest, and the completion of each atomic replacement before sending a task
 message. Full graph rules and complexity are normative in [dispatch-graph-invariants.md](../design/dispatch-graph-invariants.md).
 
+Task Spec `allowed_paths` and `forbidden_paths` use one canonical repository-relative POSIX grammar. Reject absolute paths,
+backslashes, empty segments, `.` or `..` segments, and every repository escape. A single trailing directory slash is permitted
+but normalized away before component-aware equality and ancestor overlap comparison. Thus aliases cannot bypass parallel
+ownership, while `src/x` and `src/x/` denote the same ownership boundary.
+
 The validator applies full graph semantics to every current nonterminal task and every task covered by the model-policy fence.
 Legacy terminal entries below that fence remain immutable digest-checked evidence and may act only as trusted topological
 boundaries for newly enforced descendants. This compatibility rule prevents retroactive rewriting of completed evidence; it
@@ -424,13 +429,20 @@ authorization:
   expires_at: null
   envelope_digest: <computed-sha256-digest>
 acceptance: [<targeted-test>, <layer-audit>, <base-relative-audit>, <diff-check>]
-commit_message: <message>
+commit_message: <non-empty-message-or-null-only-for-independent-read-only-report>
 stop_conditions: [<baseline-mismatch>, <overlapping-dirty-files>, <unexpected-dependency>, <wrong-assignment>,
   <wrong-scope>, <wrong-worktree>, <ambiguity>, <missing-authorization>]
 ```
 
 The task must say both what to do and what not to do. The recipient should not need to invent scope, authority, inputs, or
 acceptance criteria.
+
+`commit_message: null` is an explicit report-only exception for a Task Spec whose `task_class` begins
+`independent-read-only`. That revision may publish and report `BLOCKED` or be `CANCELLED`, but Dispatch may not mark it
+`INTEGRATED`. A successful re-review requires a higher Task Spec revision and a persisted non-empty attestation commit message.
+Because the review has no tracked payload, that exact assignment explicitly permits a metadata-only empty commit; Master may
+record its Worker SHA against an integrated attestation commit or an existing tree-equivalence mapping. Ordinary implementation
+tasks still require a non-empty commit message and a normal atomic payload commit.
 
 ## Durable state cards
 
@@ -590,7 +602,10 @@ lowercase kebab case and are never inferred from list position, command text, ti
 every persisted `gate_definition`, `command_spec`, and `runner_policy`, then recompute each check `input_digest`, Gate
 `input_digest`, compatibility `gate_input_digest`, check `evidence_digest`, and Gate `evidence_digest` from the canonical
 envelopes defined by the schema and validator. Current `PASS` or `FAIL` evidence requires exact input binding, bounded command
-description, execution reference, exit-code predicate, output digests, artifact digests, runner digest, and observation time.
+description, exit-code predicate, output digests, artifact digests, runner digest, and observation time. `execution_ref` is
+nullable for locally attributable evidence unless the registered runner policy declares `execution_ref_required: true`; that
+policy makes the non-secret reference mandatory without weakening any other provenance field. A mapped `STALE` or `NONE` row
+must use one exact Schema-enumerated `invalidation_reason`.
 Infrastructure errors and unverifiable provenance are `STALE`, never `FAIL` or `PASS`.
 
 A changed `release_head_sha` invalidates every Gate without tree- or patch-equivalence reuse. For the same head, compare only
@@ -611,8 +626,8 @@ under `legacy`, synthesize no Gate/check identity, and produce `STALE` whenever 
 `NONE` record remains `NONE`. This read compatibility is not current release authority: a current Master Card rejects v1
 `PASSED` and `FAILED`, while a previous historical Master snapshot may retain them for exact migration audit and a current v1
 `STALE` remains readable for deliberate recovery. Comparing any evidence-bearing v1 record returns whole-candidate `ALL`,
-even when both objects are byte-identical. Return `NONE` only when both operands are empty v1 `NONE`; every mixed v1/v2
-comparison returns `ALL`. Applying migration to an already migrated
+even when both objects are byte-identical. Return `NONE` when both operands are empty v1 `NONE`, or when both are canonical
+empty v2 `NONE`; every mixed v1/v2 comparison returns `ALL`. Applying migration to an already migrated
 v2 record is idempotent. Validate standalone fixtures with `--candidate-evidence-json <PATH>`, compare old/current manifests with
 `--previous-candidate-evidence-json <OLD> --candidate-evidence-json <CURRENT>` to obtain `NONE`, `AFFECTED`, or `ALL`, and run
 the targeted matrix with `--candidate-evidence-self-test`.

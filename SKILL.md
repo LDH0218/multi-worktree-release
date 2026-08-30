@@ -101,6 +101,9 @@ executable message.
   `ready_wave` frontier on every Plan write.
 - Require `parallel_with` to be canonical, symmetric, same-wave, transitively incomparable, and free of active-worktree or
   semantic ownership overlap. Never infer parallel eligibility merely from equal waves.
+- Treat every Task Spec `allowed_paths` and `forbidden_paths` entry as a repository-relative POSIX path. Reject absolute paths,
+  backslashes, empty segments, `.`/`..` segments, and repository escapes; normalize one permitted trailing directory slash
+  before component-aware equality or ancestor overlap checks. Invalid aliases never reach parallel ownership comparison.
 - Every plan entry records `task_spec_revision` and `task_spec_digest`. An affected changed assignment increments its task
   revision; an unchanged active assignment may continue only through an explicit grandfather record in the new plan revision.
 - A grandfathered entry preserves its persisted task spec and records that spec's original `task_spec_plan_revision`; it does
@@ -159,6 +162,10 @@ monotonic revisions, terminal states, immutable identity/evidence, and diagnosti
 - A Worker changes only owned/allowed paths, runs layer tests plus affected shared-contract tests when available, reviews the
   diff, creates an atomic commit, records `AWAITING_INTEGRATION`, and does not rewrite the handed-off commit.
 - Rework creates a successor commit. Do not amend or force-push an immutable handoff.
+- `commit_message: null` is valid only for an `independent-read-only` report task. Such a revision may be `BLOCKED` or
+  `CANCELLED`, but cannot be integrated successfully. A successful re-review uses a higher Task Spec revision with a non-empty
+  attestation commit message; that exact contract permits a metadata-only empty commit and an explicit tree-equivalence
+  Worker-to-Master mapping. It never relaxes the commit requirement for an implementation task.
 - Master reviews ownership and the complete patch, records `worker_commit_sha → integrated_as_sha`, and resolves only
   mechanical shared-projection conflicts. Semantic conflicts return to the owning Worker.
 - Recompute generated projections, hashes, baselines, indexes, lock files, and cross-layer evidence from the integrated Master
@@ -170,6 +177,9 @@ monotonic revisions, terminal states, immutable identity/evidence, and diagnosti
 - Candidate evidence v2 binds effective identity exactly to `release_task_id + release_head_sha`, uses stable explicit Gate and
   check revisions, and recomputes bounded source, input, result, provenance, artifact, and aggregate digests from the integrated
   tree. Plan and registry digests remain audit context, not authority or candidate-key members.
+- A mapped `STALE`/`NONE` Gate accepts only a Schema-enumerated `invalidation_reason`. Check `execution_ref` is nullable only
+  when the registered runner policy does not set `execution_ref_required: true`; all other result provenance remains required.
+  Two canonical empty v2 `NONE` records compare as `NONE`, while any mixed v1/v2 comparison remains whole-candidate `ALL`.
 - Any change to the integrated Master tree changes `release_head_sha` and makes every Gate stale; patch or tree equivalence does
   not permit reuse. A Worker-only rework that has not been integrated does not change the candidate. For the same head, a
   dependency-plan, authorization, acceptance, toolchain, Gate-registry, or derived-output change invalidates only Gates whose
