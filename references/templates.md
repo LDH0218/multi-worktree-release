@@ -103,6 +103,81 @@ Persist the complete task specification atomically and verify its digest before 
 another durable path, write the plan to `<MASTER_WORKTREE>/.codex/multi-worktree-release/dispatch-plan.json` and task specs to
 the sibling `tasks/` directory. Do not dispatch from a conversation-only projection or after a partial write or digest mismatch.
 
+## Candidate evidence v2
+
+Use this projection for new candidate evidence. Keep v1 aggregate records unchanged until safe migration.
+
+```yaml
+schema_version: 2
+release_task_id: <MASTER_RELEASE_TASK_ID>
+release_head_sha: <EXACT_INTEGRATED_HEAD_SHA>
+plan_revision: <POSITIVE_INTEGER_AUDIT_FENCE>
+plan_digest: <SHA256_OR_NULL_AUDIT_CONTEXT>
+gate_registry_digest: <RECOMPUTED_SHA256>
+gate_registry:
+  - gate_id: <STABLE_KEBAB_ID>
+    gate_revision: <POSITIVE_INTEGER>
+    required: true | false
+    gate_definition: <BOUNDED_CANONICAL_VALUE>
+    gate_definition_digest: <RECOMPUTED_SHA256>
+    runner_policy: <BOUNDED_CANONICAL_VALUE>
+    runner_policy_digest: <RECOMPUTED_SHA256>
+    checks:
+      - check_id: <STABLE_KEBAB_ID>
+        check_revision: <POSITIVE_INTEGER>
+        command_spec: <BOUNDED_CANONICAL_VALUE_WITH_SUCCESS_EXIT_CODES>
+        command_spec_digest: <RECOMPUTED_SHA256>
+        runner_policy: <BOUNDED_CANONICAL_VALUE>
+        runner_policy_digest: <RECOMPUTED_SHA256>
+        input_source_ids: [<CANONICALLY_SORTED_STABLE_SOURCE_ID>]
+gate_input_digest: <RECOMPUTED_COMPATIBILITY_SHA256_OR_NULL>
+status: NONE | STALE | PASSED | FAILED
+legacy: null
+gates:
+  - gate_id: <REGISTERED_GATE_ID>
+    gate_revision: <REGISTERED_REVISION>
+    required: true | false
+    status: NONE | STALE | PASSED | FAILED
+    input_digest: <RECOMPUTED_SHA256_OR_NULL>
+    evidence_digest: <RECOMPUTED_SHA256_OR_NULL>
+    input_sources:
+      - source_id: integrated-tree
+        kind: git-commit
+        locator: master-integrated-tree
+        revision: <EXACT_INTEGRATED_HEAD_SHA>
+        value_digest: <SHA256_OF_EXACT_CONSUMED_VALUE>
+    checks:
+      - check_id: <REGISTERED_CHECK_ID>
+        check_revision: <REGISTERED_REVISION>
+        command: <BOUNDED_NON_SECRET_DESCRIPTION>
+        input_source_ids: [<CANONICALLY_SORTED_STABLE_SOURCE_ID>]
+        result: PASS | FAIL
+        input_digest: <RECOMPUTED_SHA256>
+        evidence_digest: <RECOMPUTED_SHA256>
+        execution_ref: <NON_SECRET_REFERENCE>
+        exit_code: <INTEGER>
+        stdout_digest: <SHA256>
+        stderr_digest: <SHA256>
+        observed_artifacts:
+          - locator: <NON_SECRET_LOCATOR>
+            value_digest: <SHA256>
+        runner_digest: <SHA256>
+        observed_at: <RFC3339_TIMESTAMP>
+    invalidation_reason: <NULL_OR_ENUM_REASON>
+```
+
+The candidate identity is only `release_task_id + release_head_sha`. The plan and registry summaries are audit context. A
+status-only Plan write does not stale Gates whose selected semantic source manifests are unchanged. A changed head makes every
+Gate stale. Same-head selective reuse is allowed only with complete registered membership, revisions, requiredness, and source
+mapping; otherwise clear asserted Gate/check evidence and use the all-Gate `STALE` fallback. Aggregate required Gates with
+`STALE` before `FAILED`; explicitly optional Gates are reported but do not change the required-Gate result.
+
+For a legacy v1 record, preserve the exact original object and canonical digest under `legacy` with reason
+`LEGACY_AGGREGATE_ONLY`, leave `gate_registry`, `gates`, and per-Gate digests empty, and set evidence-bearing records to
+`STALE`. Never derive IDs from commands or positions. Validate with `--candidate-evidence-json`; use
+`--previous-candidate-evidence-json <OLD> --candidate-evidence-json <CURRENT>` for read-only invalidation scope,
+`--migrate-candidate-evidence` for the read-only legacy projection, and `--candidate-evidence-self-test` for the focused matrix.
+
 ## New conversation read-only bootstrap
 
 ```text
@@ -296,18 +371,23 @@ Master gates
 - <COMMAND>: <PASS/FAIL AND KEY EVIDENCE>
 
 Candidate evidence
+- Candidate identity: <RELEASE_TASK_ID + EXACT_RELEASE_HEAD_SHA>
 - Previous release-candidate HEAD: <SHA_OR_NONE>
 - Previous evidence: <VALID / INVALIDATED / NOT APPLICABLE>
 - Previous gate-input digest: <DIGEST_OR_NONE>
 - Current gate-input digest: <DIGEST>
-- Invalidation reason: <INTEGRATED-TREE CHANGE / PLAN CHANGE / AUTHORIZATION CHANGE / ACCEPTANCE CHANGE / PROJECTION CHANGE / NONE>
+- Gate registry digest and membership verified: <DIGEST / YES_OR_NO>
+- Per-Gate status/input/evidence digest: <GATE_ID / REVISION / REQUIRED / STATUS / INPUT_DIGEST / EVIDENCE_DIGEST>
+- Invalidation reason: <HEAD_CHANGED / INPUT_SOURCE_CHANGED / REGISTRY_AMBIGUOUS / MAPPING_AMBIGUOUS / OTHER_ENUM / NONE>
+- Selective mapping: <COMPLETE_AND_VALID / WHOLE_CANDIDATE_STALE_FALLBACK>
 - Evidence recomputed from integrated tree: <YES/NO>
+- Legacy aggregate audit: <NONE / PRESERVED_DIGEST_AND_STALE>
 - Unintegrated Worker-only rework leaves existing candidate evidence unchanged.
 
 Authorization status
 - <EXTERNAL CALL / RUN / PUBLISH / DESTRUCTIVE ACTION ACTUALLY USED OR NOT USED>
 
-Release candidate: <PASSED/FAILED>.
+Release candidate: <NONE/STALE/PASSED/FAILED>.
 Worker handoff: <ACCEPTED/REWORK REQUIRED>; responsible findings: <NONE OR LIST>.
 Record integrated_as_sha and release_head_sha. When accepted, copy the task identity, `COMPLETED` outcome, and commit mapping to
 `last_task`, clear active lock fields to default-deny/null values, and return to IDLE. If another layer blocks release, Master

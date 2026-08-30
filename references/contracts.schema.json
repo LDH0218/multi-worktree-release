@@ -619,7 +619,7 @@
         "state": {"enum": ["RECEIVED", "INTEGRATED", "REWORK_REQUESTED"]}
       }
     },
-    "candidate_evidence": {
+    "candidate_evidence_v1": {
       "type": "object",
       "additionalProperties": false,
       "required": ["release_head_sha", "gate_input_digest", "status", "checks"],
@@ -641,6 +641,180 @@
           }
         }
       }
+    },
+    "candidate_input_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "kind", "locator", "revision", "value_digest"],
+      "properties": {
+        "source_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", "maxLength": 96},
+        "kind": {
+          "enum": [
+            "git-commit", "git-tree", "file", "dispatch-plan", "task-spec", "acceptance",
+            "gate-registry", "projection", "toolchain", "authorization"
+          ]
+        },
+        "locator": {"type": "string", "minLength": 1, "maxLength": 512},
+        "revision": {"type": ["string", "null"], "minLength": 1, "maxLength": 256},
+        "value_digest": {"$ref": "#/$defs/required_digest"}
+      }
+    },
+    "candidate_observed_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["locator", "value_digest"],
+      "properties": {
+        "locator": {"type": "string", "minLength": 1, "maxLength": 512},
+        "value_digest": {"$ref": "#/$defs/required_digest"}
+      }
+    },
+    "candidate_registry_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "check_id", "check_revision", "command_spec", "command_spec_digest", "runner_policy",
+        "runner_policy_digest", "input_source_ids"
+      ],
+      "properties": {
+        "check_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", "maxLength": 96},
+        "check_revision": {"type": "integer", "minimum": 1},
+        "command_spec": {"$ref": "#/$defs/canonical_value"},
+        "command_spec_digest": {"$ref": "#/$defs/required_digest"},
+        "runner_policy": {"$ref": "#/$defs/canonical_value"},
+        "runner_policy_digest": {"$ref": "#/$defs/required_digest"},
+        "input_source_ids": {
+          "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", "maxLength": 96},
+          "x-canonical-order": "utf8"
+        }
+      }
+    },
+    "candidate_registry_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gate_id", "gate_revision", "required", "gate_definition", "gate_definition_digest", "runner_policy",
+        "runner_policy_digest", "checks"
+      ],
+      "properties": {
+        "gate_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", "maxLength": 96},
+        "gate_revision": {"type": "integer", "minimum": 1},
+        "required": {"type": "boolean"},
+        "gate_definition": {"$ref": "#/$defs/canonical_value"},
+        "gate_definition_digest": {"$ref": "#/$defs/required_digest"},
+        "runner_policy": {"$ref": "#/$defs/canonical_value"},
+        "runner_policy_digest": {"$ref": "#/$defs/required_digest"},
+        "checks": {
+          "type": "array", "minItems": 1, "maxItems": 64,
+          "items": {"$ref": "#/$defs/candidate_registry_check"}
+        }
+      }
+    },
+    "candidate_check_v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "check_id", "check_revision", "command", "input_source_ids", "result", "input_digest",
+        "evidence_digest", "execution_ref", "exit_code", "stdout_digest", "stderr_digest",
+        "observed_artifacts", "runner_digest", "observed_at"
+      ],
+      "properties": {
+        "check_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", "maxLength": 96},
+        "check_revision": {"type": "integer", "minimum": 1},
+        "command": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "input_source_ids": {
+          "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", "maxLength": 96},
+          "x-canonical-order": "utf8"
+        },
+        "result": {"enum": ["PASS", "FAIL"]},
+        "input_digest": {"$ref": "#/$defs/required_digest"},
+        "evidence_digest": {"$ref": "#/$defs/required_digest"},
+        "execution_ref": {"type": ["string", "null"], "minLength": 1, "maxLength": 256},
+        "exit_code": {"type": "integer"},
+        "stdout_digest": {"$ref": "#/$defs/required_digest"},
+        "stderr_digest": {"$ref": "#/$defs/required_digest"},
+        "observed_artifacts": {
+          "type": "array", "maxItems": 64,
+          "items": {"$ref": "#/$defs/candidate_observed_artifact"}
+        },
+        "runner_digest": {"$ref": "#/$defs/required_digest"},
+        "observed_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "candidate_gate_v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gate_id", "gate_revision", "required", "status", "input_digest", "evidence_digest",
+        "input_sources", "checks", "invalidation_reason"
+      ],
+      "properties": {
+        "gate_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", "maxLength": 96},
+        "gate_revision": {"type": "integer", "minimum": 1},
+        "required": {"type": "boolean"},
+        "status": {"enum": ["NONE", "STALE", "PASSED", "FAILED"]},
+        "input_digest": {"$ref": "#/$defs/digest"},
+        "evidence_digest": {"$ref": "#/$defs/digest"},
+        "input_sources": {
+          "type": "array", "maxItems": 64,
+          "items": {"$ref": "#/$defs/candidate_input_source"}
+        },
+        "checks": {
+          "type": "array", "maxItems": 64,
+          "items": {"$ref": "#/$defs/candidate_check_v2"}
+        },
+        "invalidation_reason": {
+          "enum": [
+            null, "INPUT_SOURCE_CHANGED", "HEAD_CHANGED", "LEGACY_AGGREGATE_ONLY", "REGISTRY_AMBIGUOUS",
+            "MAPPING_AMBIGUOUS", "DIGEST_UNVERIFIABLE", "PROVENANCE_UNVERIFIABLE", "REVISION_MIXED",
+            "ATOMICITY_UNPROVEN", "INFRASTRUCTURE_ERROR"
+          ]
+        }
+      }
+    },
+    "candidate_legacy_audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "original_digest", "original"],
+      "properties": {
+        "reason": {"const": "LEGACY_AGGREGATE_ONLY"},
+        "original_digest": {"$ref": "#/$defs/required_digest"},
+        "original": {"$ref": "#/$defs/candidate_evidence_v1"}
+      }
+    },
+    "candidate_evidence_v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "release_task_id", "release_head_sha", "plan_revision", "plan_digest",
+        "gate_registry_digest", "gate_registry", "gate_input_digest", "status", "legacy", "gates"
+      ],
+      "properties": {
+        "schema_version": {"const": 2},
+        "release_task_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 256},
+        "release_head_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "plan_revision": {"type": ["integer", "null"], "minimum": 1},
+        "plan_digest": {"$ref": "#/$defs/digest"},
+        "gate_registry_digest": {"$ref": "#/$defs/digest"},
+        "gate_registry": {
+          "type": "array", "maxItems": 64,
+          "items": {"$ref": "#/$defs/candidate_registry_gate"}
+        },
+        "gate_input_digest": {"$ref": "#/$defs/digest"},
+        "status": {"enum": ["NONE", "STALE", "PASSED", "FAILED"]},
+        "legacy": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/candidate_legacy_audit"}]},
+        "gates": {
+          "type": "array", "maxItems": 64,
+          "items": {"$ref": "#/$defs/candidate_gate_v2"}
+        }
+      }
+    },
+    "candidate_evidence": {
+      "oneOf": [
+        {"$ref": "#/$defs/candidate_evidence_v1"},
+        {"$ref": "#/$defs/candidate_evidence_v2"}
+      ]
     },
     "master_card": {
       "type": "object",

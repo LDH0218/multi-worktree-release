@@ -539,15 +539,79 @@ worker_handoffs:
     integrated_as_sha: <full-sha-or-null>
     state: RECEIVED | INTEGRATED | REWORK_REQUESTED
 candidate_evidence:
+  schema_version: 2
+  release_task_id: <master-release-task-id-or-null>
   release_head_sha: <full-sha-or-null>
+  plan_revision: <positive-integer-or-null>
+  plan_digest: <sha256-digest-or-null>
+  gate_registry_digest: <sha256-digest-or-null>
+  gate_registry:
+    - gate_id: <stable-id>
+      gate_revision: <positive-integer>
+      required: <true-or-false>
+      gate_definition: <bounded-canonical-value>
+      gate_definition_digest: <sha256-digest>
+      runner_policy: <bounded-canonical-value>
+      runner_policy_digest: <sha256-digest>
+      checks:
+        - check_id: <stable-id>
+          check_revision: <positive-integer>
+          command_spec: <bounded-canonical-value>
+          command_spec_digest: <sha256-digest>
+          runner_policy: <bounded-canonical-value>
+          runner_policy_digest: <sha256-digest>
+          input_source_ids: [<stable-source-id>]
   gate_input_digest: <sha256-digest-or-null>
   status: NONE | STALE | PASSED | FAILED
-  checks:
-    - command: <command>
-      result: PASS | FAIL
-      evidence_digest: <sha256-digest>
+  legacy: <null-or-preserved-v1-audit>
+  gates:
+    - gate_id: <stable-id>
+      gate_revision: <positive-integer>
+      required: <true-or-false>
+      status: NONE | STALE | PASSED | FAILED
+      input_digest: <sha256-digest-or-null>
+      evidence_digest: <sha256-digest-or-null>
+      input_sources: [<bounded-source-manifest>]
+      checks: [<current-check-evidence>]
+      invalidation_reason: <reason-or-null>
 blocker: <text-or-null>
 ```
+
+### Per-Gate candidate evidence
+
+Candidate evidence v2 is self-contained: its embedded `gate_registry` is the exact bounded registry used to validate Gate and
+check membership, revisions, requiredness, command specifications, runner policies, and source dependencies. The effective
+candidate identity is exactly `(release_task_id, release_head_sha)`. `plan_revision`, `plan_digest`, and
+`gate_registry_digest` are audit/fencing context, not extra candidate-key members; a status-only Plan write does not invalidate
+evidence merely because those audit values changed.
+
+Normalize Gate, check, source, source-ID, and artifact arrays by their stable IDs or locators before hashing. Stable IDs use
+lowercase kebab case and are never inferred from list position, command text, timestamps, branches, or content digests. Rehash
+every persisted `gate_definition`, `command_spec`, and `runner_policy`, then recompute each check `input_digest`, Gate
+`input_digest`, compatibility `gate_input_digest`, check `evidence_digest`, and Gate `evidence_digest` from the canonical
+envelopes defined by the schema and validator. Current `PASS` or `FAIL` evidence requires exact input binding, bounded command
+description, execution reference, exit-code predicate, output digests, artifact digests, runner digest, and observation time.
+Infrastructure errors and unverifiable provenance are `STALE`, never `FAIL` or `PASS`.
+
+A changed `release_head_sha` invalidates every Gate without tree- or patch-equivalence reuse. For the same head, compare only
+the semantic source manifests each Gate declares. A changed acceptance, authorization, Task Spec, registry, toolchain, or
+projection source stales its dependent Gates when the embedded registry and mapping are complete. Do not invalidate unrelated
+Gates solely for `record_revision`, `updated_at`, dispatch status, `plan_revision`, or the whole `plan_digest`. If Gate
+membership, requiredness, source mapping, digest recomputation, provenance, revision fencing, or atomic persistence cannot be
+proved, clear asserted current evidence and persist all known Gate rows as `STALE` with a whole-candidate reason and no asserted
+registry or compatibility digest.
+
+Aggregate required Gates in this order: missing/`NONE`/`STALE` first, then valid `FAILED`, then all valid `PASSED`. Thus
+`STALE` precedes `FAILED`. An explicitly `required: false` Gate is reported but does not change the required-Gate result;
+missing or unknown requiredness is stale. An empty required set cannot pass.
+
+Aggregate v1 evidence remains valid as immutable legacy syntax. Migrate it with
+`--candidate-evidence-json <PATH> --migrate-candidate-evidence`; preserve the exact original object plus its canonical digest
+under `legacy`, synthesize no Gate/check identity, and produce `STALE` whenever the old record contains evidence. An empty v1
+`NONE` record remains `NONE`. Applying migration to an already migrated v2 record is idempotent. Validate standalone fixtures
+with `--candidate-evidence-json <PATH>`, compare old/current manifests with
+`--previous-candidate-evidence-json <OLD> --candidate-evidence-json <CURRENT>` to obtain `NONE`, `AFFECTED`, or `ALL`, and run
+the targeted matrix with `--candidate-evidence-self-test`.
 
 ## State transitions
 
@@ -681,10 +745,12 @@ Master should:
 
 Master rejects a handoff whose task or plan revision is stale for its affected plan entry, unless Master has explicitly verified
 that the entry is unchanged. A release candidate and its gates are valid only for the exact integrated-tree
-`release_head_sha` and `gate_input_digest`. Any integrated-tree change invalidates all prior candidate evidence because the
-candidate SHA changes. A Worker-only rework that has not been integrated leaves the candidate unchanged. A dependency-plan,
-authorization, acceptance, or regenerated-projection change invalidates the gates whose inputs changed; Master clears or marks
-the stale evidence and reruns the release-candidate and affected gates.
+`release_head_sha` and their recomputed per-Gate input/evidence digests. Any integrated-tree change invalidates every Gate
+because the candidate SHA changes. A Worker-only rework that has not been integrated leaves the candidate unchanged. For the
+same head, a dependency-plan, authorization, acceptance, toolchain, registry, or regenerated-projection change invalidates
+only Gates whose declared semantic sources changed when the registry and dependency map are complete; bookkeeping-only Plan
+writes do not invalidate Gates. Any ambiguity uses the whole-candidate `STALE` fallback. Master reruns stale required Gates and
+recomputes the compatibility `gate_input_digest` from the integrated tree before candidate approval.
 
 Master may resolve mechanical conflicts in generated indexes, hashes, manifests, or projections by regeneration. Semantic
 conflicts in Worker-owned inputs, compilers, or business rules return to that Worker. Unknown ownership remains blocked.

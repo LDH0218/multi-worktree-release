@@ -167,10 +167,18 @@ monotonic revisions, terminal states, immutable identity/evidence, and diagnosti
   release candidate. Production release remains a separate authorized action.
 - Execution order and integration order are independent. Independent Workers may execute in parallel. Master may integrate
   accepted handoffs in any suitable order, but must recheck conflicts and recompute derived outputs after integration.
-- Any change to the integrated Master tree changes `release_head_sha` and invalidates all prior release-candidate evidence. A
-  Worker-only rework that has not been integrated does not change the candidate. A dependency-plan, authorization,
-  acceptance, or derived-output change invalidates only the gates whose inputs changed. Master records the invalidation,
-  recomputes evidence from the integrated tree, and reruns the release-candidate and affected gates.
+- Candidate evidence v2 binds effective identity exactly to `release_task_id + release_head_sha`, uses stable explicit Gate and
+  check revisions, and recomputes bounded source, input, result, provenance, artifact, and aggregate digests from the integrated
+  tree. Plan and registry digests remain audit context, not authority or candidate-key members.
+- Any change to the integrated Master tree changes `release_head_sha` and makes every Gate stale; patch or tree equivalence does
+  not permit reuse. A Worker-only rework that has not been integrated does not change the candidate. For the same head, a
+  dependency-plan, authorization, acceptance, toolchain, Gate-registry, or derived-output change invalidates only Gates whose
+  declared semantic inputs changed when the registry and source map are complete. Status-only Plan writes do not invalidate
+  unrelated Gates. Missing membership, ambiguous mapping, unverifiable digests/provenance, mixed fences, or partial writes use
+  the whole-candidate `STALE` fallback. `STALE` precedes `FAILED`; only all current required Gates passing yields `PASSED`.
+- Preserve aggregate-only v1 evidence under the v2 `legacy` audit field with its original digest. Evidence-bearing legacy
+  records migrate to `STALE`, empty legacy `NONE` remains `NONE`, and migration never invents Gate identity or promotes an old
+  aggregate result. Master reruns required Gates and recomputes final evidence from the integrated tree.
 - An accepted Worker handoff may return to `IDLE` even if the global candidate is blocked by another responsibility layer.
 
 ## Deliver evidence, not ceremony

@@ -1023,24 +1023,12 @@ def validate_master_card(value: dict[str, Any], schema: dict[str, Any]) -> None:
         if handoff["state"] != "INTEGRATED" and handoff["integrated_as_sha"] is not None:
             raise ContractError(f"{handoff['state']} Worker handoff cannot retain integrated_as_sha")
     evidence = value["candidate_evidence"]
-    require_exact_fields(evidence, schema_required(schema, "candidate_evidence"), "candidate evidence")
-    validate_digest(evidence["gate_input_digest"], "gate_input_digest", allow_null=True)
-    validate_sha(evidence["release_head_sha"], "candidate release_head_sha", allow_null=True)
-    if evidence["status"] not in set(schema["$defs"]["candidate_evidence"]["properties"]["status"]["enum"]):
-        raise ContractError(f"unknown candidate status: {evidence['status']}")
-    for check in evidence["checks"]:
-        require_exact_fields(check, {"command", "result", "evidence_digest"}, "candidate check")
-        if not isinstance(check["command"], str) or not check["command"]:
-            raise ContractError("candidate check command must be non-empty")
-        if check["result"] not in {"PASS", "FAIL"}:
-            raise ContractError(f"unknown candidate check result: {check['result']}")
-        validate_digest(check["evidence_digest"], "candidate check evidence_digest")
-    if evidence["status"] == "NONE" and any((evidence["release_head_sha"], evidence["gate_input_digest"], evidence["checks"])):
-        historical_error("H24", "candidate status NONE cannot retain candidate evidence")
-    if evidence["status"] in {"STALE", "PASSED", "FAILED"} and (
-        evidence["release_head_sha"] is None or evidence["gate_input_digest"] is None or not evidence["checks"]
-    ):
-        raise ContractError(f"candidate status {evidence['status']} requires HEAD, gate digest, and checks")
+    validate_candidate_evidence(evidence, schema)
+    if evidence.get("schema_version") == 2 and evidence["status"] != "NONE" and evidence["legacy"] is None:
+        if evidence["release_task_id"] != value["release_task_id"]:
+            raise ContractError("candidate release_task_id differs from the Master release lock")
+        if evidence["plan_revision"] != value["plan_revision"]:
+            raise ContractError("candidate plan_revision mixes a different Master semantic fence")
     if value["state"] == "IDLE" and any(value[field] is not None for field in
                                            ("release_task_id", "plan_revision", "dispatch_plan_path", "dispatch_plan_digest",
                                             "frozen_baseline_sha", "blocker")):
@@ -1082,6 +1070,599 @@ def candidate_invalidation(old_head: str, new_head: str, old_gate_digest: str, n
     if old_gate_digest != new_gate_digest:
         return "AFFECTED"
     return "NONE"
+
+
+STABLE_EVIDENCE_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+POSITION_ID_RE = re.compile(r"^(?:gate|check|item|row|index)-?[0-9]+$")
+CANDIDATE_SOURCE_KINDS = {
+    "git-commit", "git-tree", "file", "dispatch-plan", "task-spec", "acceptance", "gate-registry",
+    "projection", "toolchain", "authorization",
+}
+WHOLE_CANDIDATE_REASONS = {
+    "HEAD_CHANGED", "REGISTRY_AMBIGUOUS", "MAPPING_AMBIGUOUS", "DIGEST_UNVERIFIABLE",
+    "PROVENANCE_UNVERIFIABLE", "REVISION_MIXED", "ATOMICITY_UNPROVEN",
+}
+SECRET_TEXT_RE = re.compile(
+    r"-----BEGIN |(?:api[_-]?key|password|token)\s*[:=]|://[^/@\s:]+:[^/@\s]+@",
+    re.IGNORECASE,
+)
+
+
+def validate_bounded_text(value: Any, label: str, *, maximum: int, allow_null: bool = False) -> None:
+    if value is None and allow_null:
+        return
+    if not isinstance(value, str) or not value or len(value.encode("utf-8")) > maximum:
+        raise ContractError(f"{label} must be a non-empty string of at most {maximum} UTF-8 bytes")
+    if SECRET_TEXT_RE.search(value):
+        raise ContractError(f"{label} appears to contain secret material")
+
+
+def validate_bounded_canonical(value: Any, label: str, *, maximum: int = 16384) -> None:
+    encoded = canonical_json(value)
+    if len(encoded) > maximum:
+        raise ContractError(f"{label} exceeds the {maximum}-byte persisted-manifest limit")
+
+    def inspect(item: Any, path: str) -> None:
+        if isinstance(item, str) and SECRET_TEXT_RE.search(item):
+            raise ContractError(f"{label} appears to contain secret material at {path}")
+        if isinstance(item, list):
+            for index, child in enumerate(item):
+                inspect(child, f"{path}[{index}]")
+        elif isinstance(item, dict):
+            for key, child in item.items():
+                inspect(child, f"{path}.{key}")
+
+    inspect(value, "$")
+
+
+def validate_stable_evidence_id(value: Any, label: str) -> None:
+    if (not isinstance(value, str) or len(value.encode("utf-8")) > 96
+            or not STABLE_EVIDENCE_ID_RE.fullmatch(value)):
+        raise ContractError(f"{label} must be a stable lowercase kebab-case identifier")
+    if POSITION_ID_RE.fullmatch(value) or SHA_RE.fullmatch(value):
+        raise ContractError(f"{label} must not be position-derived or content-derived")
+
+
+def sorted_utf8(values: list[str]) -> list[str]:
+    return sorted(values, key=lambda item: item.encode("utf-8"))
+
+
+def validate_candidate_v1(value: dict[str, Any], schema: dict[str, Any]) -> None:
+    require_exact_fields(value, schema_required(schema, "candidate_evidence_v1"), "candidate evidence v1")
+    validate_digest(value["gate_input_digest"], "gate_input_digest", allow_null=True)
+    validate_sha(value["release_head_sha"], "candidate release_head_sha", allow_null=True)
+    if value["status"] not in {"NONE", "STALE", "PASSED", "FAILED"}:
+        raise ContractError(f"unknown candidate status: {value['status']}")
+    if not isinstance(value["checks"], list):
+        raise ContractError("candidate checks must be an array")
+    for check in value["checks"]:
+        if not isinstance(check, dict):
+            raise ContractError("candidate check must be an object")
+        require_exact_fields(check, {"command", "result", "evidence_digest"}, "candidate check v1")
+        validate_bounded_text(check["command"], "candidate check command", maximum=1024)
+        if check["result"] not in {"PASS", "FAIL"}:
+            raise ContractError(f"unknown candidate check result: {check['result']}")
+        validate_digest(check["evidence_digest"], "candidate check evidence_digest")
+    if value["status"] == "NONE" and any((value["release_head_sha"], value["gate_input_digest"], value["checks"])):
+        historical_error("H24", "candidate status NONE cannot retain candidate evidence")
+    if value["status"] in {"STALE", "PASSED", "FAILED"} and (
+        value["release_head_sha"] is None or value["gate_input_digest"] is None or not value["checks"]
+    ):
+        raise ContractError(f"candidate status {value['status']} requires HEAD, gate digest, and checks")
+
+
+def validate_registry_check(value: Any, schema: dict[str, Any], label: str) -> None:
+    if not isinstance(value, dict):
+        raise ContractError(f"{label} must be an object")
+    require_exact_fields(value, schema_required(schema, "candidate_registry_check"), label)
+    validate_stable_evidence_id(value["check_id"], f"{label}.check_id")
+    validate_positive_integer(value["check_revision"], f"{label}.check_revision")
+    for field in ("command_spec", "runner_policy"):
+        validate_bounded_canonical(value[field], f"{label}.{field}")
+        validate_digest(value[f"{field}_digest"], f"{label}.{field}_digest")
+        if value[f"{field}_digest"] != value_digest(value[field]):
+            raise ContractError(f"{label}.{field}_digest does not match its canonical manifest")
+    validate_string_list(value["input_source_ids"], f"{label}.input_source_ids", canonical=True)
+    if not value["input_source_ids"]:
+        raise ContractError(f"{label}.input_source_ids must not be empty")
+    for source_id in value["input_source_ids"]:
+        validate_stable_evidence_id(source_id, f"{label}.input_source_ids")
+
+
+def validate_candidate_registry(value: Any, schema: dict[str, Any]) -> dict[tuple[str, int], dict[str, Any]]:
+    if not isinstance(value, list) or not value:
+        raise ContractError("candidate Gate registry must be a non-empty array")
+    if len(value) > 64:
+        raise ContractError("candidate Gate registry exceeds 64 Gates")
+    gate_ids = [item.get("gate_id") if isinstance(item, dict) else None for item in value]
+    if any(not isinstance(item, str) for item in gate_ids) or gate_ids != sorted_utf8(cast(list[str], gate_ids)):
+        raise ContractError("candidate Gate registry must use canonical gate_id order")
+    registry: dict[tuple[str, int], dict[str, Any]] = {}
+    logical_gate_ids: set[str] = set()
+    for index, gate in enumerate(value):
+        label = f"candidate gate_registry[{index}]"
+        if not isinstance(gate, dict):
+            raise ContractError(f"{label} must be an object")
+        require_exact_fields(gate, schema_required(schema, "candidate_registry_gate"), label)
+        validate_stable_evidence_id(gate["gate_id"], f"{label}.gate_id")
+        validate_positive_integer(gate["gate_revision"], f"{label}.gate_revision")
+        if not isinstance(gate["required"], bool):
+            raise ContractError(f"{label}.required must be boolean")
+        identity = (gate["gate_id"], gate["gate_revision"])
+        if identity in registry or gate["gate_id"] in logical_gate_ids:
+            raise ContractError(f"duplicate or ambiguous Gate identity: {identity}")
+        registry[identity] = gate
+        logical_gate_ids.add(gate["gate_id"])
+        for field in ("gate_definition", "runner_policy"):
+            validate_bounded_canonical(gate[field], f"{label}.{field}")
+            validate_digest(gate[f"{field}_digest"], f"{label}.{field}_digest")
+            if gate[f"{field}_digest"] != value_digest(gate[field]):
+                raise ContractError(f"{label}.{field}_digest does not match its canonical manifest")
+        checks = gate["checks"]
+        if not isinstance(checks, list) or not checks or len(checks) > 64:
+            raise ContractError(f"{label}.checks must contain 1..64 checks")
+        check_ids = [item.get("check_id") if isinstance(item, dict) else None for item in checks]
+        if any(not isinstance(item, str) for item in check_ids) or check_ids != sorted_utf8(cast(list[str], check_ids)):
+            raise ContractError(f"{label}.checks must use canonical check_id order")
+        seen_checks: set[tuple[str, int]] = set()
+        logical_check_ids: set[str] = set()
+        for check_index, check in enumerate(checks):
+            check_label = f"{label}.checks[{check_index}]"
+            validate_registry_check(check, schema, check_label)
+            check_identity = (check["check_id"], check["check_revision"])
+            if check_identity in seen_checks or check["check_id"] in logical_check_ids:
+                raise ContractError(f"duplicate or ambiguous check identity in {gate['gate_id']}: {check_identity}")
+            seen_checks.add(check_identity)
+            logical_check_ids.add(check["check_id"])
+    if not any(gate["required"] for gate in value):
+        raise ContractError("candidate Gate registry must contain at least one required Gate")
+    return registry
+
+
+def validate_candidate_source(value: Any, schema: dict[str, Any], label: str) -> None:
+    if not isinstance(value, dict):
+        raise ContractError(f"{label} must be an object")
+    require_exact_fields(value, schema_required(schema, "candidate_input_source"), label)
+    validate_stable_evidence_id(value["source_id"], f"{label}.source_id")
+    if value["kind"] not in CANDIDATE_SOURCE_KINDS:
+        raise ContractError(f"{label}.kind is unknown")
+    validate_bounded_text(value["locator"], f"{label}.locator", maximum=512)
+    validate_bounded_text(value["revision"], f"{label}.revision", maximum=256, allow_null=True)
+    validate_digest(value["value_digest"], f"{label}.value_digest")
+
+
+def candidate_check_input_digest(gate: dict[str, Any], registry_gate: dict[str, Any],
+                                 check: dict[str, Any], registry_check: dict[str, Any]) -> str:
+    sources = {source["source_id"]: source for source in gate["input_sources"]}
+    resolved = [sources[source_id] for source_id in registry_check["input_source_ids"]]
+    return value_digest({
+        "schema_version": 1,
+        "gate_id": gate["gate_id"],
+        "gate_revision": gate["gate_revision"],
+        "check_id": check["check_id"],
+        "check_revision": check["check_revision"],
+        "command_spec_digest": registry_check["command_spec_digest"],
+        "input_source_ids": registry_check["input_source_ids"],
+        "input_sources": resolved,
+        "runner_policy_digest": registry_check["runner_policy_digest"],
+    })
+
+
+def candidate_gate_input_digest(gate: dict[str, Any], registry_gate: dict[str, Any],
+                                check_input_digests: dict[tuple[str, int], str]) -> str:
+    return value_digest({
+        "schema_version": 1,
+        "gate_id": gate["gate_id"],
+        "gate_revision": gate["gate_revision"],
+        "required": gate["required"],
+        "gate_definition_digest": registry_gate["gate_definition_digest"],
+        "input_sources": gate["input_sources"],
+        "checks": [
+            {
+                "check_id": check["check_id"],
+                "check_revision": check["check_revision"],
+                "input_digest": check_input_digests[(check["check_id"], check["check_revision"])],
+            }
+            for check in registry_gate["checks"]
+        ],
+        "runner_policy_digest": registry_gate["runner_policy_digest"],
+    })
+
+
+def candidate_gate_input_summary(value: dict[str, Any], gate_inputs: dict[tuple[str, int], str]) -> str:
+    return value_digest({
+        "schema_version": 1,
+        "release_task_id": value["release_task_id"],
+        "release_head_sha": value["release_head_sha"],
+        "gates": [
+            {
+                "gate_id": gate["gate_id"],
+                "gate_revision": gate["gate_revision"],
+                "required": gate["required"],
+                "input_digest": gate_inputs[(gate["gate_id"], gate["gate_revision"])],
+            }
+            for gate in value["gates"]
+        ],
+    })
+
+
+def candidate_check_evidence_digest(gate: dict[str, Any], check: dict[str, Any]) -> str:
+    return value_digest({
+        "schema_version": 1,
+        "gate_id": gate["gate_id"],
+        "gate_revision": gate["gate_revision"],
+        "check_id": check["check_id"],
+        "check_revision": check["check_revision"],
+        "input_digest": check["input_digest"],
+        "result": check["result"],
+        "exit_code": check["exit_code"],
+        "stdout_digest": check["stdout_digest"],
+        "stderr_digest": check["stderr_digest"],
+        "observed_artifacts": check["observed_artifacts"],
+        "runner_digest": check["runner_digest"],
+        "execution_ref": check["execution_ref"],
+        "observed_at": check["observed_at"],
+    })
+
+
+def candidate_gate_evidence_digest(gate: dict[str, Any]) -> str:
+    return value_digest({
+        "schema_version": 1,
+        "gate_id": gate["gate_id"],
+        "gate_revision": gate["gate_revision"],
+        "input_digest": gate["input_digest"],
+        "checks": [
+            {
+                "check_id": check["check_id"],
+                "check_revision": check["check_revision"],
+                "result": check["result"],
+                "evidence_digest": check["evidence_digest"],
+            }
+            for check in gate["checks"]
+        ],
+    })
+
+
+def aggregate_candidate_status(gates: list[dict[str, Any]]) -> str:
+    required = [gate for gate in gates if gate["required"]]
+    if not required or any(gate["status"] in {"NONE", "STALE"} for gate in required):
+        return "STALE"
+    if any(gate["status"] == "FAILED" for gate in required):
+        return "FAILED"
+    if all(gate["status"] == "PASSED" for gate in required):
+        return "PASSED"
+    return "STALE"
+
+
+def validate_candidate_check(check: Any, gate: dict[str, Any], registry_check: dict[str, Any],
+                             expected_input_digest: str, schema: dict[str, Any], label: str) -> None:
+    if not isinstance(check, dict):
+        raise ContractError(f"{label} must be an object")
+    require_exact_fields(check, schema_required(schema, "candidate_check_v2"), label)
+    validate_stable_evidence_id(check["check_id"], f"{label}.check_id")
+    validate_positive_integer(check["check_revision"], f"{label}.check_revision")
+    if (check["check_id"], check["check_revision"]) != (
+        registry_check["check_id"], registry_check["check_revision"]
+    ):
+        raise ContractError(f"{label} does not match its registered check identity")
+    validate_bounded_text(check["command"], f"{label}.command", maximum=1024)
+    validate_string_list(check["input_source_ids"], f"{label}.input_source_ids", canonical=True)
+    if check["input_source_ids"] != registry_check["input_source_ids"]:
+        raise ContractError(f"{label}.input_source_ids differs from the registered dependency map")
+    if check["result"] not in {"PASS", "FAIL"}:
+        raise ContractError(f"{label}.result is unknown")
+    for field in ("input_digest", "evidence_digest", "stdout_digest", "stderr_digest", "runner_digest"):
+        validate_digest(check[field], f"{label}.{field}")
+    if check["input_digest"] != expected_input_digest:
+        raise ContractError(f"{label}.input_digest does not match its canonical input envelope")
+    validate_bounded_text(check["execution_ref"], f"{label}.execution_ref", maximum=256)
+    if not isinstance(check["exit_code"], int) or isinstance(check["exit_code"], bool):
+        raise ContractError(f"{label}.exit_code must be an integer")
+    validate_rfc3339(check["observed_at"], f"{label}.observed_at")
+    artifacts = check["observed_artifacts"]
+    if not isinstance(artifacts, list) or len(artifacts) > 64:
+        raise ContractError(f"{label}.observed_artifacts must contain at most 64 entries")
+    locators: list[str] = []
+    for artifact_index, artifact in enumerate(artifacts):
+        artifact_label = f"{label}.observed_artifacts[{artifact_index}]"
+        if not isinstance(artifact, dict):
+            raise ContractError(f"{artifact_label} must be an object")
+        require_exact_fields(artifact, schema_required(schema, "candidate_observed_artifact"), artifact_label)
+        validate_bounded_text(artifact["locator"], f"{artifact_label}.locator", maximum=512)
+        validate_digest(artifact["value_digest"], f"{artifact_label}.value_digest")
+        locators.append(artifact["locator"])
+    if locators != sorted_utf8(locators) or len(set(locators)) != len(locators):
+        raise ContractError(f"{label}.observed_artifacts must use unique canonical locator order")
+    command_spec = registry_check["command_spec"]
+    if not isinstance(command_spec, dict) or not isinstance(command_spec.get("success_exit_codes"), list):
+        raise ContractError(f"{label} registered command_spec must declare success_exit_codes")
+    success_codes = command_spec["success_exit_codes"]
+    if (not success_codes or any(not isinstance(code, int) or isinstance(code, bool) for code in success_codes)
+            or len(set(success_codes)) != len(success_codes)):
+        raise ContractError(f"{label} success_exit_codes must be unique integers")
+    expected_result = "PASS" if check["exit_code"] in success_codes else "FAIL"
+    if check["result"] != expected_result:
+        raise ContractError(f"{label}.result contradicts exit_code and the registered success predicate")
+    if check["evidence_digest"] != candidate_check_evidence_digest(gate, check):
+        raise ContractError(f"{label}.evidence_digest does not match its canonical evidence envelope")
+
+
+def validate_fallback_candidate(value: dict[str, Any], schema: dict[str, Any]) -> None:
+    if value["status"] != "STALE" or value["gate_registry"] or value["gate_registry_digest"] is not None:
+        raise ContractError("unmapped candidate fallback must be STALE with no asserted Gate registry")
+    if value["gate_input_digest"] is not None or not value["gates"]:
+        raise ContractError("unmapped candidate fallback must not assert an aggregate input digest")
+    identities: set[tuple[str, int]] = set()
+    for index, gate in enumerate(value["gates"]):
+        label = f"candidate fallback gates[{index}]"
+        if not isinstance(gate, dict):
+            raise ContractError(f"{label} must be an object")
+        require_exact_fields(gate, schema_required(schema, "candidate_gate_v2"), label)
+        validate_stable_evidence_id(gate["gate_id"], f"{label}.gate_id")
+        validate_positive_integer(gate["gate_revision"], f"{label}.gate_revision")
+        identity = (gate["gate_id"], gate["gate_revision"])
+        if identity in identities:
+            raise ContractError(f"duplicate fallback Gate identity: {identity}")
+        identities.add(identity)
+        if not isinstance(gate["required"], bool):
+            raise ContractError(f"{label}.required must be boolean")
+        if (gate["status"] != "STALE" or gate["input_digest"] is not None
+                or gate["evidence_digest"] is not None or gate["checks"]):
+            raise ContractError(f"{label} must clear all unverifiable current evidence")
+        if gate["invalidation_reason"] not in WHOLE_CANDIDATE_REASONS:
+            raise ContractError(f"{label} must record a whole-candidate fallback reason")
+        sources = gate["input_sources"]
+        if not isinstance(sources, list) or len(sources) > 64:
+            raise ContractError(f"{label}.input_sources must be an array")
+        source_ids = [item.get("source_id") if isinstance(item, dict) else None for item in sources]
+        if any(not isinstance(item, str) for item in source_ids) or source_ids != sorted_utf8(cast(list[str], source_ids)):
+            raise ContractError(f"{label}.input_sources must use canonical source_id order")
+        if len(set(cast(list[str], source_ids))) != len(source_ids):
+            raise ContractError(f"{label}.input_sources contains duplicate source IDs")
+        for source_index, source in enumerate(sources):
+            validate_candidate_source(source, schema, f"{label}.input_sources[{source_index}]")
+
+
+def validate_candidate_v2(value: dict[str, Any], schema: dict[str, Any]) -> None:
+    require_exact_fields(value, schema_required(schema, "candidate_evidence_v2"), "candidate evidence v2")
+    if value["schema_version"] != 2 or isinstance(value["schema_version"], bool):
+        raise ContractError("candidate_evidence.schema_version must be 2")
+    validate_bounded_text(value["release_task_id"], "candidate release_task_id", maximum=256, allow_null=True)
+    validate_sha(value["release_head_sha"], "candidate release_head_sha", allow_null=True)
+    if value["plan_revision"] is not None:
+        validate_positive_integer(value["plan_revision"], "candidate plan_revision")
+    for field in ("plan_digest", "gate_registry_digest", "gate_input_digest"):
+        validate_digest(value[field], f"candidate {field}", allow_null=True)
+    if value["status"] not in {"NONE", "STALE", "PASSED", "FAILED"}:
+        raise ContractError(f"unknown candidate status: {value['status']}")
+    if not isinstance(value["gates"], list) or not isinstance(value["gate_registry"], list):
+        raise ContractError("candidate gates and gate_registry must be arrays")
+    legacy = value["legacy"]
+    if legacy is not None:
+        if not isinstance(legacy, dict):
+            raise ContractError("candidate legacy audit must be an object or null")
+        require_exact_fields(legacy, schema_required(schema, "candidate_legacy_audit"), "candidate legacy audit")
+        if legacy["reason"] != "LEGACY_AGGREGATE_ONLY":
+            raise ContractError("candidate legacy reason is unknown")
+        validate_candidate_v1(legacy["original"], schema)
+        validate_digest(legacy["original_digest"], "candidate legacy original_digest")
+        if legacy["original_digest"] != value_digest(legacy["original"]):
+            raise ContractError("candidate legacy original_digest does not preserve the original record")
+        has_material = any((legacy["original"]["release_head_sha"], legacy["original"]["gate_input_digest"],
+                            legacy["original"]["checks"]))
+        expected_status = "STALE" if has_material else "NONE"
+        if value["status"] != expected_status:
+            raise ContractError(f"legacy migration must produce {expected_status}")
+        if value["gates"] or value["gate_registry"] or any(
+            value[field] is not None for field in ("gate_registry_digest", "gate_input_digest")
+        ):
+            raise ContractError("legacy migration must not synthesize Gate identity or per-Gate digests")
+        return
+    if value["status"] == "NONE":
+        retained = (
+            value["release_task_id"], value["release_head_sha"], value["plan_revision"], value["plan_digest"],
+            value["gate_registry_digest"], value["gate_input_digest"], value["gate_registry"], value["gates"],
+        )
+        if any(retained):
+            historical_error("H24", "candidate status NONE cannot retain candidate evidence")
+        return
+    if value["release_task_id"] is None or value["release_head_sha"] is None or value["plan_revision"] is None:
+        raise ContractError("non-NONE candidate v2 requires release task, exact HEAD, and plan fence")
+    if not value["gate_registry"] and value["status"] == "STALE":
+        validate_fallback_candidate(value, schema)
+        return
+    registry = validate_candidate_registry(value["gate_registry"], schema)
+    if value["gate_registry_digest"] != value_digest({"schema_version": 1, "gates": value["gate_registry"]}):
+        raise ContractError("candidate gate_registry_digest does not match the canonical registry")
+    gate_ids = [item.get("gate_id") if isinstance(item, dict) else None for item in value["gates"]]
+    if any(not isinstance(item, str) for item in gate_ids) or gate_ids != sorted_utf8(cast(list[str], gate_ids)):
+        raise ContractError("candidate gates must use canonical gate_id order")
+    if len(value["gates"]) != len(registry):
+        raise ContractError("candidate Gate membership is incomplete or contains unknown rows")
+    gate_inputs: dict[tuple[str, int], str] = {}
+    gate_identities: set[tuple[str, int]] = set()
+    for gate_index, gate in enumerate(value["gates"]):
+        label = f"candidate gates[{gate_index}]"
+        if not isinstance(gate, dict):
+            raise ContractError(f"{label} must be an object")
+        require_exact_fields(gate, schema_required(schema, "candidate_gate_v2"), label)
+        validate_stable_evidence_id(gate["gate_id"], f"{label}.gate_id")
+        validate_positive_integer(gate["gate_revision"], f"{label}.gate_revision")
+        identity = (gate["gate_id"], gate["gate_revision"])
+        if identity in gate_identities:
+            raise ContractError(f"duplicate candidate Gate identity: {identity}")
+        gate_identities.add(identity)
+        registry_gate = registry.get(identity)
+        if registry_gate is None:
+            raise ContractError(f"unknown or revision-mismatched candidate Gate identity: {identity}")
+        if gate["required"] is not registry_gate["required"]:
+            raise ContractError(f"{label}.required differs from the Gate registry")
+        sources = gate["input_sources"]
+        if not isinstance(sources, list) or not sources or len(sources) > 64:
+            raise ContractError(f"{label}.input_sources must contain 1..64 sources")
+        source_ids = [item.get("source_id") if isinstance(item, dict) else None for item in sources]
+        if any(not isinstance(item, str) for item in source_ids) or source_ids != sorted_utf8(cast(list[str], source_ids)):
+            raise ContractError(f"{label}.input_sources must use canonical source_id order")
+        if len(set(cast(list[str], source_ids))) != len(source_ids):
+            raise ContractError(f"{label}.input_sources contains duplicate source IDs")
+        for source_index, source in enumerate(sources):
+            validate_candidate_source(source, schema, f"{label}.input_sources[{source_index}]")
+        integrated = [source for source in sources if source["source_id"] == "integrated-tree"]
+        if (len(integrated) != 1 or integrated[0]["kind"] != "git-commit"
+                or integrated[0]["revision"] != value["release_head_sha"]):
+            raise ContractError(f"{label} is not bound to the exact integrated release_head_sha")
+        registry_checks = {
+            (check["check_id"], check["check_revision"]): check for check in registry_gate["checks"]
+        }
+        declared_sources = set(cast(list[str], source_ids))
+        for registry_check in registry_gate["checks"]:
+            if not set(registry_check["input_source_ids"]).issubset(declared_sources):
+                raise ContractError(f"{label} has an incomplete registered source dependency map")
+        check_inputs: dict[tuple[str, int], str] = {}
+        for registry_check in registry_gate["checks"]:
+            key = (registry_check["check_id"], registry_check["check_revision"])
+            check_inputs[key] = candidate_check_input_digest(gate, registry_gate, registry_check, registry_check)
+        expected_gate_input = candidate_gate_input_digest(gate, registry_gate, check_inputs)
+        gate_inputs[identity] = expected_gate_input
+        if gate["status"] in {"PASSED", "FAILED"}:
+            if gate["input_digest"] != expected_gate_input or gate["evidence_digest"] is None:
+                raise ContractError(f"{label} current result is not bound to its exact input manifest")
+            if gate["invalidation_reason"] is not None:
+                raise ContractError(f"{label} current result cannot retain an invalidation reason")
+            checks = gate["checks"]
+            if not isinstance(checks, list) or len(checks) != len(registry_checks):
+                raise ContractError(f"{label} current result has incomplete check membership")
+            check_ids = [item.get("check_id") if isinstance(item, dict) else None for item in checks]
+            if any(not isinstance(item, str) for item in check_ids) or check_ids != sorted_utf8(cast(list[str], check_ids)):
+                raise ContractError(f"{label}.checks must use canonical check_id order")
+            seen_checks: set[tuple[str, int]] = set()
+            for check_index, check in enumerate(checks):
+                if not isinstance(check, dict):
+                    raise ContractError(f"{label}.checks[{check_index}] must be an object")
+                check_identity = (check.get("check_id"), check.get("check_revision"))
+                if check_identity in seen_checks or check_identity not in registry_checks:
+                    raise ContractError(f"duplicate or unknown check identity in {label}: {check_identity}")
+                seen_checks.add(cast(tuple[str, int], check_identity))
+                validate_candidate_check(
+                    check, gate, registry_checks[cast(tuple[str, int], check_identity)],
+                    check_inputs[cast(tuple[str, int], check_identity)], schema, f"{label}.checks[{check_index}]",
+                )
+            expected_gate_status = "FAILED" if any(check["result"] == "FAIL" for check in checks) else "PASSED"
+            if gate["status"] != expected_gate_status:
+                raise ContractError(f"{label}.status contradicts its current check results")
+            if gate["evidence_digest"] != candidate_gate_evidence_digest(gate):
+                raise ContractError(f"{label}.evidence_digest does not match its canonical evidence envelope")
+        elif gate["status"] in {"STALE", "NONE"}:
+            if (gate["input_digest"] is not None or gate["evidence_digest"] is not None or gate["checks"]
+                    or gate["invalidation_reason"] is None):
+                raise ContractError(f"{label} stale/none row must clear evidence and record a reason")
+        else:
+            raise ContractError(f"{label}.status is unknown")
+    expected_summary = candidate_gate_input_summary(value, gate_inputs)
+    if value["gate_input_digest"] != expected_summary:
+        raise ContractError("candidate gate_input_digest does not match the per-Gate input manifests")
+    expected_status = aggregate_candidate_status(value["gates"])
+    if value["status"] != expected_status:
+        raise ContractError(f"candidate status must aggregate to {expected_status}")
+
+
+def validate_candidate_evidence(value: Any, schema: dict[str, Any]) -> None:
+    if not isinstance(value, dict):
+        raise ContractError("candidate evidence must be an object")
+    if value.get("schema_version") == 2:
+        validate_candidate_v2(value, schema)
+    else:
+        validate_candidate_v1(value, schema)
+
+
+def candidate_manifest_digests(value: dict[str, Any]) -> dict[str, str]:
+    registry = {gate["gate_id"]: gate for gate in value["gate_registry"]}
+    result: dict[str, str] = {}
+    for gate in value["gates"]:
+        registry_gate = registry[gate["gate_id"]]
+        check_inputs: dict[tuple[str, int], str] = {}
+        for registry_check in registry_gate["checks"]:
+            identity = (registry_check["check_id"], registry_check["check_revision"])
+            check_inputs[identity] = candidate_check_input_digest(
+                gate, registry_gate, registry_check, registry_check,
+            )
+        result[gate["gate_id"]] = candidate_gate_input_digest(gate, registry_gate, check_inputs)
+    return result
+
+
+def evaluate_candidate_invalidation(previous: dict[str, Any], current: dict[str, Any],
+                                    schema: dict[str, Any]) -> tuple[str, list[str]]:
+    """Return NONE, AFFECTED, or ALL without mutating either evidence record."""
+    validate_candidate_evidence(previous, schema)
+    validate_candidate_evidence(current, schema)
+    current_gate_ids = sorted_utf8([
+        gate["gate_id"] for gate in current.get("gates", []) if isinstance(gate, dict) and "gate_id" in gate
+    ])
+    if previous.get("schema_version") != 2 or current.get("schema_version") != 2:
+        if previous == current:
+            return "NONE", []
+        return "ALL", current_gate_ids
+    if previous.get("legacy") is not None or current.get("legacy") is not None:
+        if previous == current:
+            return "NONE", []
+        return "ALL", current_gate_ids
+    if (previous.get("release_task_id"), previous.get("release_head_sha")) != (
+        current.get("release_task_id"), current.get("release_head_sha")
+    ):
+        return "ALL", current_gate_ids
+    if not previous.get("gate_registry") or not current.get("gate_registry"):
+        return "ALL", current_gate_ids
+    previous_membership = {
+        gate["gate_id"]: gate["required"] for gate in previous["gate_registry"]
+    }
+    current_membership = {
+        gate["gate_id"]: gate["required"] for gate in current["gate_registry"]
+    }
+    if previous_membership != current_membership:
+        return "ALL", current_gate_ids
+    try:
+        previous_inputs = candidate_manifest_digests(previous)
+        current_inputs = candidate_manifest_digests(current)
+    except (ContractError, KeyError, TypeError):
+        return "ALL", current_gate_ids
+    affected = sorted_utf8([
+        gate_id for gate_id in current_membership if previous_inputs.get(gate_id) != current_inputs.get(gate_id)
+    ])
+    return ("AFFECTED", affected) if affected else ("NONE", [])
+
+
+def migrate_candidate_evidence(value: dict[str, Any], schema: dict[str, Any], *,
+                               release_task_id: str | None = None, plan_revision: int | None = None,
+                               plan_digest: str | None = None) -> dict[str, Any]:
+    if value.get("schema_version") == 2:
+        validate_candidate_v2(value, schema)
+        return copy.deepcopy(value)
+    validate_candidate_v1(value, schema)
+    if release_task_id is not None:
+        validate_bounded_text(release_task_id, "release_task_id", maximum=256)
+    if plan_revision is not None:
+        validate_positive_integer(plan_revision, "plan_revision")
+    validate_digest(plan_digest, "plan_digest", allow_null=True)
+    has_material = any((value["release_head_sha"], value["gate_input_digest"], value["checks"]))
+    migrated = {
+        "schema_version": 2,
+        "release_task_id": release_task_id,
+        "release_head_sha": value["release_head_sha"],
+        "plan_revision": plan_revision,
+        "plan_digest": plan_digest,
+        "gate_registry_digest": None,
+        "gate_registry": [],
+        "gate_input_digest": None,
+        "status": "STALE" if has_material else "NONE",
+        "legacy": {
+            "reason": "LEGACY_AGGREGATE_ONLY",
+            "original_digest": value_digest(value),
+            "original": copy.deepcopy(value),
+        },
+        "gates": [],
+    }
+    validate_candidate_v2(migrated, schema)
+    return migrated
 
 
 def validate_previous_pairing(args: argparse.Namespace) -> None:
@@ -1297,6 +1878,50 @@ def handoff_identity(handoff: dict[str, Any]) -> tuple[Any, ...]:
 
 
 def validate_candidate_transition(previous: dict[str, Any], current: dict[str, Any]) -> None:
+    previous_version = previous.get("schema_version", 1)
+    current_version = current.get("schema_version", 1)
+    if previous_version == 1 and current_version == 2:
+        legacy = current.get("legacy")
+        if not isinstance(legacy, dict) or legacy.get("original") != previous:
+            historical_error("H25", "v1 candidate migration did not preserve the exact aggregate record")
+        if current["status"] not in {"NONE", "STALE"}:
+            historical_error("H25", "v1 candidate migration promoted aggregate evidence")
+        return
+    if previous_version == 2 and current_version == 1:
+        historical_error("H25", "candidate evidence cannot downgrade from per-Gate v2 to aggregate v1")
+    if previous_version == 2 and current_version == 2:
+        if previous.get("legacy") is not None or current.get("legacy") is not None:
+            if previous != current:
+                historical_error("H25", "migrated legacy audit evidence was rewritten")
+            return
+        previous_identity = (previous.get("release_task_id"), previous.get("release_head_sha"))
+        current_identity = (current.get("release_task_id"), current.get("release_head_sha"))
+        previous_gates = {
+            (gate["gate_id"], gate["gate_revision"]): gate for gate in previous.get("gates", [])
+        }
+        current_gates = {
+            (gate["gate_id"], gate["gate_revision"]): gate for gate in current.get("gates", [])
+        }
+        membership_changed = set(previous_gates) != set(current_gates)
+        for identity in set(previous_gates) & set(current_gates):
+            old_gate = previous_gates[identity]
+            new_gate = current_gates[identity]
+            old_current = old_gate.get("status") in {"PASSED", "FAILED"}
+            new_current = new_gate.get("status") in {"PASSED", "FAILED"}
+            evidence_reused = (old_gate.get("evidence_digest") is not None
+                               and old_gate.get("evidence_digest") == new_gate.get("evidence_digest"))
+            input_changed = old_gate.get("input_digest") != new_gate.get("input_digest")
+            if previous_identity != current_identity and old_current and new_current and evidence_reused:
+                historical_error("H25", "per-Gate evidence was reused for a different candidate identity")
+            if membership_changed and old_current and new_current and evidence_reused:
+                historical_error("H25", "Gate membership changed while prior evidence remained current")
+            if input_changed and old_current and new_current and evidence_reused:
+                historical_error("H25", "per-Gate evidence remained usable after its relevant inputs changed")
+            if (not input_changed and old_current and new_current
+                    and {old_gate["status"], new_gate["status"]} == {"PASSED", "FAILED"}
+                    and evidence_reused):
+                historical_error("H26", "per-Gate result flipped without new evidence")
+        return
     previous_status = previous["status"]
     current_status = current["status"]
     if (previous["release_head_sha"] != current["release_head_sha"]
@@ -2428,6 +3053,222 @@ class ContractScenarios(unittest.TestCase):
         self.assertEqual(classify_task_change(task, changed), "REVISE")
 
 
+class CandidateEvidenceScenarios(unittest.TestCase):
+    """Executable N01-N21 matrix plus positive and migration fixtures."""
+
+    def setUp(self) -> None:
+        self.schema = ACTIVE_SCHEMA
+
+    def assert_rejected(self, candidate: dict[str, Any]) -> None:
+        with self.assertRaises(ContractError):
+            validate_candidate_evidence(candidate, self.schema)
+
+    def test_positive_current_candidate(self) -> None:
+        candidate = make_candidate_v2()
+        validate_candidate_evidence(candidate, self.schema)
+        self.assertEqual(candidate["status"], "PASSED")
+
+    def test_n01_duplicate_and_position_derived_gate_identity(self) -> None:
+        duplicate = make_candidate_v2()
+        duplicate["gates"].append(copy.deepcopy(duplicate["gates"][0]))
+        self.assert_rejected(duplicate)
+        positional = make_candidate_v2()
+        positional["gate_registry"][0]["gate_id"] = "gate-1"
+        positional["gates"][0]["gate_id"] = "gate-1"
+        self.assert_rejected(positional)
+
+    def test_n02_unknown_gate_and_check_identity(self) -> None:
+        unknown_gate = make_candidate_v2()
+        unknown_gate["gates"][0]["gate_id"] = "unknown-gate"
+        self.assert_rejected(unknown_gate)
+        unknown_check = make_candidate_v2()
+        unknown_check["gates"][0]["checks"][0]["check_id"] = "unknown-check"
+        self.assert_rejected(unknown_check)
+
+    def test_n03_required_gate_missing(self) -> None:
+        candidate = make_candidate_v2()
+        candidate["gates"].pop()
+        self.assert_rejected(candidate)
+
+    def test_n04_aggregate_pass_cannot_hide_stale_gate(self) -> None:
+        candidate = make_candidate_v2(stale_gates={"targeted-tests"})
+        candidate["status"] = "PASSED"
+        self.assert_rejected(candidate)
+
+    def test_n05_gate_input_digest_mismatch(self) -> None:
+        candidate = make_candidate_v2()
+        candidate["gates"][0]["input_digest"] = "sha256:" + "0" * 64
+        self.assert_rejected(candidate)
+
+    def test_n06_changed_check_input_cannot_reuse_evidence(self) -> None:
+        candidate = make_candidate_v2()
+        gate = candidate["gates"][1]
+        gate["input_sources"][0]["value_digest"] = value_digest({"commands": ["changed"]})
+        refresh_candidate_inputs(candidate, refresh_evidence=False)
+        self.assert_rejected(candidate)
+
+    def test_n07_gate_evidence_digest_mismatch(self) -> None:
+        candidate = make_candidate_v2()
+        candidate["gates"][0]["evidence_digest"] = "sha256:" + "0" * 64
+        self.assert_rejected(candidate)
+
+    def test_n08_result_provenance_and_artifact_contradiction(self) -> None:
+        candidate = make_candidate_v2()
+        candidate["gates"][0]["checks"][0]["exit_code"] = 1
+        candidate["gates"][0]["checks"][0]["evidence_digest"] = candidate_check_evidence_digest(
+            candidate["gates"][0], candidate["gates"][0]["checks"][0],
+        )
+        self.assert_rejected(candidate)
+
+    def test_n09_head_change_rejects_old_binding(self) -> None:
+        candidate = make_candidate_v2()
+        candidate["release_head_sha"] = "b" * 40
+        self.assert_rejected(candidate)
+
+    def test_n10_selective_invalidation_preserves_unaffected_gate(self) -> None:
+        previous = make_candidate_v2()
+        candidate = make_candidate_v2(plan_revision=2, stale_gates={"targeted-tests"})
+        validate_candidate_evidence(candidate, self.schema)
+        scope, affected = evaluate_candidate_invalidation(previous, candidate, self.schema)
+        statuses = {gate["gate_id"]: gate["status"] for gate in candidate["gates"]}
+        self.assertEqual(statuses, {"base-relative-audit": "PASSED", "targeted-tests": "STALE"})
+        self.assertEqual((scope, affected), ("AFFECTED", ["targeted-tests"]))
+        self.assertEqual(candidate["status"], "STALE")
+
+    def test_n11_missing_mapping_uses_whole_candidate_fallback(self) -> None:
+        candidate = make_whole_candidate_stale("MAPPING_AMBIGUOUS")
+        validate_candidate_evidence(candidate, self.schema)
+        self.assertTrue(all(gate["status"] == "STALE" for gate in candidate["gates"]))
+
+    def test_n12a_status_only_plan_write_does_not_invalidate(self) -> None:
+        previous = make_candidate_v2()
+        current = copy.deepcopy(previous)
+        current["plan_revision"] = 2
+        current["plan_digest"] = value_digest({"status_only_write": 2})
+        validate_candidate_evidence(current, self.schema)
+        validate_candidate_transition(previous, current)
+        self.assertEqual(evaluate_candidate_invalidation(previous, current, self.schema), ("NONE", []))
+        self.assertEqual(current["gate_input_digest"], previous["gate_input_digest"])
+
+    def test_n12b_semantic_source_change_is_selective(self) -> None:
+        current = make_candidate_v2(plan_revision=2, stale_gates={"targeted-tests"})
+        validate_candidate_evidence(current, self.schema)
+        self.assertEqual(current["gates"][0]["status"], "PASSED")
+        self.assertEqual(current["gates"][1]["status"], "STALE")
+
+    def test_n12_unmapped_semantic_change_stales_every_gate(self) -> None:
+        candidate = make_whole_candidate_stale("MAPPING_AMBIGUOUS")
+        validate_candidate_evidence(candidate, self.schema)
+
+    def test_n13_required_set_change_is_incomplete_until_revalidated(self) -> None:
+        candidate = make_whole_candidate_stale("REGISTRY_AMBIGUOUS")
+        validate_candidate_evidence(candidate, self.schema)
+        self.assertEqual(candidate["status"], "STALE")
+
+    def test_n14_legacy_evidence_migrates_to_stale_without_identity_synthesis(self) -> None:
+        legacy = make_candidate("PASSED", "a" * 40, "PASS")
+        migrated = migrate_candidate_evidence(
+            legacy, self.schema, release_task_id="release-1", plan_revision=1,
+            plan_digest=value_digest({"plan": 1}),
+        )
+        validate_candidate_evidence(migrated, self.schema)
+        self.assertEqual(migrated["status"], "STALE")
+        self.assertEqual(migrated["gates"], [])
+        self.assertEqual(migrated["legacy"]["original"], legacy)
+
+    def test_n15_legacy_none_remains_none(self) -> None:
+        legacy = {"release_head_sha": None, "gate_input_digest": None, "status": "NONE", "checks": []}
+        migrated = migrate_candidate_evidence(legacy, self.schema)
+        validate_candidate_evidence(migrated, self.schema)
+        self.assertEqual(migrated["status"], "NONE")
+
+    def test_n16_explicit_optional_failure_does_not_fail_candidate(self) -> None:
+        candidate = make_candidate_v2(optional_targeted=True, failed_gates={"targeted-tests"})
+        validate_candidate_evidence(candidate, self.schema)
+        self.assertEqual(candidate["status"], "PASSED")
+
+    def test_n17_unknown_requiredness_is_rejected(self) -> None:
+        candidate = make_candidate_v2()
+        candidate["gate_registry"][0]["required"] = None
+        candidate["gates"][0]["required"] = None
+        self.assert_rejected(candidate)
+
+    def test_n18_secret_or_unbounded_output_is_rejected(self) -> None:
+        secret = make_candidate_v2()
+        secret["gates"][0]["input_sources"][0]["locator"] = "https://user:password@example.invalid/data"
+        self.assert_rejected(secret)
+        unbounded = make_candidate_v2()
+        unbounded["gates"][0]["checks"][0]["command"] = "x" * 1025
+        self.assert_rejected(unbounded)
+
+    def test_n19_mixed_plan_fence_is_rejected_by_master_card(self) -> None:
+        master = make_active_master_card()
+        master["candidate_evidence"] = make_candidate_v2(plan_revision=2)
+        with self.assertRaises(ContractError):
+            validate_master_card(master, self.schema)
+
+    def test_n20_stale_precedes_valid_failure(self) -> None:
+        candidate = make_candidate_v2(
+            stale_gates={"base-relative-audit"}, failed_gates={"targeted-tests"},
+        )
+        validate_candidate_evidence(candidate, self.schema)
+        self.assertEqual(candidate["status"], "STALE")
+
+    def test_n21_tracked_validator_change_means_new_head_and_all_stale(self) -> None:
+        previous = make_candidate_v2(head="a" * 40)
+        current = make_whole_candidate_stale("HEAD_CHANGED")
+        current["release_head_sha"] = "b" * 40
+        validate_candidate_evidence(current, self.schema)
+        validate_candidate_transition(previous, current)
+        self.assertEqual(evaluate_candidate_invalidation(previous, current, self.schema), (
+            "ALL", ["base-relative-audit", "targeted-tests"],
+        ))
+        self.assertTrue(all(gate["status"] == "STALE" for gate in current["gates"]))
+
+    def test_migration_is_idempotent(self) -> None:
+        legacy = make_candidate("FAILED", "a" * 40, "FAIL")
+        once = migrate_candidate_evidence(legacy, self.schema, release_task_id="release-1", plan_revision=1)
+        twice = migrate_candidate_evidence(once, self.schema, release_task_id="ignored", plan_revision=99)
+        self.assertEqual(once, twice)
+
+    def test_public_cli_candidate_fixtures_and_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            valid_path = root / "candidate-v2.json"
+            write_json_fixture(valid_path, make_candidate_v2())
+            valid = run_public_cli("--candidate-evidence-json", str(valid_path))
+            self.assertEqual(valid.returncode, 0, valid.stderr)
+
+            selective_path = root / "candidate-selective.json"
+            write_json_fixture(selective_path, make_candidate_v2(
+                plan_revision=2, stale_gates={"targeted-tests"},
+            ))
+            compared = run_public_cli(
+                "--previous-candidate-evidence-json", str(valid_path),
+                "--candidate-evidence-json", str(selective_path),
+            )
+            self.assertEqual(compared.returncode, 0, compared.stderr)
+            self.assertIn("candidate invalidation: AFFECTED gates=targeted-tests", compared.stdout)
+
+            invalid = make_candidate_v2()
+            invalid["gate_input_digest"] = "sha256:" + "0" * 64
+            invalid_path = root / "candidate-invalid.json"
+            write_json_fixture(invalid_path, invalid)
+            rejected = run_public_cli("--candidate-evidence-json", str(invalid_path))
+            self.assertEqual(rejected.returncode, 1, rejected.stdout)
+
+            legacy_path = root / "candidate-v1.json"
+            write_json_fixture(legacy_path, make_candidate("PASSED", "a" * 40, "PASS"))
+            migrated = run_public_cli(
+                "--candidate-evidence-json", str(legacy_path), "--migrate-candidate-evidence",
+                "--release-task-id", "release-1", "--candidate-plan-revision", "1",
+            )
+            self.assertEqual(migrated.returncode, 0, migrated.stderr)
+            projection = json.loads(migrated.stdout.splitlines()[0])
+            self.assertEqual(projection["status"], "STALE")
+            self.assertEqual(projection["legacy"]["original"]["status"], "PASSED")
+
+
 class HistoricalContractScenarios(unittest.TestCase):
     def setUp(self) -> None:
         self.schema = ACTIVE_SCHEMA
@@ -3076,6 +3917,192 @@ def make_candidate(status: str, head: str, result: str) -> dict[str, Any]:
     }
 
 
+def make_candidate_registry_gate(gate_id: str, check_id: str, source_ids: list[str], *,
+                                 required: bool = True) -> dict[str, Any]:
+    command_spec = {
+        "argv": ["python3", "scripts/validate_contracts.py"] if check_id == "contract-validator"
+        else ["git", "diff", "--check"],
+        "success_exit_codes": [0],
+        "timeout_seconds": 300,
+    }
+    check_runner = {"network": "denied", "runner": "local", "working_tree": "integrated-master"}
+    gate_definition = {"predicate": "all-checks-pass", "required": required}
+    gate_runner = {"atomic_result": True, "network": "denied"}
+    return {
+        "gate_id": gate_id,
+        "gate_revision": 1,
+        "required": required,
+        "gate_definition": gate_definition,
+        "gate_definition_digest": value_digest(gate_definition),
+        "runner_policy": gate_runner,
+        "runner_policy_digest": value_digest(gate_runner),
+        "checks": [{
+            "check_id": check_id,
+            "check_revision": 1,
+            "command_spec": command_spec,
+            "command_spec_digest": value_digest(command_spec),
+            "runner_policy": check_runner,
+            "runner_policy_digest": value_digest(check_runner),
+            "input_source_ids": sorted_utf8(source_ids),
+        }],
+    }
+
+
+def make_candidate_source(source_id: str, kind: str, locator: str, revision: str | None,
+                          semantic_value: Any) -> dict[str, Any]:
+    return {
+        "source_id": source_id,
+        "kind": kind,
+        "locator": locator,
+        "revision": revision,
+        "value_digest": value_digest(semantic_value),
+    }
+
+
+def make_candidate_v2(*, head: str = "a" * 40, plan_revision: int = 1,
+                      plan_digest: str | None = None, stale_gates: set[str] | None = None,
+                      failed_gates: set[str] | None = None, optional_targeted: bool = False) -> dict[str, Any]:
+    stale_gates = stale_gates or set()
+    failed_gates = failed_gates or set()
+    plan_digest = plan_digest or value_digest({"semantic_plan": 1})
+    registry = [
+        make_candidate_registry_gate(
+            "base-relative-audit", "diff-integrity", ["base-tree", "integrated-tree"], required=True,
+        ),
+        make_candidate_registry_gate(
+            "targeted-tests", "contract-validator", ["acceptance-policy", "integrated-tree"],
+            required=not optional_targeted,
+        ),
+    ]
+    gates: list[dict[str, Any]] = []
+    source_sets = {
+        "base-relative-audit": [
+            make_candidate_source("base-tree", "git-commit", "task-frozen-baseline", "b" * 40,
+                                  {"commit": "b" * 40}),
+            make_candidate_source("integrated-tree", "git-commit", "master-integrated-tree", head,
+                                  {"commit": head}),
+        ],
+        "targeted-tests": [
+            make_candidate_source("acceptance-policy", "acceptance",
+                                  "dispatch-plan#task.targeted-tests.acceptance",
+                                  f"plan-revision-{plan_revision}", {"commands": ["contracts"]}),
+            make_candidate_source("integrated-tree", "git-commit", "master-integrated-tree", head,
+                                  {"commit": head}),
+        ],
+    }
+    for registry_gate in registry:
+        gate_id = registry_gate["gate_id"]
+        gate = {
+            "gate_id": gate_id,
+            "gate_revision": registry_gate["gate_revision"],
+            "required": registry_gate["required"],
+            "status": "STALE" if gate_id in stale_gates else "PASSED",
+            "input_digest": None,
+            "evidence_digest": None,
+            "input_sources": source_sets[gate_id],
+            "checks": [],
+            "invalidation_reason": "INPUT_SOURCE_CHANGED" if gate_id in stale_gates else None,
+        }
+        registry_check = registry_gate["checks"][0]
+        check_input = candidate_check_input_digest(gate, registry_gate, registry_check, registry_check)
+        if gate_id not in stale_gates:
+            failed = gate_id in failed_gates
+            check = {
+                "check_id": registry_check["check_id"],
+                "check_revision": registry_check["check_revision"],
+                "command": " ".join(registry_check["command_spec"]["argv"]),
+                "input_source_ids": registry_check["input_source_ids"],
+                "result": "FAIL" if failed else "PASS",
+                "input_digest": check_input,
+                "evidence_digest": None,
+                "execution_ref": f"local-master-{gate_id}-001",
+                "exit_code": 1 if failed else 0,
+                "stdout_digest": value_digest({"bounded_output": gate_id}),
+                "stderr_digest": value_digest({"bounded_error": failed}),
+                "observed_artifacts": [],
+                "runner_digest": value_digest({"runner": "local", "version": 1}),
+                "observed_at": "2026-08-30T00:00:00Z",
+            }
+            check["evidence_digest"] = candidate_check_evidence_digest(gate, check)
+            gate["checks"] = [check]
+            gate["input_digest"] = candidate_gate_input_digest(
+                gate, registry_gate, {(check["check_id"], check["check_revision"]): check_input},
+            )
+            gate["status"] = "FAILED" if failed else "PASSED"
+            gate["evidence_digest"] = candidate_gate_evidence_digest(gate)
+        gates.append(gate)
+    candidate = {
+        "schema_version": 2,
+        "release_task_id": "release-1",
+        "release_head_sha": head,
+        "plan_revision": plan_revision,
+        "plan_digest": plan_digest,
+        "gate_registry_digest": value_digest({"schema_version": 1, "gates": registry}),
+        "gate_registry": registry,
+        "gate_input_digest": None,
+        "status": aggregate_candidate_status(gates),
+        "legacy": None,
+        "gates": gates,
+    }
+    registry_by_id = {(gate["gate_id"], gate["gate_revision"]): gate for gate in registry}
+    gate_inputs: dict[tuple[str, int], str] = {}
+    for gate in gates:
+        registry_gate = registry_by_id[(gate["gate_id"], gate["gate_revision"])]
+        check_inputs = {}
+        for registry_check in registry_gate["checks"]:
+            key = (registry_check["check_id"], registry_check["check_revision"])
+            check_inputs[key] = candidate_check_input_digest(gate, registry_gate, registry_check, registry_check)
+        gate_inputs[(gate["gate_id"], gate["gate_revision"])] = candidate_gate_input_digest(
+            gate, registry_gate, check_inputs,
+        )
+    candidate["gate_input_digest"] = candidate_gate_input_summary(candidate, gate_inputs)
+    return candidate
+
+
+def make_whole_candidate_stale(reason: str = "MAPPING_AMBIGUOUS") -> dict[str, Any]:
+    candidate = make_candidate_v2()
+    candidate.update({"gate_registry": [], "gate_registry_digest": None, "gate_input_digest": None, "status": "STALE"})
+    for gate in candidate["gates"]:
+        gate.update({
+            "status": "STALE", "input_digest": None, "evidence_digest": None, "checks": [],
+            "invalidation_reason": reason,
+        })
+    return candidate
+
+
+def refresh_candidate_inputs(candidate: dict[str, Any], *, refresh_evidence: bool = False) -> None:
+    registry = {
+        (gate["gate_id"], gate["gate_revision"]): gate for gate in candidate["gate_registry"]
+    }
+    candidate["gate_registry_digest"] = value_digest({
+        "schema_version": 1, "gates": candidate["gate_registry"],
+    })
+    gate_inputs: dict[tuple[str, int], str] = {}
+    for gate in candidate["gates"]:
+        identity = (gate["gate_id"], gate["gate_revision"])
+        registry_gate = registry[identity]
+        check_inputs: dict[tuple[str, int], str] = {}
+        evidence_checks = {
+            (check["check_id"], check["check_revision"]): check for check in gate["checks"]
+        }
+        for registry_check in registry_gate["checks"]:
+            check_identity = (registry_check["check_id"], registry_check["check_revision"])
+            check_input = candidate_check_input_digest(gate, registry_gate, registry_check, registry_check)
+            check_inputs[check_identity] = check_input
+            evidence_check = evidence_checks.get(check_identity)
+            if evidence_check is not None:
+                evidence_check["input_digest"] = check_input
+                if refresh_evidence:
+                    evidence_check["evidence_digest"] = candidate_check_evidence_digest(gate, evidence_check)
+        gate_input = candidate_gate_input_digest(gate, registry_gate, check_inputs)
+        gate_inputs[identity] = gate_input
+        if gate["status"] in {"PASSED", "FAILED"}:
+            gate["input_digest"] = gate_input
+            if refresh_evidence:
+                gate["evidence_digest"] = candidate_gate_evidence_digest(gate)
+    candidate["gate_input_digest"] = candidate_gate_input_summary(candidate, gate_inputs)
+
+
 def make_task_spec_at(path: Path) -> dict[str, Any]:
     spec = make_task_spec()
     spec["task_spec_path"] = str(path)
@@ -3256,6 +4283,12 @@ def run_self_tests() -> bool:
     return result.wasSuccessful()
 
 
+def run_candidate_evidence_tests() -> bool:
+    suite = unittest.defaultTestLoader.loadTestsFromTestCase(CandidateEvidenceScenarios)
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    return result.wasSuccessful()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
@@ -3266,8 +4299,22 @@ def main() -> int:
     parser.add_argument("--previous-worker-card", type=Path)
     parser.add_argument("--master-card-json", type=Path)
     parser.add_argument("--previous-master-card", type=Path)
+    parser.add_argument("--candidate-evidence-json", type=Path)
+    parser.add_argument("--previous-candidate-evidence-json", type=Path)
+    parser.add_argument("--migrate-candidate-evidence", action="store_true")
+    parser.add_argument("--release-task-id")
+    parser.add_argument("--candidate-plan-revision", type=int)
+    parser.add_argument("--candidate-plan-digest")
+    parser.add_argument("--candidate-evidence-self-test", action="store_true")
     parser.add_argument("--skip-self-test", action="store_true")
     args = parser.parse_args()
+
+    if args.migrate_candidate_evidence and args.candidate_evidence_json is None:
+        parser.error("--migrate-candidate-evidence requires --candidate-evidence-json")
+    if args.previous_candidate_evidence_json and args.candidate_evidence_json is None:
+        parser.error("--previous-candidate-evidence-json requires --candidate-evidence-json")
+    if args.previous_candidate_evidence_json and args.migrate_candidate_evidence:
+        parser.error("candidate comparison and migration are separate operations")
 
     try:
         validate_previous_pairing(args)
@@ -3302,6 +4349,22 @@ def main() -> int:
         if args.master_card_json:
             current_master = load_json(args.master_card_json)
             validate_master_card(current_master, schema)
+        if args.candidate_evidence_json:
+            candidate = load_json(args.candidate_evidence_json)
+            if args.migrate_candidate_evidence:
+                candidate = migrate_candidate_evidence(
+                    candidate, schema, release_task_id=args.release_task_id,
+                    plan_revision=args.candidate_plan_revision, plan_digest=args.candidate_plan_digest,
+                )
+                print(json.dumps(candidate, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+            else:
+                validate_candidate_evidence(candidate, schema)
+                if args.previous_candidate_evidence_json:
+                    previous_candidate = load_previous_json(
+                        args.previous_candidate_evidence_json, "candidate evidence",
+                    )
+                    scope, affected = evaluate_candidate_invalidation(previous_candidate, candidate, schema)
+                    print(f"candidate invalidation: {scope} gates={','.join(affected) if affected else 'none'}")
 
         if args.previous_plan:
             previous_plan = load_previous_json(args.previous_plan, "Dispatch Plan")
@@ -3333,8 +4396,12 @@ def main() -> int:
         print(f"{prefix} {error}", file=sys.stderr)
         return 1
 
-    if not args.skip_self_test and not run_self_tests():
-        return 1
+    if not args.skip_self_test:
+        selected_tests_passed = (
+            run_candidate_evidence_tests() if args.candidate_evidence_self_test else run_self_tests()
+        )
+        if not selected_tests_passed:
+            return 1
     if is_historical:
         print_historical_report(pair_results, previous_cross, current_cross,
                                 historical_completeness(previous_plan, previous_worker, previous_master))
