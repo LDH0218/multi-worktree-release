@@ -990,7 +990,7 @@ def validate_worker_card(value: dict[str, Any], schema: dict[str, Any],
             raise ContractError(f"last_task is missing completed identity fields: {missing}")
 
 
-def validate_master_card(value: dict[str, Any], schema: dict[str, Any]) -> None:
+def validate_master_card(value: dict[str, Any], schema: dict[str, Any], *, historical: bool = False) -> None:
     require_exact_fields(value, schema_required(schema, "master_card"), "Master card")
     if value["schema_version"] != 1:
         raise ContractError("master_card.schema_version must be 1")
@@ -1024,6 +1024,11 @@ def validate_master_card(value: dict[str, Any], schema: dict[str, Any]) -> None:
             raise ContractError(f"{handoff['state']} Worker handoff cannot retain integrated_as_sha")
     evidence = value["candidate_evidence"]
     validate_candidate_evidence(evidence, schema)
+    if (evidence.get("schema_version") != 2 and evidence["status"] in {"PASSED", "FAILED"}
+            and not historical):
+        raise ContractError(
+            "current Master Card cannot use aggregate-only v1 PASSED/FAILED evidence; migrate it to v2 STALE"
+        )
     if evidence.get("schema_version") == 2 and evidence["status"] != "NONE" and evidence["legacy"] is None:
         if evidence["release_task_id"] != value["release_task_id"]:
             raise ContractError("candidate release_task_id differs from the Master release lock")
@@ -1590,6 +1595,10 @@ def candidate_manifest_digests(value: dict[str, Any]) -> dict[str, str]:
     return result
 
 
+def legacy_v1_has_evidence(value: dict[str, Any]) -> bool:
+    return any((value["release_head_sha"], value["gate_input_digest"], value["checks"]))
+
+
 def evaluate_candidate_invalidation(previous: dict[str, Any], current: dict[str, Any],
                                     schema: dict[str, Any]) -> tuple[str, list[str]]:
     """Return NONE, AFFECTED, or ALL without mutating either evidence record."""
@@ -1599,9 +1608,10 @@ def evaluate_candidate_invalidation(previous: dict[str, Any], current: dict[str,
         gate["gate_id"] for gate in current.get("gates", []) if isinstance(gate, dict) and "gate_id" in gate
     ])
     if previous.get("schema_version") != 2 or current.get("schema_version") != 2:
-        if previous == current:
-            return "NONE", []
-        return "ALL", current_gate_ids
+        legacy_values = [value for value in (previous, current) if value.get("schema_version") != 2]
+        if any(legacy_v1_has_evidence(value) for value in legacy_values):
+            return "ALL", current_gate_ids
+        return "NONE", []
     if previous.get("legacy") is not None or current.get("legacy") is not None:
         if previous == current:
             return "NONE", []
@@ -1643,7 +1653,7 @@ def migrate_candidate_evidence(value: dict[str, Any], schema: dict[str, Any], *,
     if plan_revision is not None:
         validate_positive_integer(plan_revision, "plan_revision")
     validate_digest(plan_digest, "plan_digest", allow_null=True)
-    has_material = any((value["release_head_sha"], value["gate_input_digest"], value["checks"]))
+    has_material = legacy_v1_has_evidence(value)
     migrated = {
         "schema_version": 2,
         "release_task_id": release_task_id,
@@ -3182,6 +3192,27 @@ class CandidateEvidenceScenarios(unittest.TestCase):
         validate_candidate_evidence(migrated, self.schema)
         self.assertEqual(migrated["status"], "NONE")
 
+    def test_current_master_fences_legacy_passed_and_failed_but_preserves_read_compatibility(self) -> None:
+        for status, result in (("PASSED", "PASS"), ("FAILED", "FAIL")):
+            with self.subTest(status=status):
+                legacy = make_candidate(status, "a" * 40, result)
+                validate_candidate_evidence(legacy, self.schema)
+                master = make_active_master_card()
+                master["candidate_evidence"] = legacy
+                with self.assertRaisesRegex(ContractError, "migrate it to v2 STALE"):
+                    validate_master_card(master, self.schema)
+                validate_master_card(master, self.schema, historical=True)
+
+        stale_master = make_active_master_card()
+        stale_master["candidate_evidence"] = make_candidate("STALE", "a" * 40, "PASS")
+        validate_master_card(stale_master, self.schema)
+
+    def test_legacy_comparison_is_conservative_except_for_empty_none(self) -> None:
+        legacy = make_candidate("PASSED", "a" * 40, "PASS")
+        self.assertEqual(evaluate_candidate_invalidation(legacy, legacy, self.schema), ("ALL", []))
+        empty = {"release_head_sha": None, "gate_input_digest": None, "status": "NONE", "checks": []}
+        self.assertEqual(evaluate_candidate_invalidation(empty, empty, self.schema), ("NONE", []))
+
     def test_n16_explicit_optional_failure_does_not_fail_candidate(self) -> None:
         candidate = make_candidate_v2(optional_targeted=True, failed_gates={"targeted-tests"})
         validate_candidate_evidence(candidate, self.schema)
@@ -3259,6 +3290,24 @@ class CandidateEvidenceScenarios(unittest.TestCase):
 
             legacy_path = root / "candidate-v1.json"
             write_json_fixture(legacy_path, make_candidate("PASSED", "a" * 40, "PASS"))
+            legacy_comparison = run_public_cli(
+                "--previous-candidate-evidence-json", str(legacy_path),
+                "--candidate-evidence-json", str(legacy_path),
+            )
+            self.assertEqual(legacy_comparison.returncode, 0, legacy_comparison.stderr)
+            self.assertIn("candidate invalidation: ALL gates=none", legacy_comparison.stdout)
+
+            legacy_none_path = root / "candidate-v1-none.json"
+            write_json_fixture(legacy_none_path, {
+                "release_head_sha": None, "gate_input_digest": None, "status": "NONE", "checks": [],
+            })
+            none_comparison = run_public_cli(
+                "--previous-candidate-evidence-json", str(legacy_none_path),
+                "--candidate-evidence-json", str(legacy_none_path),
+            )
+            self.assertEqual(none_comparison.returncode, 0, none_comparison.stderr)
+            self.assertIn("candidate invalidation: NONE gates=none", none_comparison.stdout)
+
             migrated = run_public_cli(
                 "--candidate-evidence-json", str(legacy_path), "--migrate-candidate-evidence",
                 "--release-task-id", "release-1", "--candidate-plan-revision", "1",
@@ -3267,6 +3316,34 @@ class CandidateEvidenceScenarios(unittest.TestCase):
             projection = json.loads(migrated.stdout.splitlines()[0])
             self.assertEqual(projection["status"], "STALE")
             self.assertEqual(projection["legacy"]["original"]["status"], "PASSED")
+
+            previous_master = make_active_master_card()
+            previous_master["candidate_evidence"] = make_candidate("PASSED", "a" * 40, "PASS")
+            current_master = advance_record(previous_master)
+            current_master["candidate_evidence"] = migrate_candidate_evidence(
+                previous_master["candidate_evidence"], self.schema,
+                release_task_id=previous_master["release_task_id"],
+                plan_revision=previous_master["plan_revision"],
+                plan_digest=previous_master["dispatch_plan_digest"],
+            )
+            previous_master_path = root / "master-v1-passed.json"
+            current_master_path = root / "master-v2-stale.json"
+            write_json_fixture(previous_master_path, previous_master)
+            write_json_fixture(current_master_path, current_master)
+            current_rejected = run_public_cli("--master-card-json", str(previous_master_path))
+            self.assertEqual(current_rejected.returncode, 1, current_rejected.stdout)
+            failed_master = make_active_master_card()
+            failed_master["candidate_evidence"] = make_candidate("FAILED", "a" * 40, "FAIL")
+            failed_master_path = root / "master-v1-failed.json"
+            write_json_fixture(failed_master_path, failed_master)
+            failed_rejected = run_public_cli("--master-card-json", str(failed_master_path))
+            self.assertEqual(failed_rejected.returncode, 1, failed_rejected.stdout)
+            historical_migration = run_public_cli(
+                "--previous-master-card", str(previous_master_path),
+                "--master-card-json", str(current_master_path),
+            )
+            self.assertEqual(historical_migration.returncode, 0, historical_migration.stderr)
+            self.assertIn("historical master-card: PASS", historical_migration.stdout)
 
 
 class HistoricalContractScenarios(unittest.TestCase):
@@ -4382,7 +4459,7 @@ def main() -> int:
         if args.previous_master_card:
             previous_master = load_previous_json(args.previous_master_card, "Master Card")
             validate_historical_schema_pair(previous_master, current_master, "Master Card")
-            validate_master_card(previous_master, schema)
+            validate_master_card(previous_master, schema, historical=True)
             pair_results.append(("master-card", previous_master, current_master,
                                  validate_master_transition(previous_master, current_master)))
 

@@ -178,7 +178,10 @@ monotonic revisions, terminal states, immutable identity/evidence, and diagnosti
   the whole-candidate `STALE` fallback. `STALE` precedes `FAILED`; only all current required Gates passing yields `PASSED`.
 - Preserve aggregate-only v1 evidence under the v2 `legacy` audit field with its original digest. Evidence-bearing legacy
   records migrate to `STALE`, empty legacy `NONE` remains `NONE`, and migration never invents Gate identity or promotes an old
-  aggregate result. Master reruns required Gates and recomputes final evidence from the integrated tree.
+  aggregate result. Standalone and historical readers may validate the old syntax, but a current Master Card rejects v1
+  `PASSED` or `FAILED`; even byte-identical evidence-bearing v1 comparison returns whole-candidate `ALL`. A current legacy v1
+  `STALE` remains readable for deliberate recovery, and empty v1 `NONE` may compare as `NONE`. Master reruns required Gates and
+  recomputes final evidence from the integrated tree.
 - An accepted Worker handoff may return to `IDLE` even if the global candidate is blocked by another responsibility layer.
 
 ## Deliver evidence, not ceremony

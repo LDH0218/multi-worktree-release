@@ -608,8 +608,11 @@ missing or unknown requiredness is stale. An empty required set cannot pass.
 Aggregate v1 evidence remains valid as immutable legacy syntax. Migrate it with
 `--candidate-evidence-json <PATH> --migrate-candidate-evidence`; preserve the exact original object plus its canonical digest
 under `legacy`, synthesize no Gate/check identity, and produce `STALE` whenever the old record contains evidence. An empty v1
-`NONE` record remains `NONE`. Applying migration to an already migrated v2 record is idempotent. Validate standalone fixtures
-with `--candidate-evidence-json <PATH>`, compare old/current manifests with
+`NONE` record remains `NONE`. This read compatibility is not current release authority: a current Master Card rejects v1
+`PASSED` and `FAILED`, while a previous historical Master snapshot may retain them for exact migration audit and a current v1
+`STALE` remains readable for deliberate recovery. Comparing any evidence-bearing v1 record returns whole-candidate `ALL`,
+even when both objects are byte-identical; only an empty v1 `NONE` may return `NONE`. Applying migration to an already migrated
+v2 record is idempotent. Validate standalone fixtures with `--candidate-evidence-json <PATH>`, compare old/current manifests with
 `--previous-candidate-evidence-json <OLD> --candidate-evidence-json <CURRENT>` to obtain `NONE`, `AFFECTED`, or `ALL`, and run
 the targeted matrix with `--candidate-evidence-self-test`.
 

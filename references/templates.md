@@ -174,7 +174,10 @@ mapping; otherwise clear asserted Gate/check evidence and use the all-Gate `STAL
 
 For a legacy v1 record, preserve the exact original object and canonical digest under `legacy` with reason
 `LEGACY_AGGREGATE_ONLY`, leave `gate_registry`, `gates`, and per-Gate digests empty, and set evidence-bearing records to
-`STALE`. Never derive IDs from commands or positions. Validate with `--candidate-evidence-json`; use
+`STALE`. Standalone or previous-snapshot parsing may retain v1 for audit, but never place v1 `PASSED` or `FAILED` in the current
+Master Card; migrate it first. A current v1 `STALE` remains valid recovery input. Treat every evidence-bearing v1 comparison as
+`ALL` even when identical, and permit `NONE` only for an empty v1 `NONE` record. Never derive IDs from commands or positions.
+Validate with `--candidate-evidence-json`; use
 `--previous-candidate-evidence-json <OLD> --candidate-evidence-json <CURRENT>` for read-only invalidation scope,
 `--migrate-candidate-evidence` for the read-only legacy projection, and `--candidate-evidence-self-test` for the focused matrix.
 
