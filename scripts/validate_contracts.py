@@ -9,6 +9,7 @@ import datetime as dt
 import hashlib
 import json
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -774,9 +775,9 @@ def validate_master_transition(previous: dict[str, Any], current: dict[str, Any]
             historical_error("H22", f"Master release identity changed in place: {changed}")
         if current["plan_revision"] < previous["plan_revision"]:
             historical_error("H22", "Master plan_revision regressed")
-        if (current["plan_revision"] == previous["plan_revision"]
-                and current["dispatch_plan_digest"] != previous["dispatch_plan_digest"]):
-            historical_error("H22", "Master plan digest changed without a plan revision")
+        if (current["plan_revision"] > previous["plan_revision"]
+                and current["dispatch_plan_digest"] == previous["dispatch_plan_digest"]):
+            historical_error("H22", "Master plan revision advanced without a new plan digest")
 
     previous_handoffs = {handoff_identity(item): item for item in previous["worker_handoffs"]}
     current_handoffs = {handoff_identity(item): item for item in current["worker_handoffs"]}
@@ -882,6 +883,29 @@ def validate_plan_master_consistency(plan: dict[str, Any], master: dict[str, Any
         entry = entries.get(handoff["task_id"])
         if entry is None:
             historical_error("H27", f"Master handoff references unknown plan task {handoff['task_id']}")
+        handoff_revision = handoff["task_spec_revision"]
+        current_revision = entry["task_spec_revision"]
+        if handoff_revision < current_revision:
+            preserved_rework = (
+                handoff["state"] == "REWORK_REQUESTED"
+                and entry["revision_decision"] == "REVISE"
+                and handoff["task_spec_digest"] != entry["task_spec_digest"]
+                and handoff["plan_revision"] < entry["task_spec_plan_revision"]
+                and handoff["plan_revision"] <= plan["plan_revision"]
+                and handoff["frozen_baseline_sha"] == entry["expected_head"]
+                and handoff["authorization_envelope_digest"] == entry["authorization_envelope_digest"]
+            )
+            spec = (task_specs or {}).get(handoff["task_id"])
+            if spec is not None:
+                preserved_rework = preserved_rework and (
+                    handoff["source_thread_id"] == spec["source_thread_id"]
+                    and handoff["role"] == spec["owner_role"]
+                )
+            if not preserved_rework:
+                historical_error("H27", f"incompatible prior-revision handoff for {handoff['task_id']}")
+            continue
+        if handoff_revision > current_revision:
+            historical_error("H27", f"future-revision handoff for {handoff['task_id']}")
         equality = {
             "task_spec_revision": "task_spec_revision", "task_spec_digest": "task_spec_digest",
             "dispatch_wave": "dispatch_wave", "frozen_baseline_sha": "expected_head",
@@ -1391,6 +1415,143 @@ class HistoricalContractScenarios(unittest.TestCase):
         results = validate_cross_record_set(plan, worker, master, Path("/state/dispatch-plan.json"), {"A": spec})
         self.assertEqual(results, {"plan-worker": "PASS", "plan-master": "PASS", "worker-master": "PASS"})
 
+    def test_status_only_plan_digest_synchronizes_master_without_semantic_revision(self) -> None:
+        spec = make_task_spec()
+        previous_plan = make_plan_for_spec(spec, "READY")
+        current_plan = advance_record(previous_plan)
+        current_plan["tasks"][0]["dispatch_status"] = "PUBLISHED"
+        current_plan["plan_digest"] = object_digest(current_plan, "plan_digest")
+        previous_master = make_active_master_card(previous_plan)
+        current_master = advance_record(previous_master)
+        current_master["dispatch_plan_digest"] = current_plan["plan_digest"]
+
+        self.assertEqual(validate_plan_transition(previous_plan, current_plan), "FORWARD")
+        self.assertEqual(validate_master_transition(previous_master, current_master), "FORWARD")
+        validate_plan_master_consistency(current_plan, current_master, Path("/state/dispatch-plan.json"), {"A": spec})
+
+    def test_master_digest_sync_preserves_release_fences(self) -> None:
+        plan = make_plan([make_dispatch_task("A")])
+        previous = make_active_master_card(plan)
+        for field, replacement in (
+            ("release_task_id", "other-release"),
+            ("dispatch_plan_path", "/state/other-plan.json"),
+            ("frozen_baseline_sha", "c" * 40),
+        ):
+            with self.subTest(field=field):
+                current = advance_record(previous)
+                current[field] = replacement
+                self.assert_historical("H22", lambda: validate_master_transition(previous, current))
+        current = advance_record(previous)
+        current["plan_revision"] += 1
+        self.assert_historical("H22", lambda: validate_master_transition(previous, current))
+
+        mismatches = {
+            "release_task_id": {"release_task_id": "other-release"},
+            "plan_revision": {"plan_revision": 2},
+            "dispatch_plan_path": {"dispatch_plan_path": "/state/other-plan.json"},
+            "dispatch_plan_digest": {"dispatch_plan_digest": "sha256:" + "f" * 64},
+            "frozen_baseline_sha": {"frozen_baseline_sha": "c" * 40},
+        }
+        for label, changes in mismatches.items():
+            with self.subTest(cross_record=label):
+                master = make_active_master_card(plan)
+                master.update(changes)
+                self.assert_historical("H27", lambda: validate_plan_master_consistency(
+                    plan, master, Path("/state/dispatch-plan.json")))
+
+    def test_preserved_prior_rework_handoff_matches_revised_plan_entry(self) -> None:
+        spec = make_revised_task_spec()
+        plan = make_plan_for_spec(spec, "PUBLISHED", plan_revision=2, revision_decision="REVISE")
+        master = make_active_master_card(plan)
+        master["worker_handoffs"] = [make_prior_rework_handoff(spec)]
+        validate_plan_master_consistency(plan, master, Path("/state/dispatch-plan.json"), {"A": spec})
+
+    def test_incompatible_prior_revision_handoffs_remain_rejected(self) -> None:
+        spec = make_revised_task_spec()
+        plan = make_plan_for_spec(spec, "PUBLISHED", plan_revision=2, revision_decision="REVISE")
+        mutations = {
+            "nonterminal": {"state": "RECEIVED"},
+            "integrated": {"state": "INTEGRATED", "integrated_as_sha": "c" * 40},
+            "future": {"task_spec_revision": 3},
+            "equal-revision-wrong-digest": {"task_spec_revision": 2},
+            "rewritten-authority": {"authorization_envelope_digest": "sha256:" + "f" * 64},
+        }
+        for label, changes in mutations.items():
+            with self.subTest(label=label):
+                handoff = make_prior_rework_handoff(spec)
+                handoff.update(changes)
+                master = make_active_master_card(plan)
+                master["worker_handoffs"] = [handoff]
+                self.assert_historical("H27", lambda: validate_plan_master_consistency(
+                    plan, master, Path("/state/dispatch-plan.json"), {"A": spec}))
+
+        previous = make_active_master_card(plan)
+        previous["worker_handoffs"] = [make_prior_rework_handoff(spec)]
+        current = advance_record(previous)
+        current["worker_handoffs"][0]["worker_commit_sha"] = "d" * 40
+        self.assert_historical("H22", lambda: validate_master_transition(previous, current))
+
+    def test_public_cli_status_only_plan_and_master_regression(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            spec = make_task_spec_at(root / "task.json")
+            write_json_fixture(Path(spec["task_spec_path"]), spec)
+            previous_plan = make_plan_for_spec(spec, "READY")
+            current_plan = advance_record(previous_plan)
+            current_plan["tasks"][0]["dispatch_status"] = "PUBLISHED"
+            current_plan["plan_digest"] = object_digest(current_plan, "plan_digest")
+            previous_plan_path = root / "previous-plan.json"
+            current_plan_path = root / "current-plan.json"
+            write_json_fixture(previous_plan_path, previous_plan)
+            write_json_fixture(current_plan_path, current_plan)
+
+            previous_master = make_active_master_card(previous_plan, str(current_plan_path))
+            current_master = advance_record(previous_master)
+            current_master["dispatch_plan_digest"] = current_plan["plan_digest"]
+            previous_master_path = root / "previous-master.json"
+            current_master_path = root / "current-master.json"
+            write_json_fixture(previous_master_path, previous_master)
+            write_json_fixture(current_master_path, current_master)
+
+            plan_result = run_public_cli(
+                "--plan", str(current_plan_path), "--previous-plan", str(previous_plan_path),
+            )
+            self.assertEqual(plan_result.returncode, 0, plan_result.stderr)
+            self.assertIn("historical dispatch-plan: PASS transition=FORWARD", plan_result.stdout)
+
+            master_result = run_public_cli(
+                "--plan", str(current_plan_path),
+                "--master-card-json", str(current_master_path),
+                "--previous-master-card", str(previous_master_path),
+            )
+            self.assertEqual(master_result.returncode, 0, master_result.stderr)
+            self.assertIn("historical master-card: PASS transition=FORWARD", master_result.stdout)
+            self.assertIn("historical cross-record current plan-master: PASS", master_result.stdout)
+
+    def test_public_cli_preserved_rework_handoff_regression(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            spec = make_revised_task_spec(root / "task-r2.json")
+            write_json_fixture(Path(spec["task_spec_path"]), spec)
+            plan = make_plan_for_spec(spec, "PUBLISHED", plan_revision=2, revision_decision="REVISE")
+            plan_path = root / "dispatch-plan.json"
+            write_json_fixture(plan_path, plan)
+            master = make_active_master_card(plan, str(plan_path))
+            master["worker_handoffs"] = [make_prior_rework_handoff(spec)]
+            previous_master_path = root / "previous-master.json"
+            current_master_path = root / "current-master.json"
+            write_json_fixture(previous_master_path, master)
+            write_json_fixture(current_master_path, master)
+
+            result = run_public_cli(
+                "--plan", str(plan_path),
+                "--master-card-json", str(current_master_path),
+                "--previous-master-card", str(previous_master_path),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("historical master-card: PASS transition=NOOP", result.stdout)
+            self.assertIn("historical cross-record current plan-master: PASS", result.stdout)
+
 
 def make_dispatch_task(task_id: str, blocked_by: list[str] | None = None) -> dict[str, Any]:
     digest = "sha256:" + "a" * 64
@@ -1632,6 +1793,73 @@ def make_candidate(status: str, head: str, result: str) -> dict[str, Any]:
         "status": status,
         "checks": [{"command": "test", "result": result, "evidence_digest": "sha256:" + "e" * 64}],
     }
+
+
+def make_task_spec_at(path: Path) -> dict[str, Any]:
+    spec = make_task_spec()
+    spec["task_spec_path"] = str(path)
+    spec["task_spec_digest"] = object_digest(spec, "task_spec_digest")
+    return spec
+
+
+def make_revised_task_spec(path: Path | None = None) -> dict[str, Any]:
+    spec = make_task_spec_at(path or Path("/state/tasks/A-r2.json"))
+    spec.update({
+        "task_spec_revision": 2,
+        "plan_revision": 2,
+        "objective": "implement revised A",
+        "acceptance": ["test revised A"],
+    })
+    spec["task_spec_digest"] = object_digest(spec, "task_spec_digest")
+    return spec
+
+
+def make_plan_for_spec(spec: dict[str, Any], dispatch_status: str, plan_revision: int | None = None,
+                       revision_decision: str = "NEW") -> dict[str, Any]:
+    effective_plan_revision = plan_revision or spec["plan_revision"]
+    task = make_dispatch_task(spec["task_id"])
+    task.update({
+        "task_spec_revision": spec["task_spec_revision"],
+        "task_spec_digest": spec["task_spec_digest"],
+        "task_spec_path": spec["task_spec_path"],
+        "task_spec_plan_revision": spec["plan_revision"],
+        "revision_decision": revision_decision,
+        "owner_role": spec["owner_role"],
+        "worktree": spec["worktree"],
+        "branch": spec["branch"],
+        "expected_head": spec["expected_head"],
+        "acceptance_digest": value_digest(spec["acceptance"]),
+        "authorization_envelope_digest": spec["authorization"]["envelope_digest"],
+        "dispatch_status": dispatch_status,
+        "dispatch_wave": spec["dispatch_wave"],
+    })
+    plan = make_plan([task])
+    plan["plan_revision"] = effective_plan_revision
+    plan["plan_digest"] = object_digest(plan, "plan_digest")
+    return plan
+
+
+def make_prior_rework_handoff(current_spec: dict[str, Any]) -> dict[str, Any]:
+    handoff = make_received_handoff()
+    handoff.update({
+        "state": "REWORK_REQUESTED",
+        "task_spec_digest": "sha256:" + "1" * 64,
+        "source_thread_id": current_spec["source_thread_id"],
+        "role": current_spec["owner_role"],
+        "frozen_baseline_sha": current_spec["expected_head"],
+        "authorization_envelope_digest": current_spec["authorization"]["envelope_digest"],
+        "acceptance_digest": "sha256:" + "2" * 64,
+    })
+    return handoff
+
+
+def write_json_fixture(path: Path, value: dict[str, Any]) -> None:
+    path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+
+
+def run_public_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
+    command = [sys.executable, str(Path(__file__).resolve()), "--skip-self-test", *arguments]
+    return subprocess.run(command, text=True, capture_output=True, timeout=15, check=False)
 
 
 ACTIVE_SCHEMA: dict[str, Any] = {}

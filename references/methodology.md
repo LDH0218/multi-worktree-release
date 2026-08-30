@@ -467,6 +467,12 @@ changes advance `plan_revision`; status-only writes preserve semantic content an
 Dispatch entries and terminal Master handoffs are append-only. Worker assignment identity, authorization, handed-off commits,
 integration mappings, and candidate evidence cannot be rewritten in place; rework requires the documented successor revision.
 
+A status-only Plan write recomputes `plan_digest` without advancing `plan_revision`; the corresponding Master Card may
+synchronize `dispatch_plan_digest` in a higher card `record_revision` while preserving release task, Plan path, semantic Plan
+revision, and frozen baseline. When a task ID advances through `REVISE`, its lower-revision `REWORK_REQUESTED` handoff remains
+terminal history. Plan/Master consistency validates current-revision handoffs against the current entry and permits that older
+handoff only when its source, role, baseline, authorization, and older Plan fence remain compatible with the revised entry.
+
 When multiple record types are supplied, Plan/Worker, Plan/Master, and Worker/Master consistency is checked once within the
 previous generation and once within the current generation—never across generations. Missing relationships report `NOT_RUN`.
 Historical output distinguishes `PASS`, `FAIL`, and `NOT_RUN` and includes canonical snapshot digests. Supplying only one pair
