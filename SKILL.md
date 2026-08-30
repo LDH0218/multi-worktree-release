@@ -113,6 +113,19 @@ executable message.
 - Worktree numbering never determines task order. Dependency edges determine task order.
 - A pre-dispatch mismatch removes that task from the current batch; it does not delay independent tasks.
 
+### Validate persisted history
+
+Use previous/current validation when retained snapshots must prove a state change. Pair `--previous-plan` with `--plan`,
+`--previous-worker-card` with `--worker-card-json`, and `--previous-master-card` with `--master-card-json`. Previous Worker
+input is a complete JSON Worker Card, never an implicit parse of `WORKTREE_TASK.md`. Each supplied snapshot is validated
+independently before its transition, and historical Plan validation requires the exact Task Specs referenced by that Plan.
+
+Run cross-record checks separately for the previous set and current set. A relationship missing either record is `NOT_RUN`,
+not `PASS`; complete history requires all three pairs. Reports distinguish `PASS`, `FAIL`, and `NOT_RUN` and include canonical
+snapshot digests. Omitting every previous option preserves current-only CLI behavior, while `--skip-self-test` never skips a
+requested historical check. See [references/methodology.md](references/methodology.md) for monotonic revisions, terminal
+states, immutable identity/evidence, and diagnostic rules.
+
 ## Exceptions and recovery
 
 - If a Worker discovers an unexpected dependency, wrong assignment, wrong scope, wrong worktree, ownership ambiguity, or baseline

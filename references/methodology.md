@@ -448,6 +448,31 @@ to be completed, cancelled, or superseded with all Worker outcomes preserved. Wo
 
 A mismatch between these records blocks further execution until Master reconciles it; no record silently wins.
 
+### Previous/current snapshot validation
+
+The contract validator accepts three independent historical pairs:
+
+- `--previous-plan PREVIOUS --plan CURRENT`
+- `--previous-worker-card PREVIOUS --worker-card-json CURRENT`
+- `--previous-master-card PREVIOUS --master-card-json CURRENT`
+
+A previous option without its current counterpart is a usage error. Each path is one complete UTF-8 JSON object; the Worker
+option does not parse `WORKTREE_TASK.md`. Both snapshots must independently satisfy schema version 1, exact fields, digests,
+and ordinary current-snapshot invariants before comparison. A previous Plan must still resolve the exact historical Task Specs
+it records; a mutable current file is not a substitute.
+
+For every record type, `record_revision` is non-decreasing. Equal revisions require byte-independent canonical object equality
+and are reported as a no-op; changed records advance the revision and cannot move `updated_at` backwards. Plan semantic
+changes advance `plan_revision`; status-only writes preserve semantic content and obey the Dispatch transition table. Terminal
+Dispatch entries and terminal Master handoffs are append-only. Worker assignment identity, authorization, handed-off commits,
+integration mappings, and candidate evidence cannot be rewritten in place; rework requires the documented successor revision.
+
+When multiple record types are supplied, Plan/Worker, Plan/Master, and Worker/Master consistency is checked once within the
+previous generation and once within the current generation—never across generations. Missing relationships report `NOT_RUN`.
+Historical output distinguishes `PASS`, `FAIL`, and `NOT_RUN` and includes canonical snapshot digests. Supplying only one pair
+is valid partial history; a complete release-history gate requires all three pairs and no `NOT_RUN` result. Omitting every
+previous option retains current-only behavior, and `--skip-self-test` does not disable requested snapshot or transition checks.
+
 `task_id + task_spec_revision + source_thread_id` is the message identity. `plan_revision` is its fencing token and
 `task_spec_digest` proves content equality. Duplicate delivery is idempotent only when the identity and digest both match.
 Reject an equal identity with a different digest, older task revisions, stale plan fences for affected entries, unknown

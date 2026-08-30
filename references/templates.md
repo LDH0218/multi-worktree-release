@@ -341,6 +341,22 @@ outcome=<CANCELLED/SUPERSEDED> to `last_task`, clear active lock fields to defau
 a complete new task before doing further work.
 ```
 
+## Historical validation invocation
+
+Use complete retained JSON snapshots and keep previous/current generations coherent:
+
+```text
+python3 scripts/validate_contracts.py \
+  --previous-plan <PREVIOUS_PLAN_JSON> --plan <CURRENT_PLAN_JSON> \
+  --previous-worker-card <PREVIOUS_WORKER_CARD_JSON> --worker-card-json <CURRENT_WORKER_CARD_JSON> \
+  --previous-master-card <PREVIOUS_MASTER_CARD_JSON> --master-card-json <CURRENT_MASTER_CARD_JSON>
+```
+
+Each previous option requires its current counterpart. The Worker inputs are JSON contract records, not
+`WORKTREE_TASK.md`. A partial invocation is allowed, but omitted cross-record relationships must remain `NOT_RUN`; reviewers
+must require all three pairs when claiming complete history. Record the canonical previous/current snapshot digests and retain
+the validator's `PASS`, `FAIL`, and `NOT_RUN` distinctions. With no previous option, the invocation remains current-only.
+
 ## Conversation-generation handoff
 
 ```text
