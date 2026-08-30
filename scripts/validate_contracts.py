@@ -1599,6 +1599,14 @@ def legacy_v1_has_evidence(value: dict[str, Any]) -> bool:
     return any((value["release_head_sha"], value["gate_input_digest"], value["checks"]))
 
 
+def is_empty_legacy_v1_none(value: dict[str, Any]) -> bool:
+    return (
+        value.get("schema_version") != 2
+        and value["status"] == "NONE"
+        and not legacy_v1_has_evidence(value)
+    )
+
+
 def evaluate_candidate_invalidation(previous: dict[str, Any], current: dict[str, Any],
                                     schema: dict[str, Any]) -> tuple[str, list[str]]:
     """Return NONE, AFFECTED, or ALL without mutating either evidence record."""
@@ -1608,10 +1616,9 @@ def evaluate_candidate_invalidation(previous: dict[str, Any], current: dict[str,
         gate["gate_id"] for gate in current.get("gates", []) if isinstance(gate, dict) and "gate_id" in gate
     ])
     if previous.get("schema_version") != 2 or current.get("schema_version") != 2:
-        legacy_values = [value for value in (previous, current) if value.get("schema_version") != 2]
-        if any(legacy_v1_has_evidence(value) for value in legacy_values):
-            return "ALL", current_gate_ids
-        return "NONE", []
+        if is_empty_legacy_v1_none(previous) and is_empty_legacy_v1_none(current):
+            return "NONE", []
+        return "ALL", current_gate_ids
     if previous.get("legacy") is not None or current.get("legacy") is not None:
         if previous == current:
             return "NONE", []
@@ -3213,6 +3220,40 @@ class CandidateEvidenceScenarios(unittest.TestCase):
         empty = {"release_head_sha": None, "gate_input_digest": None, "status": "NONE", "checks": []}
         self.assertEqual(evaluate_candidate_invalidation(empty, empty, self.schema), ("NONE", []))
 
+    def test_mixed_v1_v2_comparison_is_always_conservative(self) -> None:
+        empty_v1 = {"release_head_sha": None, "gate_input_digest": None, "status": "NONE", "checks": []}
+        empty_v2 = {
+            "schema_version": 2,
+            "release_task_id": None,
+            "release_head_sha": None,
+            "plan_revision": None,
+            "plan_digest": None,
+            "gate_registry_digest": None,
+            "gate_registry": [],
+            "gate_input_digest": None,
+            "status": "NONE",
+            "legacy": None,
+            "gates": [],
+        }
+        v2_records = (
+            empty_v2,
+            make_candidate_v2(stale_gates={"targeted-tests"}),
+            make_candidate_v2(),
+            make_candidate_v2(failed_gates={"targeted-tests"}),
+        )
+        for v2_record in v2_records:
+            with self.subTest(v2_status=v2_record["status"], direction="v2-to-v1"):
+                self.assertEqual(
+                    evaluate_candidate_invalidation(v2_record, empty_v1, self.schema),
+                    ("ALL", []),
+                )
+            with self.subTest(v2_status=v2_record["status"], direction="v1-to-v2"):
+                expected_gates = sorted_utf8([gate["gate_id"] for gate in v2_record["gates"]])
+                self.assertEqual(
+                    evaluate_candidate_invalidation(empty_v1, v2_record, self.schema),
+                    ("ALL", expected_gates),
+                )
+
     def test_n16_explicit_optional_failure_does_not_fail_candidate(self) -> None:
         candidate = make_candidate_v2(optional_targeted=True, failed_gates={"targeted-tests"})
         validate_candidate_evidence(candidate, self.schema)
@@ -3307,6 +3348,23 @@ class CandidateEvidenceScenarios(unittest.TestCase):
             )
             self.assertEqual(none_comparison.returncode, 0, none_comparison.stderr)
             self.assertIn("candidate invalidation: NONE gates=none", none_comparison.stdout)
+
+            v2_to_v1 = run_public_cli(
+                "--previous-candidate-evidence-json", str(valid_path),
+                "--candidate-evidence-json", str(legacy_none_path),
+            )
+            self.assertEqual(v2_to_v1.returncode, 0, v2_to_v1.stderr)
+            self.assertIn("candidate invalidation: ALL gates=none", v2_to_v1.stdout)
+
+            v1_to_v2 = run_public_cli(
+                "--previous-candidate-evidence-json", str(legacy_none_path),
+                "--candidate-evidence-json", str(valid_path),
+            )
+            self.assertEqual(v1_to_v2.returncode, 0, v1_to_v2.stderr)
+            self.assertIn(
+                "candidate invalidation: ALL gates=base-relative-audit,targeted-tests",
+                v1_to_v2.stdout,
+            )
 
             migrated = run_public_cli(
                 "--candidate-evidence-json", str(legacy_path), "--migrate-candidate-evidence",

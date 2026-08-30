@@ -611,7 +611,8 @@ under `legacy`, synthesize no Gate/check identity, and produce `STALE` whenever 
 `NONE` record remains `NONE`. This read compatibility is not current release authority: a current Master Card rejects v1
 `PASSED` and `FAILED`, while a previous historical Master snapshot may retain them for exact migration audit and a current v1
 `STALE` remains readable for deliberate recovery. Comparing any evidence-bearing v1 record returns whole-candidate `ALL`,
-even when both objects are byte-identical; only an empty v1 `NONE` may return `NONE`. Applying migration to an already migrated
+even when both objects are byte-identical. Return `NONE` only when both operands are empty v1 `NONE`; every mixed v1/v2
+comparison returns `ALL`. Applying migration to an already migrated
 v2 record is idempotent. Validate standalone fixtures with `--candidate-evidence-json <PATH>`, compare old/current manifests with
 `--previous-candidate-evidence-json <OLD> --candidate-evidence-json <CURRENT>` to obtain `NONE`, `AFFECTED`, or `ALL`, and run
 the targeted matrix with `--candidate-evidence-self-test`.
