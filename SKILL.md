@@ -124,9 +124,11 @@ executable message.
   launcher cannot honor the persisted profile.
 - Use only these owner defaults: Master `gpt-5.6-sol`/`high`/`default` with `owner-default:master`; ordinary Worker
   `gpt-5.6-luna`/`max`/`priority` with `owner-default:ordinary-worker`; complex Worker
-  `gpt-5.6-sol`/`high`/`default` with `owner-default:complex-worker`. Model `service_tier` is scheduler metadata, never
-  authorization `route`/`provider`, and grants no external call, execution, publication, destructive action, synchronization,
-  or scope expansion.
+  `gpt-5.6-luna`/`max`/`priority` with `owner-default:complex-worker`. The prior complex-worker profile is compatibility-only
+  for digest-preserved terminal or `GRANDFATHER` records; every `NEW` or `REVISE` assignment uses the current Luna profile.
+  The persisted model `service_tier` is the requested scheduler profile, not a claim about the unobservable effective tier; dispatch stops
+  when the launcher can prove it cannot honor priority. It is never authorization `route`/`provider`, and grants no external
+  call, execution, publication, destructive action, synchronization, or scope expansion.
 - Keep semantic `plan_revision` separate from `record_revision`, which increments on every persisted state update. Preserve the
   state directory as user-owned material whether repository policy tracks it or keeps it local.
 - Use the schema's strict timezone-bearing RFC 3339 grammar for every timestamp: literal `T`, seconds, and `Z` or a colonized

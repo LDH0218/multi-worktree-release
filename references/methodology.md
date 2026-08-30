@@ -91,9 +91,9 @@ model_policy:
       service_tier: priority
       selection_reason: owner-default:ordinary-worker
     complex_worker:
-      model: gpt-5.6-sol
-      reasoning_effort: high
-      service_tier: default
+      model: gpt-5.6-luna
+      reasoning_effort: max
+      service_tier: priority
       selection_reason: owner-default:complex-worker
 tasks:
   - task_id: <id>
@@ -166,12 +166,14 @@ requires a higher `task_spec_revision` and a new digest. Unsupported model/reaso
 profile mismatch stop dispatch.
 
 Owner defaults are exact: Master uses `gpt-5.6-sol` / `high` / `default` with `owner-default:master`; an ordinary Worker uses
-`gpt-5.6-luna` / `max` / `priority` with `owner-default:ordinary-worker`; a complex Worker uses `gpt-5.6-sol` / `high` /
-`default` with `owner-default:complex-worker`. Master classifies each Worker task as ordinary or complex before publication.
-The launcher must honor all three persisted routing fields exactly; if it cannot, dispatch stops instead of substituting a
-model, effort, or tier.
+`gpt-5.6-luna` / `max` / `priority` with `owner-default:ordinary-worker`; a complex Worker also uses `gpt-5.6-luna` / `max` /
+`priority` with `owner-default:complex-worker`. Master classifies each Worker task as ordinary or complex before publication.
+The prior complex-worker profile is compatibility-only for digest-preserved terminal or `GRANDFATHER` records; every `NEW` or
+`REVISE` assignment uses the current Luna profile. The launcher must honor all three persisted routing fields exactly; if it
+cannot, dispatch stops instead of substituting a model, effort, or tier.
 
-The model `service_tier` is scheduler metadata only. It is never authorization `route` or `provider`, and it grants no external
+The persisted model `service_tier` is the requested scheduler profile, not a claim about the unobservable effective tier. Dispatch stops
+when the launcher can prove it cannot honor priority. It is never authorization `route` or `provider`, and it grants no external
 call, execution creation, publication, destructive operation, synchronization, or scope expansion. Those capabilities remain
 governed solely by the complete default-deny authorization envelope and its independent digest.
 

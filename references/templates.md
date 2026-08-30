@@ -36,9 +36,9 @@ model_policy:
       service_tier: priority
       selection_reason: owner-default:ordinary-worker
     complex_worker:
-      model: gpt-5.6-sol
-      reasoning_effort: high
-      service_tier: default
+      model: gpt-5.6-luna
+      reasoning_effort: max
+      service_tier: priority
       selection_reason: owner-default:complex-worker
 tasks:
   - task_id: <id>
@@ -99,9 +99,12 @@ ownership comparison, so `src/x` and `src/x/` conflict rather than becoming alia
 `REVISE` task must persist the same exact profile in its Task Spec and Plan entry. Older digest-preserved records below the
 fence remain untouched. The exact defaults are Master `gpt-5.6-sol`/`high`/`default`
 (`owner-default:master`), ordinary Worker `gpt-5.6-luna`/`max`/`priority`
-(`owner-default:ordinary-worker`), and complex Worker `gpt-5.6-sol`/`high`/`default`
-(`owner-default:complex-worker`). A launcher that cannot honor the profile must stop dispatch. Model `service_tier` is not an
-authorization route/provider and grants no external call, run, publication, destructive operation, synchronization, or scope.
+(`owner-default:ordinary-worker`), and complex Worker `gpt-5.6-luna`/`max`/`priority`
+(`owner-default:complex-worker`). The prior complex-worker profile is compatibility-only for digest-preserved terminal or
+`GRANDFATHER` records; every `NEW` or `REVISE` assignment uses the current Luna profile. A launcher that cannot honor the
+profile must stop dispatch. The persisted model `service_tier` is the requested scheduler profile, not a claim about the unobservable effective tier;
+dispatch stops when the launcher can prove it cannot honor priority. It is not an authorization route/provider and grants no external
+call, run, publication, destructive operation, synchronization, or scope.
 
 A `GRANDFATHER` entry preserves the existing task spec, digest, and its original `task_spec_plan_revision`; do not rewrite the
 task to copy the new global plan fence. `NEW` and `REVISE` task specs bind to the current plan revision. Terminal entries retain
