@@ -2300,12 +2300,18 @@ def validate_fresh_rerun_after_legacy(previous: dict[str, Any], current: dict[st
                                       schema: dict[str, Any]) -> None:
     if not is_migrated_legacy_only_candidate(previous):
         historical_error("H25", "legacy candidate is not a canonical preserved migration record")
+    try:
+        validate_candidate_v2(previous, schema)
+    except (ContractError, KeyError, TypeError) as error:
+        historical_error("H25", f"legacy candidate is not a valid preserved migration record: {error}")
     if current.get("legacy") is not None:
         historical_error("H25", "fresh per-Gate rerun retained opaque legacy material")
-    previous_identity = (previous.get("release_task_id"), previous.get("release_head_sha"))
-    current_identity = (current.get("release_task_id"), current.get("release_head_sha"))
-    if None in previous_identity or current_identity != previous_identity:
-        historical_error("H25", "fresh per-Gate rerun changed the migrated release authority or HEAD")
+    previous_release_task = previous.get("release_task_id")
+    if (not isinstance(previous_release_task, str) or not previous_release_task
+            or current.get("release_task_id") != previous_release_task):
+        historical_error("H25", "fresh per-Gate rerun changed the migrated release authority")
+    if previous.get("release_head_sha") is None:
+        historical_error("H25", "legacy candidate is not bound to an old release HEAD")
     previous_plan_revision = previous.get("plan_revision")
     current_plan_revision = current.get("plan_revision")
     if (not isinstance(previous_plan_revision, int) or isinstance(previous_plan_revision, bool)
@@ -2327,13 +2333,19 @@ def validate_fresh_rerun_after_legacy(previous: dict[str, Any], current: dict[st
     }
     if isinstance(legacy_original.get("gate_input_digest"), str):
         opaque_digests.add(legacy_original["gate_input_digest"])
-    fresh_digests = {
-        digest for gate in current["gates"] for digest in (
-            gate.get("input_digest"), gate.get("evidence_digest"),
-            *(check.get("input_digest") for check in gate.get("checks", [])),
-            *(check.get("evidence_digest") for check in gate.get("checks", [])),
-        ) if isinstance(digest, str)
-    }
+    fresh_digests: set[str] = set()
+
+    def collect_fresh_digests(value: Any) -> None:
+        if isinstance(value, dict):
+            for field, item in value.items():
+                if field.endswith("_digest") and isinstance(item, str):
+                    fresh_digests.add(item)
+                collect_fresh_digests(item)
+        elif isinstance(value, list):
+            for item in value:
+                collect_fresh_digests(item)
+
+    collect_fresh_digests(current)
     if opaque_digests & fresh_digests:
         historical_error("H25", "fresh per-Gate rerun reused an opaque legacy digest")
 
@@ -2830,6 +2842,19 @@ def validate_documented_contracts(repo_root: Path, schema: dict[str, Any]) -> No
             raise ContractError(
                 f"final-acceptance contract missing from {relative}: {missing_acceptance_terms}"
             )
+        head_rerun_terms = ("different `release_head_sha`", "zero opaque digest reuse")
+        missing_head_rerun_terms = [term for term in head_rerun_terms if term not in contents]
+        if missing_head_rerun_terms:
+            raise ContractError(
+                f"candidate-head rerun contract missing from {relative}: {missing_head_rerun_terms}"
+            )
+    design = (repo_root / "design" / "per-gate-evidence.md").read_text(encoding="utf-8")
+    head_rerun_terms = ("different `release_head_sha`", "zero opaque digest reuse")
+    missing_design_terms = [term for term in head_rerun_terms if term not in design]
+    if missing_design_terms:
+        raise ContractError(
+            f"candidate-head rerun contract missing from design/per-gate-evidence.md: {missing_design_terms}"
+        )
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
     obsolete_identity_terms = (
         "<plan_id>:<task_id>:r<task_spec_revision>:<message_type>",
@@ -4405,7 +4430,7 @@ class CandidateEvidenceScenarios(unittest.TestCase):
 
         mutations = {
             "identity": lambda value: value.update(release_task_id="other-release"),
-            "head": lambda value: value.update(release_head_sha="b" * 40),
+            "head-binding": lambda value: value.update(release_head_sha="b" * 40),
             "plan-authority": lambda value: value.update(plan_revision=0),
             "registry": lambda value: value["gate_registry"][0].update(gate_revision=2),
             "provenance": lambda value: value["gates"][0]["input_sources"][1].update(revision="b" * 40),
@@ -4424,6 +4449,50 @@ class CandidateEvidenceScenarios(unittest.TestCase):
         )
         with self.assertRaisesRegex(ContractError, r"\[H25\].*opaque legacy digest"):
             validate_candidate_transition(opaque_migrated, fresh, self.schema)
+
+    def test_migrated_legacy_can_advance_to_fresh_different_head(self) -> None:
+        legacy_master, migrated_master, fresh_master = make_legacy_master_sequence(
+            self.schema, legacy_head="a" * 40, fresh_head="b" * 40, legacy_status="STALE",
+        )
+        migrated = migrated_master["candidate_evidence"]
+        fresh = fresh_master["candidate_evidence"]
+        self.assertEqual(legacy_master["candidate_evidence"]["release_head_sha"], "a" * 40)
+        self.assertEqual(migrated["release_head_sha"], "a" * 40)
+        self.assertEqual(fresh["release_head_sha"], "b" * 40)
+        validate_candidate_transition(migrated, fresh, self.schema)
+        validate_master_transition(migrated_master, fresh_master, self.schema)
+        with self.assertRaisesRegex(ContractError, r"\[H25\].*exact aggregate record"):
+            validate_candidate_transition(
+                legacy_master["candidate_evidence"], fresh, self.schema,
+            )
+        for gate in fresh["gates"]:
+            integrated = [
+                source for source in gate["input_sources"]
+                if source["source_id"] == "integrated-tree"
+            ]
+            self.assertEqual(len(integrated), 1)
+            self.assertEqual(integrated[0]["revision"], fresh["release_head_sha"])
+
+        incomplete = make_candidate_v2(
+            head="b" * 40, plan_revision=2, stale_gates={"targeted-tests"},
+        )
+        with self.assertRaisesRegex(ContractError, r"\[H25\].*complete fresh"):
+            validate_candidate_transition(migrated, incomplete, self.schema)
+
+        retained_legacy = copy.deepcopy(fresh)
+        retained_legacy["legacy"] = copy.deepcopy(migrated["legacy"])
+        with self.assertRaisesRegex(ContractError, r"\[H25\]"):
+            validate_candidate_transition(migrated, retained_legacy, self.schema)
+
+        copied_source_digest = copy.deepcopy(migrated)
+        copied_source_digest["legacy"]["original"]["checks"][0]["evidence_digest"] = (
+            fresh["gates"][0]["input_sources"][0]["value_digest"]
+        )
+        copied_source_digest["legacy"]["original_digest"] = value_digest(
+            copied_source_digest["legacy"]["original"]
+        )
+        with self.assertRaisesRegex(ContractError, r"\[H25\].*opaque legacy digest"):
+            validate_candidate_transition(copied_source_digest, fresh, self.schema)
 
     def test_migration_is_idempotent(self) -> None:
         legacy = make_candidate("FAILED", "a" * 40, "FAIL")
@@ -4918,7 +4987,10 @@ class HistoricalContractScenarios(unittest.TestCase):
     def test_public_cli_legacy_migration_to_fresh_master_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            legacy, migrated, fresh = make_legacy_master_sequence(self.schema)
+            legacy, migrated, fresh = make_legacy_master_sequence(
+                self.schema, legacy_head="a" * 40, fresh_head="b" * 40,
+                legacy_status="STALE",
+            )
             legacy_path = root / "master-v1.json"
             migrated_path = root / "master-migrated.json"
             fresh_path = root / "master-fresh.json"
@@ -4939,14 +5011,23 @@ class HistoricalContractScenarios(unittest.TestCase):
             )
             self.assertEqual(rerun.returncode, 0, rerun.stderr)
             self.assertEqual(fresh["candidate_evidence"]["status"], "PASSED")
+            self.assertEqual(migrated["candidate_evidence"]["release_head_sha"], "a" * 40)
+            self.assertEqual(fresh["candidate_evidence"]["release_head_sha"], "b" * 40)
+
+            direct = run_public_cli(
+                "--previous-master-card", str(legacy_path),
+                "--master-card-json", str(fresh_path),
+            )
+            self.assertEqual(direct.returncode, 1, direct.stdout)
+            self.assertIn("[H25]", direct.stderr)
 
             tampered: dict[str, dict[str, Any]] = {}
             identity = copy.deepcopy(fresh)
             identity["candidate_evidence"]["release_task_id"] = "other-release"
             tampered["identity"] = identity
             head = copy.deepcopy(fresh)
-            head["candidate_evidence"] = make_candidate_v2(head="b" * 40, plan_revision=2)
-            tampered["head"] = head
+            head["candidate_evidence"]["release_head_sha"] = "c" * 40
+            tampered["head-binding"] = head
             plan_authority = copy.deepcopy(fresh)
             plan_authority["candidate_evidence"]["plan_revision"] = 1
             tampered["plan-authority"] = plan_authority
@@ -4954,11 +5035,21 @@ class HistoricalContractScenarios(unittest.TestCase):
             registry["candidate_evidence"]["gate_registry"][0]["gate_revision"] = 2
             tampered["registry"] = registry
             provenance = copy.deepcopy(fresh)
-            provenance["candidate_evidence"]["gates"][0]["input_sources"][1]["revision"] = "b" * 40
+            provenance["candidate_evidence"]["gates"][0]["input_sources"][1]["revision"] = "c" * 40
             tampered["provenance"] = provenance
             digest = copy.deepcopy(fresh)
             digest["candidate_evidence"]["gates"][0]["evidence_digest"] = "sha256:" + "0" * 64
             tampered["digest"] = digest
+            incomplete = copy.deepcopy(fresh)
+            incomplete["candidate_evidence"] = make_candidate_v2(
+                head="b" * 40, plan_revision=2, stale_gates={"targeted-tests"},
+            )
+            tampered["incomplete"] = incomplete
+            direct_promotion = copy.deepcopy(fresh)
+            direct_promotion["candidate_evidence"] = copy.deepcopy(migrated["candidate_evidence"])
+            direct_promotion["candidate_evidence"]["legacy"] = None
+            direct_promotion["candidate_evidence"]["status"] = "PASSED"
+            tampered["direct-promotion"] = direct_promotion
             for label, card in tampered.items():
                 path = root / f"master-tampered-{label}.json"
                 write_json_fixture(path, card)
@@ -4969,6 +5060,31 @@ class HistoricalContractScenarios(unittest.TestCase):
                 with self.subTest(mutation=label):
                     self.assertEqual(result.returncode, 1, result.stdout)
                     self.assertIn("[H25]", result.stderr)
+
+            reused_legacy, reused_migrated, reused_fresh = make_legacy_master_sequence(
+                self.schema, legacy_head="a" * 40, fresh_head="b" * 40,
+                legacy_status="STALE",
+            )
+            reused_legacy["candidate_evidence"]["checks"][0]["evidence_digest"] = (
+                reused_fresh["candidate_evidence"]["gates"][0]
+                ["input_sources"][0]["value_digest"]
+            )
+            reused_migrated["candidate_evidence"] = migrate_candidate_evidence(
+                reused_legacy["candidate_evidence"], self.schema,
+                release_task_id="release-1", plan_revision=1,
+                plan_digest=reused_legacy["dispatch_plan_digest"],
+            )
+            reused_migrated_path = root / "master-migrated-reused-digest.json"
+            reused_fresh_path = root / "master-fresh-reused-digest.json"
+            write_json_fixture(reused_migrated_path, reused_migrated)
+            write_json_fixture(reused_fresh_path, reused_fresh)
+            reused = run_public_cli(
+                "--previous-master-card", str(reused_migrated_path),
+                "--master-card-json", str(reused_fresh_path),
+            )
+            self.assertEqual(reused.returncode, 1, reused.stdout)
+            self.assertIn("[H25]", reused.stderr)
+            self.assertIn("opaque legacy digest", reused.stderr)
 
     def test_public_cli_current_only_grandfather_history_regression(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -5696,9 +5812,13 @@ def make_previous_rotation_plan(current: dict[str, Any]) -> dict[str, Any]:
     return previous
 
 
-def make_legacy_master_sequence(schema: dict[str, Any]) -> tuple[
+def make_legacy_master_sequence(schema: dict[str, Any], *, legacy_head: str = "a" * 40,
+                                fresh_head: str | None = None,
+                                legacy_status: str = "PASSED") -> tuple[
         dict[str, Any], dict[str, Any], dict[str, Any]]:
-    legacy = make_candidate("PASSED", "a" * 40, "PASS")
+    if fresh_head is None:
+        fresh_head = legacy_head
+    legacy = make_candidate(legacy_status, legacy_head, "PASS")
     previous = make_active_master_card()
     previous["candidate_evidence"] = legacy
     migrated = advance_record(previous)
@@ -5710,7 +5830,7 @@ def make_legacy_master_sequence(schema: dict[str, Any]) -> tuple[
     fresh["updated_at"] = "2026-01-01T00:02:00Z"
     fresh["plan_revision"] = 2
     fresh["dispatch_plan_digest"] = value_digest({"plan": 2})
-    fresh["candidate_evidence"] = make_candidate_v2(head="a" * 40, plan_revision=2)
+    fresh["candidate_evidence"] = make_candidate_v2(head=fresh_head, plan_revision=2)
     return previous, migrated, fresh
 
 

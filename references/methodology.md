@@ -659,12 +659,14 @@ v2 record is idempotent. Validate standalone fixtures with `--candidate-evidence
 the targeted matrix with `--candidate-evidence-self-test`.
 
 The preserved legacy-only v2 record is an audit waypoint, not a permanent dead end. Historical H25 permits it to advance to a
-fresh per-Gate rerun only when the new record removes `legacy`, keeps the same non-null `release_task_id` and exact
-`release_head_sha`, uses a non-regressing Master plan fence, and independently validates a complete current Gate registry,
-source provenance, check inputs/results, and all input/evidence digests. The resulting aggregate must be current `PASSED` or
-`FAILED`. No legacy aggregate or check digest may be reused. Any legacy rewrite, direct promotion, identity/head/authority
-change, incomplete registry, bad provenance, or digest mismatch remains an H25 failure; Master `record_revision` and time must
-also advance through the ordinary monotonic transition rules.
+fresh per-Gate rerun only when the new record removes `legacy`, keeps the same non-null `release_task_id`, and uses a
+non-regressing Master plan fence. The rerun may use a different `release_head_sha`: the head change first invalidates every
+piece of legacy evidence, then the complete current Gate registry, each Gate's sole `integrated-tree` source, check
+inputs/results/provenance, and all input/evidence digests must independently validate against that exact new head. The
+resulting aggregate must be current `PASSED` or `FAILED`, with zero opaque digest reuse from legacy aggregate or check fields.
+Any legacy rewrite, direct promotion, release-task or authority change, incomplete rerun, mismatched head provenance, bad
+registry, or digest mismatch remains an H25 failure; Master `record_revision` and time must also advance through the ordinary
+monotonic transition rules.
 
 ## State transitions
 

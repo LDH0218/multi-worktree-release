@@ -406,11 +406,14 @@ one changed input from being mistaken for an unaffected Gate.
 
 The preserved legacy-only v2 record is therefore an audit waypoint, not a terminal dead end. Historical transition validation
 may replace it with a fresh per-Gate rerun only when the new record has `legacy: null`, keeps the same non-null
-`release_task_id` and exact `release_head_sha`, uses a non-regressing Master plan fence, and independently validates its full
-current registry, source map, check provenance, input digests, and evidence digests. No aggregate or check digest from the
-opaque legacy object may be reused. The Master record revision and timestamp still advance monotonically. Rewriting the
-legacy-only object, promoting it without complete current evidence, or changing identity, head, plan authority, registry,
-provenance, or digests remains an H25 failure.
+`release_task_id`, and uses a non-regressing Master plan fence. A different `release_head_sha` is valid at this boundary: it
+first invalidates the whole legacy candidate, after which every required Gate/check must be independently rerun. Each fresh
+Gate must contain exactly one `integrated-tree` source whose revision equals the new head, and its full current registry,
+source map, check provenance, input digests, and evidence digests must recompute against that head. The transition requires
+zero opaque digest reuse from the legacy aggregate or checks. The Master record revision and timestamp still advance
+monotonically. Rewriting the legacy-only object, promoting it without complete current evidence, changing the release task or
+plan authority, retaining partial/`STALE`/`NONE` results, mismatching head provenance, or forging registry/digests remains an
+H25 failure.
 
 ### 5.3 Optional exact legacy adapter
 
@@ -623,7 +626,7 @@ current evidence; when a durable candidate status is required, the safe persiste
 | N12 | Plan, acceptance, authorization, or projection changes with no affected-Gate mapping | All Gates `STALE` | `STALE` |
 | N13 | A Gate definition/requiredness source changes, or the whole required Gate set changes | Affected Gate `STALE`; a required-set change makes the aggregate incomplete | `STALE` |
 | N14 | Legacy v1 record has only aggregate `gate_input_digest` | Preserve as legacy; no synthetic per-Gate digest | `STALE` |
-| N14a | Preserved legacy-only v2 is followed by a complete independent rerun for the same task/head | Replace audit waypoint with fresh per-Gate rows; reuse no legacy digest | Freshly aggregate to `PASSED` or `FAILED` |
+| N14a | Preserved legacy-only v2 at an old head is followed by a complete independent rerun for the same release task at a different current head | Replace the audit waypoint with fresh per-Gate rows bound exactly to the new head; zero opaque digest reuse | Freshly aggregate to `PASSED` or `FAILED` |
 | N15 | Legacy v1 record has `status: NONE` and no checks/digest | No evidence to invalidate | `NONE` |
 | N16 | Current required Gates all pass, one optional Gate fails, and `required: false` is explicit | Required rows remain current; report optional failure | `PASSED` according to the declared policy |
 | N17 | Optional/required classification is absent or unknown | Classification cannot be trusted | `STALE` |

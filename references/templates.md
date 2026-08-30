@@ -208,9 +208,12 @@ Validate with `--candidate-evidence-json`; use
 `--migrate-candidate-evidence` for the read-only legacy projection, and `--candidate-evidence-self-test` for the focused matrix.
 
 A migrated legacy-only v2 audit record may later advance to a fresh per-Gate rerun. The new record must use the same non-null
-release task and exact head, a non-regressing Master plan fence, `legacy: null`, and a complete independently valid registry,
-source/check provenance, and recomputed input/evidence digests; its aggregate is freshly `PASSED` or `FAILED`. Never copy an
-opaque legacy digest. Identity, head, plan-authority, registry, provenance, digest, or monotonic-record failures remain H25.
+release task and a non-regressing Master plan fence. It may use a different `release_head_sha` only after treating the head
+change as whole-candidate invalidation and independently rerunning every required Gate. Require `legacy: null`, one exact
+`integrated-tree` source per Gate bound to the new head, complete registry/source/check provenance, recomputed input/evidence
+digests, a freshly `PASSED` or `FAILED` aggregate, and zero opaque digest reuse. Release-task or plan-authority drift, legacy
+rewrite/direct promotion, incomplete rerun, mismatched head provenance, registry, digest, or monotonic-record failures remain
+H25.
 
 ## New conversation read-only bootstrap
 
