@@ -1,0 +1,5 @@
+# Master/Worker live coordination state is local and may contain absolute paths.
+.codex/multi-worktree-release/
+
+# Compact per-worktree state card.
+WORKTREE_TASK.md
