@@ -5,6 +5,7 @@ This repository dogfoods the `multi-worktree-release` Skill.
 - Use the main worktree and its Codex task as Master. Master owns planning, task publication, handoff review, integration, release-candidate gates, and publication decisions.
 - Changes that affect contract schemas, state transitions, authorization, dispatch semantics, persistence, recovery, message identity, candidate evidence, or the validator require the Skill's Master/Worker workflow.
 - Give each independent responsibility an isolated Codex task and Git worktree with a frozen full-SHA baseline, persisted Task Spec, default-deny authorization, explicit acceptance checks, and a structured handoff.
+- Name persistent Codex tasks `<project-short-name>｜<responsibility-role>-<conversation-generation>`. In this repository use the `MWR` prefix, start each role at `1.0`, and increment the suffix on conversation rotation. Use long-lived roles rather than temporary task descriptions; omit status, branch, worktree, task ID, model profile, and authorization because the title is only a UI label.
 - Persist the normative Dispatch Plan under `.codex/multi-worktree-release/` in the Master worktree. Keep this live coordination state local and ignored by Git.
 - Workers must not merge, rebase, reset, synchronize from Master, push, publish, or widen scope unless their current Task Spec explicitly authorizes that exact action.
 - Master independently reviews and validates every handoff before integration. Production publication remains a separate explicit authorization.

@@ -49,6 +49,19 @@ prohibited resumptions, and expiry. Keep every required field even when denied b
 never grants authority. Never store secrets in prompts, task cards, or handoff reports. An authority-boundary change cannot
 widen an existing task in place; publish a superseding task with a new authorization envelope.
 
+## Name persistent conversations
+
+Name each persistent Master or Worker conversation `<project-short-name>｜<responsibility-role>-<conversation-generation>`.
+For example: `MWR｜Master-1.0` or `MWR｜授权模型-1.0`.
+
+- Keep the project prefix and long-lived responsibility role stable. Use a specific role rather than a temporary task
+  description, and omit the generic `Worker` label when the role is already clear.
+- Start the first conversation for a role at `1.0`. When rotating that role to a new conversation, increment the generation
+  suffix to `1.1`, `1.2`, and so on while reusing the role's worktree and branch.
+- Do not encode mutable status, branch, worktree, task ID, model profile, or authorization in the title.
+- Treat the title as a human-readable UI projection only. The persisted Dispatch Plan, Task Spec, and state card remain
+  authoritative for identity, state, scope, and authorization.
+
 ## Coordinate through the Master
 
 - Use a star topology for executable instructions: Master publishes to Workers; Workers hand off to Master. Worker-to-Worker
