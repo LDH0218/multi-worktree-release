@@ -258,6 +258,163 @@ class FiveWorktreeFixture:
         return self.state / "history" / "releases" / "release-five"
 
 
+class WorkerTransitionFixture:
+    """Build a one-task PUBLISHED graph for Worker-owned sidecar transitions."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.repo = root / "repo"
+        self.repo.mkdir()
+        (self.repo / "references").mkdir()
+        shutil.copyfile(REPO_ROOT / "references/contracts.schema.json",
+                        self.repo / "references/contracts.schema.json")
+        run(["git", "init", "-q", "-b", "main"], self.repo)
+        run(["git", "config", "user.email", "fixture@example.invalid"], self.repo)
+        run(["git", "config", "user.name", "Transition Fixture"], self.repo)
+        run(["git", "add", "references/contracts.schema.json"], self.repo)
+        run(["git", "commit", "-qm", "schema"], self.repo)
+        self.baseline = run(["git", "rev-parse", "HEAD"], self.repo)
+        (self.repo / "tracked.txt").write_text("final\n", encoding="utf-8")
+        run(["git", "add", "tracked.txt"], self.repo)
+        run(["git", "commit", "-qm", "final"], self.repo)
+        self.head = run(["git", "rev-parse", "HEAD"], self.repo)
+
+        self.state = root / "state"
+        self.tasks_root = self.state / "tasks"
+        self.tasks_root.mkdir(parents=True)
+        self.spec_path = self.tasks_root / "worker-task.json"
+        self.plan_path = self.state / "dispatch-plan.json"
+        self.master_path = self.state / "master-card.json"
+        self.worktree = root / "worker-worktree"
+        self.worktree.mkdir()
+        self.worker_path = self.worktree / worker_card_sidecar.SIDECAR_NAME
+        self._build_records()
+
+    def _build_records(self) -> None:
+        self.spec = contracts.make_task_spec_at(self.spec_path)
+        self.spec.update({
+            "task_id": "worker-task",
+            "source_thread_id": "master-1",
+            "owner_role": "api",
+            "worktree": str(self.worktree),
+            "branch": "task/worker-task",
+            "expected_head": self.baseline,
+            "objective": "fixture Worker transition task",
+        })
+        self.spec["task_spec_digest"] = contracts.object_digest(self.spec, "task_spec_digest")
+        write_json(self.spec_path, self.spec)
+        self.plan = contracts.make_plan_for_spec(self.spec, "PUBLISHED")
+        self.plan.update({
+            "state_root": str(self.state),
+            "task_specs_root": str(self.tasks_root),
+            "release_task_id": "release-transition",
+        })
+        self.plan["plan_digest"] = contracts.object_digest(self.plan, "plan_digest")
+        write_json(self.plan_path, self.plan)
+
+        self.master = contracts.make_active_master_card(self.plan, str(self.plan_path))
+        self.master["frozen_baseline_sha"] = self.baseline
+        candidate = contracts.make_candidate_v2(
+            head=self.head, plan_revision=self.plan["plan_revision"], plan_digest=self.plan["plan_digest"],
+            stale_gates={"targeted-tests"},
+        )
+        candidate["release_task_id"] = self.plan["release_task_id"]
+        contracts.refresh_candidate_inputs(candidate, refresh_evidence=True)
+        self.master["candidate_evidence"] = candidate
+        write_json(self.master_path, self.master)
+
+        idle = contracts.make_idle_worker_card()
+        idle["updated_at"] = "2026-01-01T00:00:00Z"
+        write_json(self.worker_path, idle)
+
+    def active(self) -> dict[str, object]:
+        card = contracts.make_active_worker_card()
+        card.update({
+            "record_revision": 2,
+            "updated_at": "2026-01-01T00:01:00Z",
+            "task_id": self.spec["task_id"],
+            "task_spec_revision": self.spec["task_spec_revision"],
+            "task_spec_digest": self.spec["task_spec_digest"],
+            "task_spec_path": self.spec["task_spec_path"],
+            "plan_revision": self.plan["plan_revision"],
+            "dispatch_wave": self.spec["dispatch_wave"],
+            "source_thread_id": self.spec["source_thread_id"],
+            "issued_at": self.spec["issued_at"],
+            "supersedes_task_id": self.spec["supersedes_task_id"],
+            "worker_generation": self.spec["generation"],
+            "frozen_baseline_sha": self.spec["expected_head"],
+            "allowed_paths": self.spec["allowed_paths"],
+            "forbidden_paths": self.spec["forbidden_paths"],
+            "authorization": copy.deepcopy(self.spec["authorization"]),
+            "acceptance_commands": self.spec["acceptance"],
+        })
+        return card
+
+    def awaiting(self) -> dict[str, object]:
+        card = self.active()
+        card.update({
+            "state": "AWAITING_INTEGRATION",
+            "record_revision": 3,
+            "updated_at": "2026-01-01T00:02:00Z",
+            "worker_commit_sha": self.head,
+        })
+        return card
+
+    def integrate(self) -> None:
+        self.plan["tasks"][0]["dispatch_status"] = "INTEGRATED"
+        self.plan["record_revision"] += 1
+        self.plan["updated_at"] = "2026-01-01T00:03:00Z"
+        self.plan["ready_wave"] = None
+        self.plan["blocked_tasks"] = []
+        self.plan["plan_digest"] = contracts.object_digest(self.plan, "plan_digest")
+        write_json(self.plan_path, self.plan)
+
+        handoff = contracts.make_received_handoff()
+        handoff.update({
+            "state": "INTEGRATED",
+            "task_id": self.spec["task_id"],
+            "role": self.spec["owner_role"],
+            "task_spec_revision": self.spec["task_spec_revision"],
+            "task_spec_digest": self.spec["task_spec_digest"],
+            "plan_revision": self.spec["plan_revision"],
+            "dispatch_wave": self.spec["dispatch_wave"],
+            "source_thread_id": self.spec["source_thread_id"],
+            "frozen_baseline_sha": self.spec["expected_head"],
+            "authorization_envelope_digest": self.spec["authorization"]["envelope_digest"],
+            "acceptance_digest": contracts.value_digest(self.spec["acceptance"]),
+            "worker_commit_sha": self.head,
+            "integrated_as_sha": self.head,
+        })
+        self.master["worker_handoffs"] = [handoff]
+        self.master["record_revision"] += 1
+        self.master["updated_at"] = "2026-01-01T00:03:00Z"
+        self.master["plan_revision"] = self.plan["plan_revision"]
+        self.master["dispatch_plan_digest"] = self.plan["plan_digest"]
+        candidate = contracts.make_candidate_v2(
+            head=self.head, plan_revision=self.plan["plan_revision"], plan_digest=self.plan["plan_digest"],
+        )
+        candidate["release_task_id"] = self.plan["release_task_id"]
+        contracts.refresh_candidate_inputs(candidate, refresh_evidence=True)
+        self.master["candidate_evidence"] = candidate
+        write_json(self.master_path, self.master)
+
+    def idle_after_integration(self) -> dict[str, object]:
+        card = contracts.make_idle_worker_card()
+        card.update({
+            "record_revision": 4,
+            "updated_at": "2026-01-01T00:04:00Z",
+            "last_task": {
+                "task_id": self.spec["task_id"],
+                "task_spec_revision": self.spec["task_spec_revision"],
+                "task_spec_digest": self.spec["task_spec_digest"],
+                "outcome": "COMPLETED",
+                "worker_commit_sha": self.head,
+                "integrated_as_sha": self.head,
+            },
+        })
+        return card
+
+
 class CloseReleaseTests(unittest.TestCase):
     def test_normal_closeout_archives_exact_three_files_and_preserves_handoffs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -583,6 +740,214 @@ class CloseReleaseTests(unittest.TestCase):
                 task_id: (worktree / worker_card_sidecar.SIDECAR_NAME).read_bytes()
                 for task_id, worktree in fixture.worktrees.items()
             })
+
+
+class WorkerTransitionTests(unittest.TestCase):
+    def transition(self, fixture: WorkerTransitionFixture, card: dict[str, object], **kwargs: object) -> dict[str, object]:
+        worker_card_path = kwargs.pop("worker_card_path", fixture.worker_path)
+        return worker_card_sidecar.transition_worker_card(
+            repo_root=fixture.repo,
+            plan_path=fixture.plan_path,
+            master_card_path=fixture.master_path,
+            task_id="worker-task",
+            worker_card_path=worker_card_path,
+            card=card,
+            **kwargs,
+        )
+
+    def test_idle_active_awaiting_idle_lifecycle_uses_json_only(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = WorkerTransitionFixture(Path(directory))
+            (fixture.worktree / "WORKTREE_TASK.md").write_text("human-only projection\n", encoding="utf-8")
+            active = fixture.active()
+            self.assertEqual(self.transition(fixture, active)["state"], "ACTIVE")
+            awaiting = fixture.awaiting()
+            self.assertEqual(self.transition(fixture, awaiting)["state"], "AWAITING_INTEGRATION")
+            fixture.integrate()
+            idle = fixture.idle_after_integration()
+            result = worker_card_sidecar.transition_worker_card(
+                repo_root=fixture.repo, plan_path=fixture.plan_path,
+                master_card_path=fixture.master_path, worker_card_path=fixture.worker_path,
+                card=idle,
+            )
+            self.assertEqual(result["state"], "IDLE")
+            self.assertEqual((fixture.worktree / "WORKTREE_TASK.md").read_text(encoding="utf-8"),
+                             "human-only projection\n")
+            self.assertEqual(json.loads(fixture.worker_path.read_text())["last_task"]["integrated_as_sha"],
+                             fixture.head)
+
+    def test_missing_sidecar_only_allows_initial_active_and_equal_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = WorkerTransitionFixture(Path(directory))
+            fixture.worker_path.unlink()
+            active = fixture.active()
+            first = self.transition(fixture, active)
+            first_bytes = fixture.worker_path.read_bytes()
+            second = self.transition(fixture, active)
+            self.assertEqual(first, second)
+            self.assertEqual(first_bytes, fixture.worker_path.read_bytes())
+
+    def test_missing_sidecar_allows_only_current_revision_with_preserved_rework(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = WorkerTransitionFixture(Path(directory))
+            old_digest = fixture.spec["task_spec_digest"]
+            old_acceptance_digest = contracts.value_digest(fixture.spec["acceptance"])
+            fixture.spec["task_spec_revision"] = 2
+            fixture.spec["plan_revision"] = 2
+            fixture.spec["acceptance"] = ["test revised Worker transition task"]
+            fixture.spec["task_spec_digest"] = contracts.object_digest(fixture.spec, "task_spec_digest")
+            write_json(fixture.spec_path, fixture.spec)
+            fixture.plan = contracts.make_plan_for_spec(
+                fixture.spec, "PUBLISHED", plan_revision=2, revision_decision="REVISE",
+            )
+            fixture.plan.update({
+                "state_root": str(fixture.state),
+                "task_specs_root": str(fixture.tasks_root),
+                "release_task_id": "release-transition",
+            })
+            fixture.plan["plan_digest"] = contracts.object_digest(fixture.plan, "plan_digest")
+            write_json(fixture.plan_path, fixture.plan)
+            fixture.master = contracts.make_active_master_card(fixture.plan, str(fixture.plan_path))
+            fixture.master["frozen_baseline_sha"] = fixture.baseline
+            candidate = contracts.make_candidate_v2(
+                head=fixture.head, plan_revision=2, plan_digest=fixture.plan["plan_digest"],
+                stale_gates={"targeted-tests"},
+            )
+            candidate["release_task_id"] = fixture.plan["release_task_id"]
+            contracts.refresh_candidate_inputs(candidate, refresh_evidence=True)
+            fixture.master["candidate_evidence"] = candidate
+            handoff = contracts.make_received_handoff()
+            handoff.update({
+                "state": "REWORK_REQUESTED",
+                "task_id": fixture.spec["task_id"],
+                "role": fixture.spec["owner_role"],
+                "task_spec_revision": 1,
+                "task_spec_digest": old_digest,
+                "plan_revision": 1,
+                "dispatch_wave": fixture.spec["dispatch_wave"],
+                "source_thread_id": fixture.spec["source_thread_id"],
+                "frozen_baseline_sha": fixture.spec["expected_head"],
+                "authorization_envelope_digest": fixture.spec["authorization"]["envelope_digest"],
+                "acceptance_digest": old_acceptance_digest,
+                "worker_commit_sha": fixture.head,
+                "integrated_as_sha": None,
+            })
+            fixture.master["worker_handoffs"] = [handoff]
+            write_json(fixture.master_path, fixture.master)
+            fixture.worker_path.unlink()
+            result = self.transition(fixture, fixture.active())
+            self.assertEqual(result["task_spec_revision"], 2)
+            self.assertEqual(result["state"], "ACTIVE")
+
+    def test_missing_prior_awaiting_is_rejected_without_creating_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = WorkerTransitionFixture(Path(directory))
+            fixture.worker_path.unlink()
+            with self.assertRaises(worker_card_sidecar.SidecarError):
+                self.transition(fixture, fixture.awaiting())
+            self.assertFalse(fixture.worker_path.exists())
+
+    def test_transition_rejects_stale_identity_wrong_path_and_same_state_rewrite(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = WorkerTransitionFixture(Path(directory))
+            self.transition(fixture, fixture.active())
+            original = fixture.worker_path.read_bytes()
+
+            stale = fixture.awaiting()
+            stale["task_spec_digest"] = "sha256:" + "f" * 64
+            with self.subTest(scenario="stale identity"), self.assertRaises(worker_card_sidecar.SidecarError):
+                self.transition(fixture, stale)
+            self.assertEqual(original, fixture.worker_path.read_bytes())
+
+            with self.subTest(scenario="cross worktree path"), self.assertRaises(worker_card_sidecar.SidecarError):
+                self.transition(fixture, fixture.awaiting(), worker_card_path=fixture.root / "other" / "WORKTREE_TASK.json")
+            self.assertEqual(original, fixture.worker_path.read_bytes())
+
+            same_state = fixture.active()
+            same_state["record_revision"] = 3
+            same_state["updated_at"] = "2026-01-01T00:02:00Z"
+            with self.subTest(scenario="same state"), self.assertRaises(worker_card_sidecar.SidecarError):
+                self.transition(fixture, same_state)
+            self.assertEqual(original, fixture.worker_path.read_bytes())
+
+    def test_transition_rejects_symlink_and_record_revision_regression(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = WorkerTransitionFixture(Path(directory))
+            self.transition(fixture, fixture.active())
+            outside = fixture.root / "outside.json"
+            outside.write_bytes(fixture.worker_path.read_bytes())
+            fixture.worker_path.unlink()
+            fixture.worker_path.symlink_to(outside)
+            with self.subTest(scenario="sidecar symlink"), self.assertRaises(worker_card_sidecar.SidecarError):
+                self.transition(fixture, fixture.awaiting())
+            self.assertEqual(fixture.worker_path.read_bytes(), outside.read_bytes())
+
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = WorkerTransitionFixture(Path(directory))
+            self.transition(fixture, fixture.active())
+            regressed = fixture.awaiting()
+            regressed["record_revision"] = 1
+            with self.assertRaises(worker_card_sidecar.SidecarError):
+                self.transition(fixture, regressed)
+
+    def test_bytes_changed_during_replace_is_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = WorkerTransitionFixture(Path(directory))
+            self.transition(fixture, fixture.active())
+            changed = b"raced bytes\n"
+            original = worker_card_sidecar._replace_if_unchanged
+
+            def race(path: Path, expected: bytes, data: bytes) -> bool:
+                path.write_bytes(changed)
+                return original(path, expected, data)
+
+            with patch.object(worker_card_sidecar, "_replace_if_unchanged", side_effect=race):
+                with self.assertRaises(worker_card_sidecar.SidecarError):
+                    self.transition(fixture, fixture.awaiting())
+            self.assertEqual(fixture.worker_path.read_bytes(), changed)
+
+    def test_interrupted_replace_is_recoverable_by_equal_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = WorkerTransitionFixture(Path(directory))
+            self.transition(fixture, fixture.active())
+            awaiting = fixture.awaiting()
+            expected = contracts.canonical_json(awaiting)
+            replace = worker_card_sidecar.os.replace
+
+            def interrupt(source: str, target: str) -> None:
+                replace(source, target)
+                raise worker_card_sidecar.SidecarError("simulated post-replace interruption")
+
+            with patch.object(worker_card_sidecar.os, "replace", side_effect=interrupt):
+                with self.assertRaises(worker_card_sidecar.SidecarError):
+                    self.transition(fixture, awaiting)
+            self.assertEqual(fixture.worker_path.read_bytes(), expected)
+            self.assertEqual(self.transition(fixture, awaiting)["state"], "AWAITING_INTEGRATION")
+
+    def test_existing_received_handoff_must_match_worker_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = WorkerTransitionFixture(Path(directory))
+            self.transition(fixture, fixture.active())
+            handoff = contracts.make_received_handoff()
+            handoff.update({
+                "task_id": fixture.spec["task_id"],
+                "role": fixture.spec["owner_role"],
+                "task_spec_revision": fixture.spec["task_spec_revision"],
+                "task_spec_digest": fixture.spec["task_spec_digest"],
+                "plan_revision": fixture.spec["plan_revision"],
+                "dispatch_wave": fixture.spec["dispatch_wave"],
+                "source_thread_id": fixture.spec["source_thread_id"],
+                "frozen_baseline_sha": fixture.spec["expected_head"],
+                "authorization_envelope_digest": fixture.spec["authorization"]["envelope_digest"],
+                "acceptance_digest": contracts.value_digest(fixture.spec["acceptance"]),
+                "worker_commit_sha": "a" * 40,
+            })
+            fixture.master["worker_handoffs"] = [handoff]
+            fixture.master["record_revision"] += 1
+            fixture.master["updated_at"] = "2026-01-01T00:02:00Z"
+            write_json(fixture.master_path, fixture.master)
+            with self.assertRaises(worker_card_sidecar.SidecarError):
+                self.transition(fixture, fixture.awaiting())
 
 
 class LocatorTests(unittest.TestCase):

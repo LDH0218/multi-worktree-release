@@ -553,10 +553,13 @@ last_task:
 ```
 
 Persist the complete Worker Card JSON object above as the ignored `WORKTREE_TASK.json` beside the worktree's Markdown
-projection. The JSON sidecar is the normative machine input for closeout; the Markdown projection is for humans and is never
-implicitly parsed as JSON. A Master-only migration/bootstrap writes an IDLE sidecar from a terminal Plan and matching
-INTEGRATED Master handoff with no-overwrite atomic bytes. Missing, duplicate, extra, symlinked, malformed, non-IDLE, stale, or
-cross-worktree sidecars fail closed before closeout archives are written.
+projection. The JSON sidecar is the normative machine input for closeout and for every Worker state transition; the Markdown
+projection is for humans and is never implicitly parsed as JSON. A Master-only migration/bootstrap writes an IDLE sidecar from
+a terminal Plan and matching INTEGRATED Master handoff with no-overwrite atomic bytes. The bound Worker writes each subsequent
+complete JSON card through an exact-path, prior-byte-checked atomic transition operation. It accepts a missing prior only for
+an initial valid ACTIVE activation, validates Plan/Task identity, legal state and revision changes, and relevant Master
+integration evidence, and has no Master or external authority. Missing, duplicate, extra, symlinked, malformed, non-IDLE,
+stale, or cross-worktree sidecars fail closed before closeout archives are written.
 
 Master card uses a list; never concatenate multiple SHAs into one field:
 
@@ -709,10 +712,13 @@ production publication.
 
 The canonical Worker Card machine record is the complete schema-valid card at the fixed ignored path
 `<WORKTREE>/WORKTREE_TASK.json`. `WORKTREE_TASK.md` remains a compact human projection and is never implicitly parsed as JSON
-evidence. Master may bootstrap one missing IDLE sidecar only from a terminal current Plan plus its exact INTEGRATED Master
-handoff, with deterministic bytes, no-overwrite atomic installation, and equal-byte retry idempotence. The bootstrap rejects
-conflicts, nonterminal or missing/mismatched evidence, unsafe paths, and non-IDLE cards; it never changes Plan, Master, Markdown,
-Git, or another worktree. Closeout discovers exactly one fixed sidecar per distinct Plan worktree when inputs are omitted;
+evidence. Every Worker state transition persists the complete JSON card atomically at that path. Master may bootstrap one
+missing IDLE sidecar only from a terminal current Plan plus its exact INTEGRATED Master handoff, with deterministic bytes,
+no-overwrite atomic installation, and equal-byte retry idempotence. The bound Worker transition operation accepts a complete
+JSON card independently of Markdown, checks the exact worktree, prior canonical bytes, Plan/Task identity, legal transition and
+revision, and relevant Master evidence; only initial ACTIVE activation may lack a prior sidecar. Bootstrap and Worker
+transitions reject conflicts, unsafe paths, stale or mismatched evidence, and bytes changed during replacement; neither grants
+Master or external authority. Closeout discovers exactly one fixed sidecar per distinct Plan worktree when inputs are omitted;
 explicit inputs remain valid only when their records reconcile to that same worktree set. All sidecar failures occur before the
 first archive write.
 

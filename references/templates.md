@@ -256,7 +256,10 @@ It also grants no production publication authority.
 
 The canonical Worker Card input is the complete schema-valid JSON object persisted at the ignored fixed path
 `<WORKTREE>/WORKTREE_TASK.json`. `WORKTREE_TASK.md` is a human projection only and is never implicitly parsed as JSON
-evidence. Master may bootstrap a missing IDLE sidecar from a terminal current Plan and matching INTEGRATED Master handoff using
+evidence. Every Worker state transition writes the complete JSON object atomically at the fixed path. The bound Worker
+transition operation accepts a complete JSON card independently of Markdown, validates Plan/Task identity, legal prior and
+current states, revision, and relevant Master evidence, and permits a missing prior only for initial ACTIVE activation. It
+grants no Master or external authority. Master may bootstrap a missing IDLE sidecar from a terminal current Plan and matching INTEGRATED Master handoff using
 deterministic, no-overwrite atomic bytes; equal bytes are idempotent, while conflicts, unsafe paths, or non-IDLE cards fail
 closed. Closeout discovers one fixed sidecar per distinct Plan worktree when explicit inputs are omitted, and explicit inputs
 must reconcile exactly to the same worktree set before any archive write.

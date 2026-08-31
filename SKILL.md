@@ -204,12 +204,16 @@ conflicts, changed inputs, unsafe paths, incomplete history, or interruption fai
 deploy, execution, external call, destructive operation, synchronization, or production-publication authority.
 
 The canonical local Worker Card evidence is the schema-valid full card at the fixed ignored path
-`<WORKTREE>/WORKTREE_TASK.json`; `WORKTREE_TASK.md` is only a human projection and is never implicitly parsed as JSON. A
-Master-only bootstrap may create one missing IDLE sidecar only from a terminal current Plan and its matching INTEGRATED Master
-handoff, using exact-byte no-overwrite installation and equal-byte retry idempotence. Closeout discovers that fixed sidecar once
-per distinct Plan worktree when explicit inputs are omitted; explicit inputs must reconcile to the same worktree set. Missing,
-extra, duplicate, symlinked, invalid, non-IDLE, stale, or cross-worktree records fail before archive writes. Bootstrap changes no
-Plan, Master Card, Markdown projection, Git state, or other worktree.
+`<WORKTREE>/WORKTREE_TASK.json`; `WORKTREE_TASK.md` is only a human projection and is never implicitly parsed as JSON. Every
+Worker state transition writes the complete JSON card atomically at that fixed path. A Master-only bootstrap may create one
+missing IDLE sidecar only from a terminal current Plan and its matching INTEGRATED Master handoff, using exact-byte
+no-overwrite installation and equal-byte retry idempotence. A Worker-owned transition operation accepts a complete JSON card,
+checks the Plan/Task identity, legal prior/current transition, revision, and relevant Master evidence, then replaces only the
+unchanged fixed sidecar; a missing prior is valid only for initial ACTIVE activation. Closeout discovers that fixed sidecar
+once per distinct Plan worktree when explicit inputs are omitted; explicit inputs must reconcile to the same worktree set.
+Missing, extra, duplicate, symlinked, invalid, non-IDLE, stale, or cross-worktree records fail before archive writes. Bootstrap
+and Worker transitions change no Markdown evidence, Plan, Master Card, Git state, or other worktree, and grant no external or
+Master authority.
 
 ## Exceptions and recovery
 
