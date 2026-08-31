@@ -1,4 +1,4 @@
-# Roadmap：FAST 已采用；当前 STRICT 批次收尾中；完整 v2 继续冻结
+# Roadmap：FAST 已采用；当前 STRICT 批次已完成；完整 v2 继续冻结
 
 > 状态：非规范路线图。本文描述后续产品方向和执行顺序，不改变当前 `SKILL.md`、Schema、校验器或既有 v1 行为。
 
@@ -216,7 +216,7 @@ FAST 已正式采用。一次性临时 Git 仓库和临时 JSON fixture 已完�
 - [x] fixture 的 previous/current Master 历史校验通过；真实批次的 closeout 已归档 ACTIVE 快照与 44 条 handoff，并将 live Master 转为 `IDLE`。
 - [x] 真实 closeout 已将 Plan、ACTIVE Master 快照与带摘要的 `closeout.json` 持久化到 `history/releases/mwr-hardening-2026-08-30/`，随后 live Master 规范地转为 `IDLE`。
 
-### Test Phase E：结论（旧批次闭环完成；新 release 起点覆盖待补）
+### Test Phase E：结论（旧批次与新 release 起点均已闭环）
 
 - [x] 即时 fixture 证明当前 FAST + v1 STRICT 的主要成功和失败路径可以运行；`mwr-hardening-2026-08-30` 的真实 E2E 已证明任务发布、Worker handoff、Master 集成、Gate、正常推送和 closeout 的完整闭环。
 - [x] **T4：新 release 空 Candidate 起点**：覆盖 `release-rollover` 后的 canonical 空 v1 Candidate、v2 `NONE` 迁移、首次完整 fresh v2 Gate 认证、正常推送与 closeout；窄范围修复、重新认证和 closeout 均已完成。
@@ -226,7 +226,7 @@ FAST 已正式采用。一次性临时 Git 仓库和临时 JSON fixture 已完�
 
 ### 真实 E2E 证据
 
-- [x] 本批次 release HEAD：`edbfe319a9d7108fcdfe815d7e6d726a489352eb`；独立 Gate attestation 与该 HEAD 的 Git tree 完全一致。
+- [x] 本批次 release HEAD：`9c4ed496be3f68edf8dca4c4955703be2c1744ae`；独立 Gate attestation 与该 HEAD 的 Git tree 完全一致。
 - [x] 五张 JSON Worker Card 均为 `IDLE`，并通过 Plan/Master/Worker 跨记录校验；本批次新增 Card 的真实生命周期为 `IDLE → ACTIVE → AWAITING_INTEGRATION → IDLE`。
 - [x] 最终 Candidate 的 10 项检查均为 `PASS`，两个 required Gate 均为 `PASSED`；推送到 `origin/main` 后执行 closeout 并复跑幂等性检查。
 - [x] 历史 Plan locator 通过显式 `--plan-locator` / `--previous-plan-locator` 在 previous/current 验证中通过；关闭历史有固定持久位置，不再依赖 live Card 或对话。
