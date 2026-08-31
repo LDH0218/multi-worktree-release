@@ -36,6 +36,34 @@ new role has durable contract ownership, an independent change cadence, and litt
 Executable messages follow a star topology. Workers may exchange discovery evidence but route all executable cross-layer
 instructions, baselines, synchronization, and rework through Master.
 
+## Durable role bindings
+
+A durable role binding is one governance tuple: `responsibility role → current visible conversation → retained worktree →
+branch`. Each long-lived role has exactly one current visible conversation and one retained worktree/branch pair; a retained
+pair cannot be concurrently claimed by another role or conversation. This is a derived v1 invariant, not a new machine record:
+Master proves it from the task list, existing Dispatch Plan/Task Specs/Cards, and read-only Git/worktree inventory.
+
+Master owns the binding lifecycle and records its evidence in the existing discovery, task, handoff, or rotation projections:
+
+- **Create:** inventory current roles and visible conversations, then verify the target worktree and branch are available, their
+  full HEAD/status and preserved material are known, and no other role, task, card, or live binding claims them. Bind the role,
+  conversation generation, absolute worktree, branch, baseline, and relevant Plan/Task/Card identities before publishing work.
+  Creating a worktree or branch follows its own explicit repository authority.
+- **Rotate:** create and verify the successor conversation first, with the same role, retained worktree, and branch. Its
+  read-only bootstrap must confirm the exact path, branch, HEAD/status, preserved material, Plan/Task/Card identities, and
+  current binding. Keep the predecessor visible until that check passes; only then archive the predecessor conversation. This
+  archive is history management, not worktree or branch retirement, and rotation never copies uncommitted files.
+- **Duplicate:** if two visible conversations claim one role or retained pair, stop dispatch immediately and keep it stopped
+  until Master reconciles the binding. Archive an unassigned duplicate only after proving it has no Task Spec, Card, changed or
+  untracked material, or live binding. Mark its worktree as awaiting an explicit cleanup decision; never delete it
+  automatically.
+- **Retire:** retire a binding only for a documented topology adjustment, role retirement, or major migration. Before doing so,
+  reconcile all active tasks, handoffs, cards, baselines, blockers, and preserved material, and retain evidence of the Master
+  decision and any successor or recovery owner. Retiring a binding never deletes task history, a worktree, or a branch;
+  worktree/branch deletion requires separate explicit destructive authorization.
+- **Complete:** task completion returns the Worker Card to `IDLE`; it does not archive the current conversation or retire the
+  role's retained worktree and branch.
+
 ## Task Dependency and Dispatch Plan
 
 The Task Dependency and Dispatch Plan is the normative coordination model for a release batch. It is not required to be a
@@ -230,8 +258,9 @@ Separate three completion states:
 
 ## Core invariants
 
-1. One long-lived role has one explicit absolute worktree and branch.
-2. Conversation rotation reuses the worktree and branch; it does not copy uncommitted files.
+1. One long-lived role has one current visible conversation and one explicit retained worktree/branch pair.
+2. Rotation creates and verifies the successor before archiving the predecessor; it reuses the worktree and branch and does not
+   copy uncommitted files.
 3. Every task freezes a full commit SHA.
 4. Workers never independently merge, rebase, reset, or synchronize Master.
 5. Master performs a read-only discovery gate before publishing implementation work.
@@ -903,10 +932,15 @@ by that Worker requires an explicit rework revision.
 ## Rotation and recovery
 
 A new conversation generation performs a read-only bootstrap and does not inherit implementation, runtime, publication,
-destructive, synchronization, or scope-expansion authorization. A rotation handoff records the current plan revision and
-task revisions and digests, dispatch waves, all worktree SHAs and states, patch-equivalent historical forks, active contracts
-and inputs, latest gates, preserved material, unfinished work, blockers and recovery owners, and actions requiring renewed
-authority. The new generation must not resume an affected task under an older plan or task revision or a mismatched digest.
+destructive, synchronization, or scope-expansion authorization. For a durable binding, Master creates the successor first and
+keeps the predecessor visible until the successor verifies the role, generation, exact worktree, branch, HEAD/status, preserved
+material, Plan/Task/Card identities, and current binding. Only after that evidence is complete may Master archive the
+predecessor conversation. The archive is not a worktree or branch retirement.
+
+A rotation handoff records the current plan revision and task revisions and digests, dispatch waves, all worktree SHAs and
+states, patch-equivalent historical forks, active contracts and inputs, latest gates, preserved material, unfinished work,
+blockers and recovery owners, and actions requiring renewed authority. The new generation must not resume an affected task
+under an older plan or task revision or a mismatched digest.
 
 If an old conversation disappears:
 
@@ -917,6 +951,11 @@ If an old conversation disappears:
 - For `AWAITING_INTEGRATION`, verify the commit remains reachable and wait for Master.
 - For `BLOCKED`, preserve the blocker kind, evidence, `blocked_since`, and recovery owner.
 - Only Master may invalidate the old task, assign a takeover, or publish a superseding task.
+- If duplicate visible conversations are discovered, stop dispatch and reconcile the role/worktree binding before any archive or
+  reassignment. Archive only an unassigned duplicate with no Task Spec, Card, changed/untracked material, or live binding; leave
+  its worktree awaiting an explicit cleanup decision.
+- A role-binding retirement requires an explicit topology, role-retirement, or major-migration decision and preserved evidence;
+  it never implies worktree or branch deletion.
 
 ## Adoption sequence
 

@@ -94,6 +94,33 @@ For example: `MWR｜Master-1.0` or `MWR｜授权模型-1.0`.
 - Treat the title as a human-readable UI projection only. The persisted Dispatch Plan, Task Spec, and state card remain
   authoritative for identity, state, scope, and authorization.
 
+## Durable role bindings
+
+A durable role binding is one tuple: `responsibility role → current visible conversation → retained worktree → branch`. One
+role has exactly one current visible conversation and one retained worktree/branch pair; one retained pair is not concurrently
+owned by another role or conversation. This is a governance invariant derived from the existing task list, Dispatch Plan,
+Task Specs, Worker/Master Cards, and read-only Git/worktree inventory. Do not add a role registry or another machine record in
+v1.
+
+- **Create:** Master first inventories roles, visible conversations, worktrees, branches, cards, plans, dirty/untracked
+  material, and baselines. It may bind a new role only after the target worktree and branch are unambiguously available and
+  the binding evidence records the role, generation, conversation, absolute worktree, branch, full HEAD, status, and relevant
+  Plan/Task/Card identities. Worktree or branch creation follows its own explicit repository authority.
+- **Rotate:** Master creates the successor conversation with the same role, retained worktree, and branch, then waits for its
+  read-only bootstrap to verify the exact path, branch, HEAD/status, Plan/Task/Card identities, and preserved material. Keep
+  the predecessor visible until that verification succeeds; only then archive the predecessor. Archiving conversation history
+  is not worktree or branch retirement, and rotation never copies uncommitted files or deletes either ref.
+- **Duplicate:** If two visible conversations claim one role or retained worktree, stop dispatch for the affected binding
+  immediately. Master may archive an unassigned duplicate only after proving it has no Task Spec, Worker/Master Card, changes
+  or untracked material, and no live binding. Mark its worktree as awaiting an explicit cleanup decision; never delete it
+  automatically.
+- **Retire:** Retire a binding only for a documented topology adjustment, role retirement, or major migration after Master
+  reconciles active tasks, handoffs, cards, baselines, and preserved material. Record the decision and evidence in the existing
+  task/Plan/Card/handoff projections. Binding retirement does not authorize worktree or branch deletion; that is a separate,
+  explicit destructive authorization.
+- **Complete:** A completed task returns its Worker Card to `IDLE`; the current conversation, retained worktree, and branch stay
+  available for the role. Do not archive the current conversation or clean up the binding merely because a task completed.
+
 ## Coordinate through the Master
 
 - Use a star topology for executable instructions: Master publishes to Workers; Workers hand off to Master. Worker-to-Worker

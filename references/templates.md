@@ -5,6 +5,39 @@ identity, state, revision, and authorization fields are never omitted; record ex
 when denied or empty. Omit only fields that the canonical contract explicitly marks optional. Never invent values or authority.
 The machine field and enum authority is [contracts.schema.json](contracts.schema.json); these templates must remain equivalent.
 
+## Durable role binding evidence
+
+This is a human-readable Master discovery/rotation/retirement projection, not a new Schema record or role registry. Use the
+existing task list, Dispatch Plan, Task Specs, Cards, handoffs, and read-only Git/worktree inventory as evidence.
+
+```text
+Binding action: CREATE | ROTATE | DUPLICATE_RECONCILIATION | RETIRE
+Responsibility role: <ROLE>
+Current visible conversation: <TASK/TITLE/GENERATION>
+Retained worktree: <ABSOLUTE_PATH>
+Branch: <BRANCH>
+Full HEAD: <SHA>
+Status and preserved material: <CLEAN_OR_DETAILS>
+Existing Plan/Task/Card/handoff identities: <IDS_OR_NONE>
+
+Master preflight
+- Exactly one current visible conversation claims this role: <PASS/FAIL>
+- Exactly one role claims this retained worktree/branch pair: <PASS/FAIL>
+- Worktree, branch, HEAD, status, and preserved material verified: <PASS/FAIL>
+- Existing Plan, Task Spec, Worker/Master Card, and live binding reconciled: <PASS/FAIL>
+- Required decision and authority present: <PASS/FAIL>
+
+Decision and evidence: <MASTER_DECISION / READ_ONLY_EVIDENCE / RECOVERY_OWNER>
+```
+
+For `ROTATE`, create and verify the successor conversation with the same role, worktree, and branch before archiving the
+predecessor. Keep the predecessor visible until its successor's read-only bootstrap passes; then archive only the predecessor
+conversation. Conversation archive is history management, not worktree or branch retirement. For `DUPLICATE_RECONCILIATION`,
+stop dispatch immediately; archive an unassigned duplicate only after proving it has no Task Spec, Card, changed or untracked
+material, or live binding, and mark its worktree as awaiting an explicit cleanup decision. For `RETIRE`, the reason must be a
+topology adjustment, role retirement, or major migration; reconcile active work and preserved material first. Worktree or branch
+deletion is never implied and needs separate explicit destructive authorization.
+
 ## Task Dependency and Dispatch Plan
 
 Use this plan before publishing implementation work. It is a semantic coordination record and may be represented as YAML, a
@@ -307,6 +340,10 @@ Then report the absolute path, branch, HEAD, status, preserved untracked materia
 verify its task ID, task revision, task-spec digest, plan revision, dispatch wave, frozen baseline, issuer, Worker SHA, and
 waiting condition against this handoff. Verify card and plan `record_revision` values and the Worker/Dispatch state mapping.
 
+Also verify that exactly one current visible conversation claims the role and retained worktree/branch pair. A rotation successor
+must pass this bootstrap before Master archives its predecessor. If another visible conversation claims the same role or retained
+pair, stop dispatch and report `DUPLICATE_RECONCILIATION`; do not archive or delete a worktree automatically.
+
 Do not switch branches, synchronize, merge, rebase, reset, delete historical material, run external services, create a run,
 publish, or expand scope. This generation inherits no external or destructive authorization.
 After the read-only check, report inconsistencies and stop; otherwise update your current facts and wait for a concrete task.
@@ -324,6 +361,7 @@ Worktree and baseline
 - Absolute worktree: <PATH>
 - Branch: <BRANCH>
 - Expected HEAD: <FULL_SHA>
+- Durable binding: role=<ROLE>; current visible conversation=<TASK/TITLE/GENERATION>; retained worktree/branch=<PATH / BRANCH>
 - Preserved dirty/untracked material: <PATHS_OR_NONE>
 - On worktree, baseline, assignment, or plan-revision mismatch, stop and report. Do not synchronize, merge, rebase, reset, or
   switch branches.
@@ -625,6 +663,7 @@ This is the read-only handoff from <ROLE>-<OLD_GENERATION> to <ROLE>-<NEW_GENERA
 
 Identity and worktree
 - Role: <ROLE>; absolute worktree: <PATH>; branch: <BRANCH>.
+- Current visible conversation: <TASK/TITLE/GENERATION>; binding action: ROTATE.
 - HEAD: <FULL_SHA>; expected status: <STATUS INCLUDING PRESERVED PATHS>.
 - Dispatch Plan: <ABSOLUTE_PATH / PLAN_REVISION / RECORD_REVISION / DIGEST>.
 - Persisted task specification: <ABSOLUTE_PATH_OR_NULL / TASK_SPEC_DIGEST_OR_NULL>.
@@ -657,6 +696,8 @@ Authorization
 - Execution/job creation: not inherited.
 - Publication, deletion, scope expansion, and synchronization: not inherited.
 
-Read all repository governance and the state card. Verify path, branch, HEAD, status, and this handoff without modification.
-On mismatch, report and stop. On agreement, update current facts and wait; do not resume work or external authority yourself.
+Read all repository governance and the state card. Verify path, branch, HEAD, status, the one-to-one role binding, and this
+handoff without modification. Keep the predecessor visible until this successor bootstrap passes; only Master may then archive
+the predecessor. On mismatch, report and stop. On agreement, update current facts and wait; do not resume work or external
+authority yourself.
 ```
