@@ -2470,11 +2470,15 @@ def validate_fresh_rerun_after_legacy(previous: dict[str, Any], current: dict[st
         historical_error("H25", f"legacy candidate is not a valid preserved migration record: {error}")
     if current.get("legacy") is not None:
         historical_error("H25", "fresh per-Gate rerun retained opaque legacy material")
+    legacy_original = previous["legacy"]["original"]
+    empty_legacy_none = is_empty_legacy_v1_none(legacy_original)
     previous_release_task = previous.get("release_task_id")
     if (not isinstance(previous_release_task, str) or not previous_release_task
             or current.get("release_task_id") != previous_release_task):
         historical_error("H25", "fresh per-Gate rerun changed the migrated release authority")
-    if previous.get("release_head_sha") is None:
+    if empty_legacy_none and previous.get("release_head_sha") is not None:
+        historical_error("H25", "empty legacy candidate unexpectedly retained an old release HEAD")
+    if not empty_legacy_none and previous.get("release_head_sha") is None:
         historical_error("H25", "legacy candidate is not bound to an old release HEAD")
     previous_plan_revision = previous.get("plan_revision")
     current_plan_revision = current.get("plan_revision")
@@ -2500,7 +2504,6 @@ def validate_fresh_rerun_after_legacy(previous: dict[str, Any], current: dict[st
             "fresh per-Gate rerun is incomplete for current Gate registry: "
             f"{', '.join(incomplete_gates)}",
         )
-    legacy_original = previous["legacy"]["original"]
     opaque_digests = {
         check["evidence_digest"] for check in legacy_original.get("checks", [])
         if isinstance(check, dict) and isinstance(check.get("evidence_digest"), str)
@@ -4602,6 +4605,29 @@ class CandidateEvidenceScenarios(unittest.TestCase):
         validate_candidate_evidence(migrated, self.schema)
         self.assertEqual(migrated["status"], "NONE")
 
+    def test_empty_legacy_none_can_advance_to_fresh_per_gate_evidence(self) -> None:
+        _legacy_master, migrated_master, fresh_master = make_legacy_master_sequence(
+            self.schema, fresh_head="b" * 40, legacy_empty=True,
+        )
+        migrated = migrated_master["candidate_evidence"]
+        fresh = fresh_master["candidate_evidence"]
+        self.assertEqual(migrated["status"], "NONE")
+        self.assertIsNone(migrated["release_head_sha"])
+        self.assertEqual(fresh["status"], "PASSED")
+        validate_candidate_transition(migrated, fresh, self.schema)
+        validate_master_transition(migrated_master, fresh_master, self.schema)
+
+    def test_evidence_bearing_legacy_without_old_head_remains_h25(self) -> None:
+        legacy = make_candidate("STALE", "a" * 40, "PASS")
+        migrated = migrate_candidate_evidence(
+            legacy, self.schema, release_task_id="release-1", plan_revision=1,
+        )
+        migrated["release_head_sha"] = None
+        validate_candidate_v2(migrated, self.schema)
+        fresh = make_candidate_v2(head="b" * 40, plan_revision=2)
+        with self.assertRaisesRegex(ContractError, r"\[H25\].*old release HEAD"):
+            validate_candidate_transition(migrated, fresh, self.schema)
+
     def test_current_master_fences_legacy_passed_and_failed_but_preserves_read_compatibility(self) -> None:
         for status, result in (("PASSED", "PASS"), ("FAILED", "FAIL")):
             with self.subTest(status=status):
@@ -5443,6 +5469,39 @@ class HistoricalContractScenarios(unittest.TestCase):
                     self.assertEqual(result.returncode, 1, result.stdout)
                     self.assertIn("[H25]", result.stderr)
 
+    def test_public_cli_empty_legacy_migration_to_fresh_master_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            legacy, migrated, fresh = make_legacy_master_sequence(
+                self.schema, fresh_head="b" * 40, legacy_empty=True,
+            )
+            legacy_path = root / "master-v1-none.json"
+            migrated_path = root / "master-v2-none.json"
+            fresh_path = root / "master-v2-fresh.json"
+            write_json_fixture(legacy_path, legacy)
+            write_json_fixture(migrated_path, migrated)
+            write_json_fixture(fresh_path, fresh)
+
+            migration = run_public_cli(
+                "--previous-master-card", str(legacy_path),
+                "--master-card-json", str(migrated_path),
+            )
+            self.assertEqual(migration.returncode, 0, migration.stderr)
+
+            rerun = run_public_cli(
+                "--previous-master-card", str(migrated_path),
+                "--master-card-json", str(fresh_path),
+            )
+            self.assertEqual(rerun.returncode, 0, rerun.stderr)
+            self.assertIn("historical master-card: PASS transition=FORWARD", rerun.stdout)
+
+            direct = run_public_cli(
+                "--previous-master-card", str(legacy_path),
+                "--master-card-json", str(fresh_path),
+            )
+            self.assertEqual(direct.returncode, 1, direct.stdout)
+            self.assertIn("[H25]", direct.stderr)
+
             reused_legacy, reused_migrated, reused_fresh = make_legacy_master_sequence(
                 self.schema, legacy_head="a" * 40, fresh_head="b" * 40,
                 legacy_status="STALE",
@@ -6196,11 +6255,12 @@ def make_previous_rotation_plan(current: dict[str, Any]) -> dict[str, Any]:
 
 def make_legacy_master_sequence(schema: dict[str, Any], *, legacy_head: str = "a" * 40,
                                 fresh_head: str | None = None,
-                                legacy_status: str = "PASSED") -> tuple[
+                                legacy_status: str = "PASSED", legacy_empty: bool = False) -> tuple[
         dict[str, Any], dict[str, Any], dict[str, Any]]:
     if fresh_head is None:
         fresh_head = legacy_head
-    legacy = make_candidate(legacy_status, legacy_head, "PASS")
+    legacy = ({"release_head_sha": None, "gate_input_digest": None, "status": "NONE", "checks": []}
+              if legacy_empty else make_candidate(legacy_status, legacy_head, "PASS"))
     previous = make_active_master_card()
     previous["candidate_evidence"] = legacy
     migrated = advance_record(previous)
