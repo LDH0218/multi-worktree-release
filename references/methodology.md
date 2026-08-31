@@ -710,6 +710,39 @@ archive paths, or interruption leave the live Master `ACTIVE` and preserve all e
 clears a Worker Card and never authorizes push, tag, release, deploy, execution, external call, destructive operation, or
 production publication.
 
+## v1 release rollover
+
+The three-file closeout archive is the complete authority for a closed release. The live Plan and live `IDLE` Master Card are
+only its recoverable final projection; they are deliberately not the historical ledger for the next release. Starting another
+independent STRICT release therefore is **not** a normal previous/current Plan transition: H11/H22/H27 continue to reject
+deletion or rewriting within a release.
+
+Only the Master-owned `scripts/rollover_release.py` may cross that boundary. It first validates the archived Plan, archived
+ACTIVE Master, closeout digest, archived byte digests, terminal handoff count/digest, reachable historical release HEAD, and
+the exact live `IDLE` Master projection. It does not require old Worker worktrees, cards, branches, or the closeout release HEAD
+to equal the current Git HEAD; those are historical facts. It then validates a staged target Plan and Master independently:
+
+- target `release_task_id` differs from the closed release;
+- target Plan and record revisions both start at `1`, and it contains only newly persisted Task Specs;
+- target Master advances its record revision exactly once, starts `ACTIVE`, has no inherited Worker handoffs, and has the
+  canonical empty candidate;
+- target Master baseline and every initial Task Spec baseline equal the current clean Master Git HEAD.
+
+Before replacing a live record, rollover installs exactly one immutable receipt:
+
+```text
+state_root/history/rollovers/<next-release-task-id>.json
+```
+
+The `release-rollover` receipt binds the prior closeout locator and digest, prior release identity, source live Plan/Master byte
+digests, target live Plan/Master byte digests, next release identity, issuer, timestamp, and its own digest. It is separate from
+the prior release archive; it never adds a fourth archive file or changes the archived bytes. Write order is receipt → live Plan
+compare-and-swap → live Master compare-and-swap → readback cross-record validation. If the process stops after replacing only
+the Plan, the same receipt and exact staged target bytes permit only forward completion. Any other mixed bytes, receipt conflict,
+unsafe path, source drift, inherited candidate/authorization/handoff, non-empty target handoff list, dirty current Git state, or
+unreachable archived release head stops without dispatch, rollback, or cleanup. Rollover grants no Worker, external, push,
+publication, destructive, synchronization, or v2 authority.
+
 The canonical Worker Card machine record is the complete schema-valid card at the fixed ignored path
 `<WORKTREE>/WORKTREE_TASK.json`. `WORKTREE_TASK.md` remains a compact human projection and is never implicitly parsed as JSON
 evidence. Every Worker state transition persists the complete JSON card atomically at that path. Master may bootstrap one

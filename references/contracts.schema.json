@@ -1031,6 +1031,60 @@
         "closeout_digest": {"$ref": "#/$defs/required_digest"}
       }
     },
+    "release_rollover_closeout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["locator", "closeout_digest", "dispatch_plan_digest", "master_card_digest"],
+      "properties": {
+        "locator": {
+          "type": "string", "minLength": 1,
+          "pattern": "^history/releases/[a-z][a-z0-9]*(?:-[a-z0-9]+)*/closeout\\.json$"
+        },
+        "closeout_digest": {"$ref": "#/$defs/required_digest"},
+        "dispatch_plan_digest": {"$ref": "#/$defs/required_digest"},
+        "master_card_digest": {"$ref": "#/$defs/required_digest"}
+      }
+    },
+    "release_rollover_live": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["locator", "value_digest"],
+      "properties": {
+        "locator": {"type": "string", "minLength": 1},
+        "value_digest": {"$ref": "#/$defs/required_digest"}
+      }
+    },
+    "release_rollover": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "record_kind", "rollover_revision", "state_root", "issued_by", "created_at",
+        "previous_release_task_id", "previous_closeout", "next_release_task_id", "source_live_plan",
+        "source_live_master_card", "target_live_plan", "target_live_master_card", "rollover_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "record_kind": {"const": "release-rollover"},
+        "rollover_revision": {"type": "integer", "minimum": 1},
+        "state_root": {"type": "string", "minLength": 1, "pattern": "^/"},
+        "issued_by": {"type": "string", "minLength": 1},
+        "created_at": {"$ref": "#/$defs/rfc3339_timestamp"},
+        "previous_release_task_id": {
+          "type": "string", "minLength": 1, "maxLength": 256,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "previous_closeout": {"$ref": "#/$defs/release_rollover_closeout"},
+        "next_release_task_id": {
+          "type": "string", "minLength": 1, "maxLength": 256,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "source_live_plan": {"$ref": "#/$defs/release_rollover_live"},
+        "source_live_master_card": {"$ref": "#/$defs/release_rollover_live"},
+        "target_live_plan": {"$ref": "#/$defs/release_rollover_live"},
+        "target_live_master_card": {"$ref": "#/$defs/release_rollover_live"},
+        "rollover_digest": {"$ref": "#/$defs/required_digest"}
+      }
+    },
     "master_card": {
       "type": "object",
       "additionalProperties": false,

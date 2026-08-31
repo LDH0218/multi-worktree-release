@@ -1496,6 +1496,26 @@ def validate_release_closeout(value: Any, schema: dict[str, Any]) -> None:
         raise ContractError("release closeout digest mismatch")
 
 
+def validate_release_rollover(value: Any, schema: dict[str, Any]) -> None:
+    validate_schema_definition(value, schema, "release_rollover", "release rollover")
+    require_exact_fields(value, schema_required(schema, "release_rollover"), "release rollover")
+    if value["previous_release_task_id"] == value["next_release_task_id"]:
+        raise ContractError("release rollover must use a new release_task_id")
+    expected_closeout = f"history/releases/{value['previous_release_task_id']}/closeout.json"
+    if value["previous_closeout"]["locator"] != expected_closeout:
+        raise ContractError("release rollover closeout locator does not match previous release_task_id")
+    if value["source_live_plan"]["locator"] != "dispatch-plan.json":
+        raise ContractError("release rollover source Plan locator must be dispatch-plan.json")
+    if value["source_live_master_card"]["locator"] != "master-card.json":
+        raise ContractError("release rollover source Master locator must be master-card.json")
+    if value["target_live_plan"]["locator"] != "dispatch-plan.json":
+        raise ContractError("release rollover target Plan locator must be dispatch-plan.json")
+    if value["target_live_master_card"]["locator"] != "master-card.json":
+        raise ContractError("release rollover target Master locator must be master-card.json")
+    if value["rollover_digest"] != object_digest(value, "rollover_digest"):
+        raise ContractError("release rollover digest mismatch")
+
+
 def classify_task_change(old: dict[str, Any], new: dict[str, Any]) -> str:
     if old["task_id"] != new["task_id"]:
         return "SUPERSEDE"
@@ -2576,7 +2596,8 @@ def validate_candidate_transition(previous: dict[str, Any], current: dict[str, A
 
 def validate_master_transition(previous: dict[str, Any], current: dict[str, Any],
                                schema: dict[str, Any] | None = None,
-                               *, allow_closeout_candidate_reset: bool = False) -> str:
+                               *, allow_closeout_candidate_reset: bool = False,
+                               allow_release_rollover: bool = False) -> str:
     transition = validate_record_transition(previous, current, "Master Card")
     previous_state = previous["state"]
     current_state = current["state"]
@@ -2600,25 +2621,30 @@ def validate_master_transition(previous: dict[str, Any], current: dict[str, Any]
     current_handoffs = {handoff_identity(item): item for item in current["worker_handoffs"]}
     previous_order = [handoff_identity(item) for item in previous["worker_handoffs"]]
     current_order = [handoff_identity(item) for item in current["worker_handoffs"]]
-    if current_order[:len(previous_order)] != previous_order:
-        historical_error("H22", "Master reordered prior Worker handoff history")
-    removed = sorted(set(previous_handoffs) - set(current_handoffs), key=repr)
-    if removed:
-        historical_error("H22", f"Master removed historical Worker handoffs: {removed}")
-    for identity, previous_handoff in previous_handoffs.items():
-        current_handoff = current_handoffs[identity]
-        immutable_previous = {key: value for key, value in previous_handoff.items()
-                              if key not in {"state", "integrated_as_sha"}}
-        immutable_current = {key: value for key, value in current_handoff.items()
-                             if key not in {"state", "integrated_as_sha"}}
-        if immutable_current != immutable_previous:
-            historical_error("H22", f"Master rewrote immutable handoff evidence for {identity}")
-        old_state = previous_handoff["state"]
-        new_state = current_handoff["state"]
-        if old_state != new_state and new_state not in HANDOFF_TRANSITIONS.get(old_state, set()):
-            historical_error("H22", f"illegal handoff transition {old_state} -> {new_state} for {identity}")
-        if old_state in {"INTEGRATED", "REWORK_REQUESTED"} and current_handoff != previous_handoff:
-            historical_error("H22", f"terminal handoff changed for {identity}")
+    rollover = (allow_release_rollover and previous_state == "IDLE" and current_state == "ACTIVE")
+    if rollover:
+        if current_handoffs:
+            historical_error("H22", "release rollover must start with an empty current Worker handoff list")
+    else:
+        if current_order[:len(previous_order)] != previous_order:
+            historical_error("H22", "Master reordered prior Worker handoff history")
+        removed = sorted(set(previous_handoffs) - set(current_handoffs), key=repr)
+        if removed:
+            historical_error("H22", f"Master removed historical Worker handoffs: {removed}")
+        for identity, previous_handoff in previous_handoffs.items():
+            current_handoff = current_handoffs[identity]
+            immutable_previous = {key: value for key, value in previous_handoff.items()
+                                  if key not in {"state", "integrated_as_sha"}}
+            immutable_current = {key: value for key, value in current_handoff.items()
+                                 if key not in {"state", "integrated_as_sha"}}
+            if immutable_current != immutable_previous:
+                historical_error("H22", f"Master rewrote immutable handoff evidence for {identity}")
+            old_state = previous_handoff["state"]
+            new_state = current_handoff["state"]
+            if old_state != new_state and new_state not in HANDOFF_TRANSITIONS.get(old_state, set()):
+                historical_error("H22", f"illegal handoff transition {old_state} -> {new_state} for {identity}")
+            if old_state in {"INTEGRATED", "REWORK_REQUESTED"} and current_handoff != previous_handoff:
+                historical_error("H22", f"terminal handoff changed for {identity}")
     if not (allow_closeout_candidate_reset and previous_state == "ACTIVE" and current_state == "IDLE"):
         validate_candidate_transition(previous["candidate_evidence"], current["candidate_evidence"], schema)
     return transition
@@ -6248,6 +6274,7 @@ def main() -> int:
     parser.add_argument("--plan-locator", type=str)
     parser.add_argument("--previous-plan-locator", type=str)
     parser.add_argument("--release-closeout-json", type=Path)
+    parser.add_argument("--release-rollover-json", type=Path)
     parser.add_argument("--skip-self-test", action="store_true")
     args = parser.parse_args()
 
@@ -6324,6 +6351,8 @@ def main() -> int:
                     print(f"candidate invalidation: {scope} gates={','.join(affected) if affected else 'none'}")
         if args.release_closeout_json:
             validate_release_closeout(load_json(args.release_closeout_json), schema)
+        if args.release_rollover_json:
+            validate_release_rollover(load_json(args.release_rollover_json), schema)
 
         if previous_plan_path is not None:
             previous_plan = load_previous_json(previous_plan_path, "Dispatch Plan")
@@ -6373,6 +6402,8 @@ def main() -> int:
             print_plan_locator_report(previous_plan_ref, previous_master, previous_cross["plan-master"])
     if args.release_closeout_json:
         print("release closeout: PASS")
+    if args.release_rollover_json:
+        print("release rollover: PASS")
     print("contract validation: PASS")
     return 0
 

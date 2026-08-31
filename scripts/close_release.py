@@ -523,8 +523,12 @@ def verify_closeout_links(closeout: dict[str, Any], plan: dict[str, Any], master
         raise CloseoutError(f"invalid closeout record: {error}") from error
     if closeout["state_root"] != plan["state_root"] or closeout["issued_by"] != plan["issued_by"]:
         raise CloseoutError("closeout Plan context mismatch")
-    if closeout["dispatch_plan"]["record_revision"] != plan["record_revision"]:
-        raise CloseoutError("closeout Plan record revision mismatch")
+    if closeout["release_task_id"] != plan["release_task_id"]:
+        raise CloseoutError("closeout release_task_id mismatch")
+    if (closeout["dispatch_plan"]["record_revision"], closeout["dispatch_plan"]["plan_revision"],
+            closeout["dispatch_plan"]["plan_digest"]) != (
+                plan["record_revision"], plan["plan_revision"], plan["plan_digest"]):
+        raise CloseoutError("closeout Plan fence mismatch")
     if closeout["master_card"]["record_revision"] != master["record_revision"]:
         raise CloseoutError("closeout Master record revision mismatch")
     if closeout["master_card"]["state"] != master["state"]:
@@ -539,6 +543,13 @@ def verify_closeout_links(closeout: dict[str, Any], plan: dict[str, Any], master
     if closeout["master_card"]["archive_digest"] != digest_bytes(master_bytes):
         raise CloseoutError("closeout Master archive digest mismatch")
     candidate = master["candidate_evidence"]
+    if (closeout["candidate"]["schema_version"], closeout["candidate"]["release_task_id"],
+            closeout["candidate"]["release_head_sha"], closeout["candidate"]["plan_revision"],
+            closeout["candidate"]["plan_digest"], closeout["candidate"]["status"],
+            closeout["candidate"]["legacy"]) != (
+                candidate["schema_version"], candidate["release_task_id"], candidate["release_head_sha"],
+                candidate["plan_revision"], candidate["plan_digest"], candidate["status"], candidate["legacy"]):
+        raise CloseoutError("closeout candidate fence mismatch")
     if closeout["candidate"]["value_digest"] != value_digest(candidate):
         raise CloseoutError("closeout candidate digest mismatch")
     if closeout["git"]["final_release_head_sha"] != head or closeout["git"]["final_release_tree_sha"] != tree:
@@ -547,6 +558,9 @@ def verify_closeout_links(closeout: dict[str, Any], plan: dict[str, Any], master
         raise CloseoutError("closeout handoff count does not match archived Master")
     if closeout["master_card"]["handoff_array_digest"] != value_digest(master["worker_handoffs"]):
         raise CloseoutError("closeout handoff digest does not match archived Master")
+    if (closeout["worker_handoffs"]["count"], closeout["worker_handoffs"]["array_digest"]) != (
+            len(master["worker_handoffs"]), value_digest(master["worker_handoffs"])):
+        raise CloseoutError("closeout worker handoff summary mismatch")
     if parse_rfc3339(closeout["created_at"], "closeout.created_at") <= parse_rfc3339(
             master["updated_at"], "Master Card.updated_at"):
         raise CloseoutError("closeout timestamp does not advance the ACTIVE Master snapshot")

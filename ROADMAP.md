@@ -29,6 +29,7 @@
 - 现有 ISOLATED / STRICT 流程继续处理复杂和高风险任务；完整 v2 停车区继续冻结。
 - 2026-08-31 已完成即时 FAST/STRICT、失败路径、Gate 和旧 Master 取消模拟；真实任务抽样改为可选后续验证，不再阻塞当前测试目标。
 - 2026-08-31 已完成 `mwr-hardening-2026-08-30` 的真实 STRICT 多工作树 E2E：五张 JSON Worker Card、独立 Gate 审查、空树等价认证、最终 Candidate、正常推送和可恢复 closeout 均已留存证据。
+- 2026-08-31 已完成第二个 STRICT 批次启动能力的离线实现与恢复测试：`release-rollover` 以 prior closeout 为历史权威，支持新 live Plan/Master 的 fail-closed、可恢复启动；尚未用它改写真实 live `.codex` 或发布下一批任务。
 
 ## 路线原则
 

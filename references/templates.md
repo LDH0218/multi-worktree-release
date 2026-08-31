@@ -254,6 +254,36 @@ idempotent; conflicting bytes, changed inputs, incomplete history, unsafe paths,
 `ACTIVE`. This record grants no push, publication, execution, external call, destructive action, cleanup, or v2 authority.
 It also grants no production publication authority.
 
+## v1 release rollover receipt
+
+Create this only through `scripts/rollover_release.py` after the previous release has a complete closeout. It is a Master-local
+boundary record, not a Worker task or an archive extension.
+
+```yaml
+schema_version: 1
+record_kind: release-rollover
+rollover_revision: 1
+state_root: <absolute-state-root>
+issued_by: <next-plan-issuer>
+created_at: <next-plan-updated-at>
+previous_release_task_id: <closed-release-id>
+previous_closeout:
+  locator: history/releases/<closed-release-id>/closeout.json
+  closeout_digest: <digest>
+  dispatch_plan_digest: <archived-byte-digest>
+  master_card_digest: <archived-byte-digest>
+next_release_task_id: <new-release-id>
+source_live_plan: {locator: dispatch-plan.json, value_digest: <digest>}
+source_live_master_card: {locator: master-card.json, value_digest: <digest>}
+target_live_plan: {locator: dispatch-plan.json, value_digest: <digest>}
+target_live_master_card: {locator: master-card.json, value_digest: <digest>}
+rollover_digest: <digest>
+```
+
+Do not add this receipt to `history/releases/<closed-release-id>/`. Its installation is followed only by forward,
+compare-and-swap replacement of the live Plan and Master; equal target bytes are idempotent. The next Plan is a new release root
+with Plan and record revision `1`; ordinary H11/H22/H27 history rules remain unchanged inside either release.
+
 The canonical Worker Card input is the complete schema-valid JSON object persisted at the ignored fixed path
 `<WORKTREE>/WORKTREE_TASK.json`. `WORKTREE_TASK.md` is a human projection only and is never implicitly parsed as JSON
 evidence. Every Worker state transition writes the complete JSON object atomically at the fixed path. The bound Worker

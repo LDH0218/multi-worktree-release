@@ -203,6 +203,19 @@ no-overwrite atomic writes, and clear only the live Master lock after readback v
 conflicts, changed inputs, unsafe paths, incomplete history, or interruption fail closed. Closeout grants no push, tag, release,
 deploy, execution, external call, destructive operation, synchronization, or production-publication authority.
 
+### v1 release rollover
+
+After a successful closeout, use `scripts/rollover_release.py`—not an ordinary Plan transition—to open the next independent
+STRICT release. It verifies the immutable prior archive and the exact live `IDLE` projection, then writes one immutable receipt
+at `state_root/history/rollovers/<next-release-task-id>.json` before compare-and-swap replacement of the live Plan and Master
+Card. The receipt binds old closeout, source bytes, and target bytes; it is outside the three-file release archive and does not
+alter it. The new Plan starts a new release root at Plan and record revision `1`, contains only new Task Specs, and the new
+Master starts `ACTIVE` with an empty handoff list and canonical `NONE` candidate. Its frozen baseline and every initial task
+baseline must equal the current clean Master Git HEAD. Old Worker directories or sidecars are never rediscovered during
+rollover: the verified closeout is the authority for the closed release. Any byte conflict, incomplete/forged archive,
+dirty/unreachable Git state, inherited handoff or candidate, incorrect target baseline, or interrupted state outside the exact
+source/target bytes fails closed; a receipt-backed Plan-only interruption may only resume forward, never roll back or dispatch.
+
 The canonical local Worker Card evidence is the schema-valid full card at the fixed ignored path
 `<WORKTREE>/WORKTREE_TASK.json`; `WORKTREE_TASK.md` is only a human projection and is never implicitly parsed as JSON. Every
 Worker state transition writes the complete JSON card atomically at that fixed path. A Master-only bootstrap may create one
