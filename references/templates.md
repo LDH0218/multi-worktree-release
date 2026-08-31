@@ -254,6 +254,13 @@ idempotent; conflicting bytes, changed inputs, incomplete history, unsafe paths,
 `ACTIVE`. This record grants no push, publication, execution, external call, destructive action, cleanup, or v2 authority.
 It also grants no production publication authority.
 
+The canonical Worker Card input is the complete schema-valid JSON object persisted at the ignored fixed path
+`<WORKTREE>/WORKTREE_TASK.json`. `WORKTREE_TASK.md` is a human projection only and is never implicitly parsed as JSON
+evidence. Master may bootstrap a missing IDLE sidecar from a terminal current Plan and matching INTEGRATED Master handoff using
+deterministic, no-overwrite atomic bytes; equal bytes are idempotent, while conflicts, unsafe paths, or non-IDLE cards fail
+closed. Closeout discovers one fixed sidecar per distinct Plan worktree when explicit inputs are omitted, and explicit inputs
+must reconcile exactly to the same worktree set before any archive write.
+
 ## New conversation read-only bootstrap
 
 ```text
@@ -559,8 +566,8 @@ python3 scripts/validate_contracts.py \
   --previous-master-card <PREVIOUS_MASTER_CARD_JSON> --master-card-json <CURRENT_MASTER_CARD_JSON>
 ```
 
-Each previous option requires its current counterpart. The Worker inputs are JSON contract records, not
-`WORKTREE_TASK.md`. A partial invocation is allowed, but omitted cross-record relationships must remain `NOT_RUN`; reviewers
+Each previous option requires its current counterpart. The Worker inputs are complete `WORKTREE_TASK.json` JSON contract records,
+not `WORKTREE_TASK.md`. A partial invocation is allowed, but omitted cross-record relationships must remain `NOT_RUN`; reviewers
 must require all three pairs when claiming complete history. Record the canonical previous/current snapshot digests and retain
 the validator's `PASS`, `FAIL`, and `NOT_RUN` distinctions.
 

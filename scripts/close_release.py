@@ -40,6 +40,7 @@ from validate_contracts import (  # noqa: E402
 
 TERMINAL_DISPATCH_STATES = {"INTEGRATED", "CANCELLED", "SUPERSEDED"}
 ARCHIVE_NAMES = ("dispatch-plan.json", "master-card.active.json", "closeout.json")
+WORKER_CARD_SIDECAR = "WORKTREE_TASK.json"
 
 
 class CloseoutError(ValueError):
@@ -274,6 +275,7 @@ def assert_source_bytes(path: Path, expected: bytes, label: str) -> None:
 def assert_worker_cards_unchanged(worker_cards: list[tuple[Path, dict[str, Any]]],
                                   schema: dict[str, Any]) -> None:
     for path, expected in worker_cards:
+        require_regular_file(path, "Worker Card")
         _, current = read_json_bytes(path, "Worker Card")
         try:
             validate_worker_card(current, schema)
@@ -296,11 +298,56 @@ def assert_sources_unchanged(plan_path: Path, plan_bytes: bytes, plan: dict[str,
     assert_worker_cards_unchanged(worker_cards, schema)
 
 
+def safe_worker_card_path(path: Path, label: str = "Worker Card") -> Path:
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    current = Path(path.anchor)
+    for component in path.parts[1:]:
+        current /= component
+        # macOS exposes /var and /tmp as root-level compatibility aliases;
+        # reject user-created path links below those OS boundaries.
+        if current.is_symlink() and current not in {Path("/var"), Path("/tmp"), Path("/home")}:
+            raise CloseoutError(f"{label} path contains a symlink component: {current}")
+    try:
+        return path.resolve(strict=False)
+    except (OSError, RuntimeError) as error:
+        raise CloseoutError(f"cannot canonicalize {label} path {path}: {error}") from error
+
+
+def expected_worker_worktrees(plan: dict[str, Any]) -> dict[Path, str]:
+    worktrees: dict[Path, str] = {}
+    for task in plan["tasks"]:
+        raw = Path(task["worktree"])
+        canonical = safe_worker_card_path(raw, "Plan worktree")
+        if not canonical.is_dir() or canonical.is_symlink():
+            raise CloseoutError(f"Plan worktree is not a regular directory: {raw}")
+        previous = worktrees.get(canonical)
+        if previous is not None and previous != task["worktree"]:
+            raise CloseoutError(f"Plan contains aliased Worker worktrees: {previous}, {task['worktree']}")
+        worktrees[canonical] = task["worktree"]
+    return worktrees
+
+
+def select_worker_card_paths(plan: dict[str, Any], requested: list[Path] | None) -> list[Path]:
+    expected = expected_worker_worktrees(plan)
+    if not requested:
+        return [worktree / WORKER_CARD_SIDECAR for worktree in sorted(expected)]
+    canonical: list[Path] = []
+    for path in requested:
+        resolved = safe_worker_card_path(path)
+        if resolved in canonical:
+            raise CloseoutError("duplicate Worker Card input path")
+        canonical.append(resolved)
+    return canonical
+
+
 def load_worker_cards(paths: list[Path], schema: dict[str, Any]) -> list[tuple[Path, dict[str, Any]]]:
-    if len({str(path.resolve(strict=False)) for path in paths}) != len(paths):
+    if len({str(safe_worker_card_path(path)) for path in paths}) != len(paths):
         raise CloseoutError("duplicate Worker Card input path")
     cards: list[tuple[Path, dict[str, Any]]] = []
     for path in paths:
+        path = safe_worker_card_path(path)
+        require_regular_file(path, "Worker Card")
         _, card = read_json_bytes(path, "Worker Card")
         try:
             validate_worker_card(card, schema)
@@ -331,28 +378,51 @@ def validate_sources(repo_root: Path, plan_path: Path, plan: dict[str, Any], spe
     except (ContractError, KeyError, TypeError) as error:
         raise CloseoutError(f"Plan/Master closeout consistency failed: {error}") from error
 
-    expected_worktrees = {task["worktree"] for task in plan["tasks"]}
+    expected_worktrees = expected_worker_worktrees(plan)
     if len(worker_cards) != len(expected_worktrees):
         raise CloseoutError(
             f"Worker Card reconciliation count differs from bound worktrees: "
             f"expected={len(expected_worktrees)}, observed={len(worker_cards)}"
         )
-    observed_worktrees: set[str] = set()
+    observed_worktrees: set[Path] = set()
+    latest_by_worktree: dict[Path, dict[str, Any]] = {}
+    for index, task in enumerate(plan["tasks"]):
+        if task["dispatch_status"] not in TERMINAL_DISPATCH_STATES:
+            continue
+        worktree = safe_worker_card_path(Path(task["worktree"]), "Plan worktree")
+        current = latest_by_worktree.get(worktree)
+        rank = (task["task_spec_plan_revision"], task["task_spec_revision"], index)
+        if current is None or rank > current["_closeout_rank"]:
+            latest_by_worktree[worktree] = {**task, "_closeout_rank": rank}
     for path, card in worker_cards:
         history = card["last_task"]
         if history["task_id"] is None:
             raise CloseoutError(f"Worker Card has no bound last_task for closeout: {path}")
-        spec = specs.get(history["task_id"])
-        if spec is None:
+        history_spec = specs.get(history["task_id"])
+        if history_spec is None:
             raise CloseoutError(f"Worker Card history is not in the closeout Plan: {path}")
-        observed_worktrees.add(spec["worktree"])
+        history_worktree = safe_worker_card_path(Path(history_spec["worktree"]), "Worker Card history worktree")
+        if history_worktree not in expected_worktrees:
+            raise CloseoutError(f"Worker Card history points outside the closeout worktree set: {path}")
+        if history_worktree in observed_worktrees:
+            raise CloseoutError(f"duplicate Worker Card for closeout worktree: {history_worktree}")
+        observed_worktrees.add(history_worktree)
+        if path.name == WORKER_CARD_SIDECAR:
+            if path.parent not in expected_worktrees:
+                raise CloseoutError(f"extra Worker Card sidecar path: {path}")
+            if history_worktree != path.parent:
+                raise CloseoutError(f"Worker Card sidecar crosses worktree boundary: {path}")
+        latest = latest_by_worktree.get(history_worktree)
+        if latest is None or (history["task_id"], history["task_spec_revision"], history["task_spec_digest"]) != (
+                latest["task_id"], latest["task_spec_revision"], latest["task_spec_digest"]):
+            raise CloseoutError(f"Worker Card history is stale for its closeout worktree: {path}")
         try:
             validate_cross_record_set(plan, card, master, plan_path, specs)
         except (ContractError, KeyError, TypeError) as error:
             raise CloseoutError(f"Worker Card closeout consistency failed for {path}: {error}") from error
-    if observed_worktrees != expected_worktrees:
-        missing = sorted(expected_worktrees - observed_worktrees)
-        extra = sorted(observed_worktrees - expected_worktrees)
+    if observed_worktrees != set(expected_worktrees):
+        missing = sorted(str(path) for path in set(expected_worktrees) - observed_worktrees)
+        extra = sorted(str(path) for path in observed_worktrees - set(expected_worktrees))
         raise CloseoutError(f"Worker Card reconciliation is incomplete; missing={missing}, extra={extra}")
 
     candidate = master["candidate_evidence"]
@@ -487,7 +557,7 @@ def archive_paths(archive: Path) -> tuple[Path, Path, Path]:
 
 
 def close_release(*, repo_root: Path, plan_path: Path, master_card_path: Path,
-                  worker_card_paths: list[Path], release_task_id: str | None = None,
+                  worker_card_paths: list[Path] | None = None, release_task_id: str | None = None,
                   now: str | None = None) -> dict[str, Any]:
     repo_root = repo_root.resolve()
     plan_path = plan_path.resolve(strict=False)
@@ -498,7 +568,8 @@ def close_release(*, repo_root: Path, plan_path: Path, master_card_path: Path,
         specs = load_persisted_plan_specs(plan, schema)
     except (ContractError, KeyError, TypeError, OSError, json.JSONDecodeError) as error:
         raise CloseoutError(f"Plan validation failed: {error}") from error
-    workers = load_worker_cards(worker_card_paths, schema)
+    worker_paths = select_worker_card_paths(plan, worker_card_paths)
+    workers = load_worker_cards(worker_paths, schema)
     archive = archive_directory(plan)
     check_archive_directory(archive)
     plan_archive_path, master_archive_path, closeout_path = archive_paths(archive)

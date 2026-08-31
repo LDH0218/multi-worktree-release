@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 import close_release
 import validate_contracts as contracts
+import worker_card_sidecar
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -59,7 +60,9 @@ class CloseoutFixture:
         self.spec_path = self.tasks_root / "worker-task.json"
         self.plan_path = self.state / "dispatch-plan.json"
         self.master_path = self.state / "master-card.json"
-        self.worker_path = root / "worker-card.json"
+        self.worker_worktree = root / "worker-worktree"
+        self.worker_worktree.mkdir()
+        self.worker_path = self.worker_worktree / close_release.WORKER_CARD_SIDECAR
         self._write_records(status, candidate_head, stale_candidate, release_task_id)
 
     def _write_records(self, status: str, candidate_head: str | None, stale_candidate: bool,
@@ -148,10 +151,111 @@ class CloseoutFixture:
             **kwargs,
         )
 
+    def bootstrap_sidecar(self) -> dict[str, object]:
+        return worker_card_sidecar.bootstrap_worker_card(
+            repo_root=self.repo,
+            plan_path=self.plan_path,
+            master_card_path=self.master_path,
+            task_id="worker-task",
+        )
+
     def assert_active_and_unarchived(self, test: unittest.TestCase) -> None:
         test.assertEqual(self.master_path.read_bytes(), self.active_master_bytes)
         if self.archive.exists():
             test.assertFalse(any(path.name in close_release.ARCHIVE_NAMES for path in self.archive.iterdir()))
+
+
+class FiveWorktreeFixture:
+    """Build five terminal assignments and their Master handoff evidence."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.repo = root / "repo"
+        self.repo.mkdir()
+        (self.repo / "references").mkdir()
+        shutil.copyfile(REPO_ROOT / "references/contracts.schema.json",
+                        self.repo / "references/contracts.schema.json")
+        run(["git", "init", "-q", "-b", "main"], self.repo)
+        run(["git", "config", "user.email", "fixture@example.invalid"], self.repo)
+        run(["git", "config", "user.name", "Five Worktree Fixture"], self.repo)
+        run(["git", "add", "references/contracts.schema.json"], self.repo)
+        run(["git", "commit", "-qm", "schema"], self.repo)
+        (self.repo / "tracked.txt").write_text("final\n", encoding="utf-8")
+        run(["git", "add", "tracked.txt"], self.repo)
+        run(["git", "commit", "-qm", "final"], self.repo)
+        self.head = run(["git", "rev-parse", "HEAD"], self.repo)
+
+        self.state = root / "state"
+        self.tasks_root = self.state / "tasks"
+        self.tasks_root.mkdir(parents=True)
+        self.plan_path = self.state / "dispatch-plan.json"
+        self.master_path = self.state / "master-card.json"
+        nodes: dict[str, dict[str, object]] = {}
+        self.worktrees: dict[str, Path] = {}
+        for index in range(5):
+            task_id = f"worker-{index}"
+            worktree = root / task_id
+            worktree.mkdir()
+            self.worktrees[task_id] = worktree
+            nodes[task_id] = {
+                "status": "INTEGRATED",
+                "owner_role": task_id,
+                "worktree": str(worktree),
+                "allowed_paths": [f"src/{task_id}"],
+            }
+        self.plan, self.specs = contracts.make_graph_bundle(self.state, nodes)
+        self.plan.update({"release_task_id": "release-five", "updated_at": "2026-01-01T00:02:00Z"})
+        self.plan["plan_digest"] = contracts.object_digest(self.plan, "plan_digest")
+        for spec in self.specs.values():
+            write_json(Path(spec["task_spec_path"]), spec)
+        write_json(self.plan_path, self.plan)
+
+        master = contracts.make_active_master_card(self.plan, str(self.plan_path))
+        master["frozen_baseline_sha"] = self.plan["tasks"][0]["expected_head"]
+        candidate = contracts.make_candidate_v2(
+            head=self.head, plan_revision=self.plan["plan_revision"], plan_digest=self.plan["plan_digest"],
+        )
+        candidate["release_task_id"] = self.plan["release_task_id"]
+        contracts.refresh_candidate_inputs(candidate, refresh_evidence=True)
+        master["candidate_evidence"] = candidate
+        handoffs = []
+        for entry in self.plan["tasks"]:
+            spec = self.specs[entry["task_id"]]
+            handoff = contracts.make_received_handoff()
+            handoff.update({
+                "state": "INTEGRATED",
+                "task_id": entry["task_id"],
+                "role": spec["owner_role"],
+                "task_spec_revision": entry["task_spec_revision"],
+                "task_spec_digest": entry["task_spec_digest"],
+                "plan_revision": entry["task_spec_plan_revision"],
+                "dispatch_wave": entry["dispatch_wave"],
+                "source_thread_id": spec["source_thread_id"],
+                "frozen_baseline_sha": entry["expected_head"],
+                "authorization_envelope_digest": spec["authorization"]["envelope_digest"],
+                "acceptance_digest": contracts.value_digest(spec["acceptance"]),
+                "worker_commit_sha": self.head,
+                "integrated_as_sha": self.head,
+            })
+            handoffs.append(handoff)
+        master["worker_handoffs"] = handoffs
+        write_json(self.master_path, master)
+
+    def bootstrap_all(self) -> dict[str, dict[str, object]]:
+        cards: dict[str, dict[str, object]] = {}
+        for task_id, worktree in self.worktrees.items():
+            cards[task_id] = worker_card_sidecar.bootstrap_worker_card(
+                repo_root=self.repo,
+                plan_path=self.plan_path,
+                master_card_path=self.master_path,
+                task_id=task_id,
+                worker_card_path=worktree / worker_card_sidecar.SIDECAR_NAME,
+            )
+        return cards
+
+    @property
+    def archive(self) -> Path:
+        return self.state / "history" / "releases" / "release-five"
 
 
 class CloseReleaseTests(unittest.TestCase):
@@ -296,6 +400,189 @@ class CloseReleaseTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("live_master=IDLE", result.stdout)
+
+    def test_closeout_discovers_sidecar_when_explicit_inputs_are_omitted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = CloseoutFixture(Path(directory))
+            result = close_release.close_release(
+                repo_root=fixture.repo, plan_path=fixture.plan_path, master_card_path=fixture.master_path,
+                now="2026-08-31T00:00:00Z",
+            )
+            self.assertEqual(result["status"], "PASS")
+            self.assertEqual(json.loads(fixture.master_path.read_text())["state"], "IDLE")
+
+    def test_master_bootstrap_is_schema_valid_idempotent_and_preserves_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = CloseoutFixture(Path(directory))
+            fixture.worker_path.unlink()
+            plan_bytes = fixture.plan_path.read_bytes()
+            master_bytes = fixture.master_path.read_bytes()
+            first = fixture.bootstrap_sidecar()
+            first_bytes = fixture.worker_path.read_bytes()
+            second = fixture.bootstrap_sidecar()
+            self.assertEqual(first, second)
+            self.assertEqual(first_bytes, fixture.worker_path.read_bytes())
+            self.assertEqual(first["state"], "IDLE")
+            self.assertEqual(first["last_task"]["task_id"], "worker-task")
+            self.assertEqual(fixture.plan_path.read_bytes(), plan_bytes)
+            self.assertEqual(fixture.master_path.read_bytes(), master_bytes)
+
+    def test_master_bootstrap_interruption_after_install_retries_without_rewrite(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = CloseoutFixture(Path(directory))
+            fixture.worker_path.unlink()
+            original = worker_card_sidecar._existing_or_install
+
+            def interrupt(path: Path, data: bytes) -> bool:
+                result = original(path, data)
+                raise worker_card_sidecar.SidecarError("simulated sidecar interruption")
+
+            with patch.object(worker_card_sidecar, "_existing_or_install", side_effect=interrupt):
+                with self.assertRaises(worker_card_sidecar.SidecarError):
+                    fixture.bootstrap_sidecar()
+            installed = fixture.worker_path.read_bytes()
+            fixture.bootstrap_sidecar()
+            self.assertEqual(installed, fixture.worker_path.read_bytes())
+
+    def test_master_bootstrap_rejects_conflict_nonterminal_missing_and_mismatched_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = CloseoutFixture(Path(directory))
+            fixture.worker_path.unlink()
+            fixture.bootstrap_sidecar()
+            conflict = json.loads(fixture.worker_path.read_text())
+            conflict["updated_at"] = "2026-01-01T00:02:00Z"
+            write_json(fixture.worker_path, conflict)
+            conflict_bytes = fixture.worker_path.read_bytes()
+            with self.assertRaises(worker_card_sidecar.SidecarError):
+                fixture.bootstrap_sidecar()
+            self.assertEqual(fixture.worker_path.read_bytes(), conflict_bytes)
+
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = CloseoutFixture(Path(directory), status="PUBLISHED")
+            fixture.worker_path.unlink()
+            with self.assertRaises(worker_card_sidecar.SidecarError):
+                fixture.bootstrap_sidecar()
+            self.assertFalse(fixture.worker_path.exists())
+
+        for mutation in ("missing", "mismatched"):
+            with self.subTest(handoff=mutation), tempfile.TemporaryDirectory() as directory:
+                fixture = CloseoutFixture(Path(directory))
+                master = json.loads(fixture.master_path.read_text())
+                if mutation == "missing":
+                    master["worker_handoffs"] = []
+                else:
+                    master["worker_handoffs"][0]["role"] = "other-role"
+                write_json(fixture.master_path, master)
+                fixture.worker_path.unlink()
+                with self.assertRaises(worker_card_sidecar.SidecarError):
+                    fixture.bootstrap_sidecar()
+                self.assertFalse(fixture.worker_path.exists())
+
+    def test_master_bootstrap_rejects_unsafe_target_and_non_idle_existing_card(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = CloseoutFixture(Path(directory))
+            outside = fixture.root / "outside.json"
+            outside.write_bytes(b"outside")
+            fixture.worker_path.unlink()
+            fixture.worker_path.symlink_to(outside)
+            with self.assertRaises(worker_card_sidecar.SidecarError):
+                fixture.bootstrap_sidecar()
+            self.assertEqual(outside.read_bytes(), b"outside")
+
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = CloseoutFixture(Path(directory))
+            active = contracts.make_active_worker_card()
+            write_json(fixture.worker_path, active)
+            active_bytes = fixture.worker_path.read_bytes()
+            with self.assertRaises(worker_card_sidecar.SidecarError):
+                fixture.bootstrap_sidecar()
+            self.assertEqual(fixture.worker_path.read_bytes(), active_bytes)
+
+    def test_closeout_rejects_missing_duplicate_extra_symlink_invalid_non_idle_stale_and_cross_worktree(self) -> None:
+        cases = ("missing", "duplicate", "extra", "symlink", "invalid", "non-idle", "stale", "cross-worktree")
+        for scenario in cases:
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
+                fixture = CloseoutFixture(Path(directory))
+                if scenario == "missing":
+                    fixture.worker_path.unlink()
+                    paths = None
+                elif scenario == "duplicate":
+                    paths = [fixture.worker_path, fixture.worker_path]
+                elif scenario == "extra":
+                    extra = fixture.root / "extra-worker.json"
+                    extra.write_bytes(fixture.worker_path.read_bytes())
+                    paths = [fixture.worker_path, extra]
+                elif scenario == "symlink":
+                    outside = fixture.root / "outside.json"
+                    outside.write_bytes(fixture.worker_path.read_bytes())
+                    fixture.worker_path.unlink()
+                    fixture.worker_path.symlink_to(outside)
+                    paths = None
+                elif scenario == "invalid":
+                    fixture.worker_path.write_bytes(b"{}")
+                    paths = None
+                elif scenario == "non-idle":
+                    write_json(fixture.worker_path, contracts.make_active_worker_card())
+                    paths = None
+                elif scenario == "stale":
+                    stale = json.loads(fixture.worker_path.read_text())
+                    stale["last_task"] = {
+                        "task_id": "missing-task",
+                        "task_spec_revision": 1,
+                        "task_spec_digest": "sha256:" + "f" * 64,
+                        "outcome": "COMPLETED",
+                        "worker_commit_sha": "a" * 40,
+                        "integrated_as_sha": "b" * 40,
+                    }
+                    write_json(fixture.worker_path, stale)
+                    paths = None
+                else:
+                    other = fixture.root / "other-worker"
+                    other.mkdir()
+                    other_card = other / close_release.WORKER_CARD_SIDECAR
+                    other_card.write_bytes(fixture.worker_path.read_bytes())
+                    paths = [other_card]
+                with self.assertRaises(close_release.CloseoutError):
+                    close_release.close_release(
+                        repo_root=fixture.repo, plan_path=fixture.plan_path,
+                        master_card_path=fixture.master_path, worker_card_paths=paths,
+                        now="2026-08-31T00:00:00Z",
+                    )
+                fixture.assert_active_and_unarchived(self)
+
+    def test_closeout_keeps_explicit_json_inputs_when_they_reconcile_to_the_same_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = CloseoutFixture(Path(directory))
+            legacy_input = fixture.root / "legacy-worker-card.json"
+            legacy_input.write_bytes(fixture.worker_path.read_bytes())
+            result = close_release.close_release(
+                repo_root=fixture.repo, plan_path=fixture.plan_path,
+                master_card_path=fixture.master_path, worker_card_paths=[legacy_input],
+                now="2026-08-31T00:00:00Z",
+            )
+            self.assertEqual(result["status"], "PASS")
+
+    def test_five_worktree_bootstrap_and_discovered_closeout_drill(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = FiveWorktreeFixture(Path(directory))
+            cards = fixture.bootstrap_all()
+            self.assertEqual(set(cards), set(fixture.worktrees))
+            sidecar_bytes = {
+                task_id: (worktree / worker_card_sidecar.SIDECAR_NAME).read_bytes()
+                for task_id, worktree in fixture.worktrees.items()
+            }
+            result = close_release.close_release(
+                repo_root=fixture.repo, plan_path=fixture.plan_path, master_card_path=fixture.master_path,
+                now="2026-08-31T00:00:00Z",
+            )
+            self.assertEqual(result["status"], "PASS")
+            self.assertEqual(sorted(path.name for path in fixture.archive.iterdir()),
+                             sorted(close_release.ARCHIVE_NAMES))
+            self.assertEqual(json.loads(fixture.master_path.read_text())["state"], "IDLE")
+            self.assertEqual(sidecar_bytes, {
+                task_id: (worktree / worker_card_sidecar.SIDECAR_NAME).read_bytes()
+                for task_id, worktree in fixture.worktrees.items()
+            })
 
 
 class LocatorTests(unittest.TestCase):
