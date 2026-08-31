@@ -232,9 +232,22 @@ FAST 已正式采用。一次性临时 Git 仓库和临时 JSON fixture 已完�
 - [x] 历史 Plan locator 通过显式 `--plan-locator` / `--previous-plan-locator` 在 previous/current 验证中通过；关闭历史有固定持久位置，不再依赖 live Card 或对话。
 - [x] 新 release rollover 与首次 Candidate 认证：`mwr-role-bindings-2026-08-31` 已完成 rollover、Worker handoff、修复集成、Candidate fresh-rerun、推送和 closeout。
 
-### 后续可选现场抽样
+### 后续可选现场抽样（其他使用项目）
 
-- 可选现场抽样：未来自然出现真实 FAST 或 STRICT 任务时，记录分类、额外治理步骤、升级和恢复结果；它们不再是本测试目标的完成门槛，也不得为了计数制造任务。
+现场抽样针对以后采用本 Skill 的其他项目，不针对本仓库反复制造测试任务。每个使用项目由自己的 Master 在首次需要时创建非规范记录文件 `docs/fast-strict-observations.md`；MWR 仓库只在阶段复盘时保存汇总结论，不收集其他项目的逐条原始记录。
+
+每个自然发生的真实任务完成后，由该项目 Master 补一行：
+
+```text
+日期｜任务引用｜预计路线｜实际路线｜额外治理步骤｜升级/返工｜恢复结果｜遗漏｜证据｜结论
+```
+
+- FAST 使用提交 SHA 和简短描述作为任务引用；STRICT 使用 Task ID、release ID 或 closeout 作为引用。
+- 记录不包含密钥、业务隐私或完整对话；FAST 仍不创建 Plan、Card、工作树或 Operation Receipt。
+- 观察表更新可以批量完成，不属于 FAST 任务的额外验收步骤，也不要求每个任务单独推送。
+- `PASS` 表示路线分类正确且没有遗漏、异常升级或恢复问题；`ISSUE` 表示误分类、无故升级、恢复失败、权限边界异常或治理成本明显过重；证据不足时只能写 `NOT_PROVEN`。
+- 每累计 3 条自然记录，或出现一次严重问题时，Master 做一次小结。没有问题就继续使用 `FAST + v1 STRICT`；重复问题才另开有明确范围的 STRICT 设计任务，不自动启动完整 v2。
+- 没有自然任务时保持 `NOT_PROVEN`，不得为了满足数量而制造任务。
 
 ### 目标模式入口
 
