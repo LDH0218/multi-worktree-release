@@ -30,19 +30,19 @@
 - 2026-08-31 已完成即时 FAST/STRICT、失败路径、Gate 和旧 Master 取消模拟；真实任务抽样改为可选后续验证，不再阻塞当前测试目标。
 - 2026-08-31 已完成 `mwr-hardening-2026-08-30` 的真实 STRICT 多工作树 E2E：五张 JSON Worker Card、独立 Gate 审查、空树等价认证、最终 Candidate、正常推送和可恢复 closeout 均已留存证据。
 - 2026-08-31 已完成第二个 STRICT 批次启动能力的离线实现与恢复测试：`release-rollover` 以 prior closeout 为历史权威，支持新 live Plan/Master 的 fail-closed、可恢复启动。
-- 2026-08-31 已用 `release-rollover` 启动真实批次 `mwr-role-bindings-2026-08-31`：其唯一 Worker 已集成并回到 `IDLE`，但该批次尚未推送或 closeout。首次把空 v1 Candidate 迁移为 v2 并写入 fresh Gate 证据时，发现 H25 错误要求空历史记录具有旧 HEAD；当前 live Master 因此停在合法的 v2 `NONE` 迁移状态，等待窄范围修复。
+- 2026-08-31 已用 `release-rollover` 启动并完成真实批次 `mwr-role-bindings-2026-08-31`：修复空 Candidate 首次 fresh 认证路径，完成重新验收、正常推送和可恢复 closeout；最终 release HEAD 为 `9c4ed496be3f68edf8dca4c4955703be2c1744ae`，closeout digest 为 `sha256:6b205274ed6689e071589bb00e0beb633a4f8cc9adbe1793e99e9589b580277e`，live Master 已回到 `IDLE`。
 
-## 当前 STRICT 批次：唯一发布收尾目标
+## 当前 STRICT 批次：已完成
 
-当前批次不是重新设计整个架构，也不改变已采用的 FAST 路径。完成顺序固定如下；前一项未通过时不得进入下一项。
+本批次没有重新设计整个架构，也没有改变已采用的 FAST 路径。以下收尾顺序已全部完成；归档证据位于 `history/releases/mwr-role-bindings-2026-08-31/`。
 
-1. 修复“空 v1 `NONE` → v2 `NONE` → 首次 fresh v2 `PASSED`”的 Candidate 迁移路径，并加入真实回归。此修复只能放行空、无旧证据的迁移；任何有旧 aggregate 证据的 v1 记录仍必须保持 H25 的完整 fresh-rerun 与零旧摘要复用约束。
-2. 由 Master 集成该窄范围修复；修复后的最终 `HEAD` 成为唯一 Gate 输入。
-3. 在该最终 `HEAD` 上重新生成全部 required Gate 证据，并验证 Plan、Task Spec、Worker Card 与 Master Card 的完整跨记录一致性。
-4. 仅当 Candidate 为 schema-v2 `PASSED`、所有 Worker Card 为 `IDLE`、工作树干净且 `origin/main` 未变化时，正常推送 `origin/main`。
-5. 执行 `mwr-role-bindings-2026-08-31` 的可恢复 closeout，归档 Plan、ACTIVE Master 和 closeout 证据，并将 live Master 转为 `IDLE`。
+1. [x] 修复“空 v1 `NONE` → v2 `NONE` → 首次 fresh v2 `PASSED`”的 Candidate 迁移路径，并加入真实回归；有旧 aggregate 证据的 v1 记录仍保持 H25 的完整 fresh-rerun 与零旧摘要复用约束。
+2. [x] 由 Master 集成窄范围修复；最终 `HEAD` 为 `9c4ed496`。
+3. [x] 在最终 `HEAD` 上重新生成全部 required Gate 证据，并验证 Plan、Task Spec、Worker Card 与 Master Card 的完整跨记录一致性。
+4. [x] Candidate 为 schema-v2 `PASSED`、Worker Card 为 `IDLE`、工作树干净且 `origin/main` 未变化后，正常推送 `origin/main`。
+5. [x] 执行可恢复 closeout，归档 Plan、ACTIVE Master 和 closeout 证据，并将 live Master 转为 `IDLE`。
 
-这五项是当前发布的剩余工作。FAST 已是完成项，不再作为本批次待办。完整真实 E2E 也不是另起一个无限范围项目：本批次必须补上“新 release 从空 Candidate 首次认证并 closeout”的缺口，随后将该路径固化为回归场景。
+这五项已完成。FAST 是既有完成项，不属于本批次待办；“新 release 从空 Candidate 首次认证并 closeout”的缺口也已补上并固化为回归场景。
 
 ## 路线原则
 
@@ -219,7 +219,7 @@ FAST 已正式采用。一次性临时 Git 仓库和临时 JSON fixture 已完�
 ### Test Phase E：结论（旧批次闭环完成；新 release 起点覆盖待补）
 
 - [x] 即时 fixture 证明当前 FAST + v1 STRICT 的主要成功和失败路径可以运行；`mwr-hardening-2026-08-30` 的真实 E2E 已证明任务发布、Worker handoff、Master 集成、Gate、正常推送和 closeout 的完整闭环。
-- [ ] **T4：新 release 空 Candidate 起点**：覆盖 `release-rollover` 后的 canonical 空 v1 Candidate、v2 `NONE` 迁移、首次完整 fresh v2 Gate 认证、正常推送与 closeout。当前真实批次发现该路径被 H25 错误阻塞；在窄范围修复、重新认证和 closeout 全部完成前，不得将它标为通过。
+- [x] **T4：新 release 空 Candidate 起点**：覆盖 `release-rollover` 后的 canonical 空 v1 Candidate、v2 `NONE` 迁移、首次完整 fresh v2 Gate 认证、正常推送与 closeout；窄范围修复、重新认证和 closeout 均已完成。
 - [x] v2 adoption、FAST binding、cycle fence 和 v2 CLI 均未启用或进入正式路由。
 - [x] 未增加长期测试脚本；临时 harness 和 fixture 不进入仓库。
 - [x] 独立 Gate Worker 对最终 Worker Card closeout 修复完成审查：31/31 closeout、88/88 契约、34/34 Candidate evidence、Schema、编译和离线 Skill 验证均通过，并以空树等价 attestation 绑定最终 release HEAD。
@@ -230,7 +230,7 @@ FAST 已正式采用。一次性临时 Git 仓库和临时 JSON fixture 已完�
 - [x] 五张 JSON Worker Card 均为 `IDLE`，并通过 Plan/Master/Worker 跨记录校验；本批次新增 Card 的真实生命周期为 `IDLE → ACTIVE → AWAITING_INTEGRATION → IDLE`。
 - [x] 最终 Candidate 的 10 项检查均为 `PASS`，两个 required Gate 均为 `PASSED`；推送到 `origin/main` 后执行 closeout 并复跑幂等性检查。
 - [x] 历史 Plan locator 通过显式 `--plan-locator` / `--previous-plan-locator` 在 previous/current 验证中通过；关闭历史有固定持久位置，不再依赖 live Card 或对话。
-- [ ] 新 release rollover 与首次 Candidate 认证：`mwr-role-bindings-2026-08-31` 已完成 rollover、Worker handoff 和集成；Candidate fresh-rerun、推送和 closeout 待上述 T4 修复后完成。
+- [x] 新 release rollover 与首次 Candidate 认证：`mwr-role-bindings-2026-08-31` 已完成 rollover、Worker handoff、修复集成、Candidate fresh-rerun、推送和 closeout。
 
 ### 后续可选现场抽样
 
