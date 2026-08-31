@@ -900,6 +900,137 @@
         {"$ref": "#/$defs/candidate_evidence_v2"}
       ]
     },
+    "release_closeout_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["locator", "record_revision", "plan_revision", "plan_digest", "archive_digest"],
+      "properties": {
+        "locator": {"const": "dispatch-plan.json"},
+        "record_revision": {"type": "integer", "minimum": 1},
+        "plan_revision": {"type": "integer", "minimum": 1},
+        "plan_digest": {"$ref": "#/$defs/required_digest"},
+        "archive_digest": {"$ref": "#/$defs/required_digest"}
+      }
+    },
+    "release_closeout_master": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "locator", "record_revision", "state", "release_task_id", "plan_revision",
+        "dispatch_plan_digest", "frozen_baseline_sha", "archive_digest", "handoff_count",
+        "handoff_array_digest"
+      ],
+      "properties": {
+        "locator": {"const": "master-card.active.json"},
+        "record_revision": {"type": "integer", "minimum": 1},
+        "state": {"const": "ACTIVE"},
+        "release_task_id": {
+          "type": "string", "minLength": 1, "maxLength": 256,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "plan_revision": {"type": "integer", "minimum": 1},
+        "dispatch_plan_digest": {"$ref": "#/$defs/required_digest"},
+        "frozen_baseline_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "archive_digest": {"$ref": "#/$defs/required_digest"},
+        "handoff_count": {"type": "integer", "minimum": 0},
+        "handoff_array_digest": {"$ref": "#/$defs/required_digest"}
+      }
+    },
+    "release_closeout_candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "locator", "schema_version", "release_task_id", "release_head_sha", "plan_revision",
+        "plan_digest", "status", "legacy", "value_digest"
+      ],
+      "properties": {
+        "locator": {"const": "master-card.active.json#/candidate_evidence"},
+        "schema_version": {"const": 2},
+        "release_task_id": {
+          "type": "string", "minLength": 1, "maxLength": 256,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "release_head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "plan_revision": {"type": "integer", "minimum": 1},
+        "plan_digest": {"$ref": "#/$defs/required_digest"},
+        "status": {"const": "PASSED"},
+        "legacy": {"type": "null"},
+        "value_digest": {"$ref": "#/$defs/required_digest"}
+      }
+    },
+    "release_closeout_git": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["final_release_head_sha", "final_release_tree_sha", "head_reachable"],
+      "properties": {
+        "final_release_head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "final_release_tree_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "head_reachable": {"const": true}
+      }
+    },
+    "release_closeout_workers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "array_digest", "all_terminal", "worker_locks"],
+      "properties": {
+        "count": {"type": "integer", "minimum": 0},
+        "array_digest": {"$ref": "#/$defs/required_digest"},
+        "all_terminal": {"const": true},
+        "worker_locks": {"const": "ALL_IDLE"}
+      }
+    },
+    "release_closeout_transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from_state", "from_record_revision", "to_state", "to_record_revision",
+        "worker_handoffs_preserved"
+      ],
+      "properties": {
+        "from_state": {"const": "ACTIVE"},
+        "from_record_revision": {"type": "integer", "minimum": 1},
+        "to_state": {"const": "IDLE"},
+        "to_record_revision": {"type": "integer", "minimum": 1},
+        "worker_handoffs_preserved": {"const": true}
+      }
+    },
+    "release_closeout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "record_kind", "closeout_revision", "release_task_id", "outcome",
+        "protocol", "state_root", "archive_locator", "issued_by", "created_at",
+        "candidate_validated_at", "dispatch_plan", "master_card", "candidate", "git",
+        "worker_handoffs", "live_master_transition", "external_authority", "closeout_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "record_kind": {"const": "release-closeout"},
+        "closeout_revision": {"type": "integer", "minimum": 1},
+        "release_task_id": {
+          "type": "string", "minLength": 1, "maxLength": 256,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "outcome": {"const": "COMPLETED"},
+        "protocol": {"const": "v1-authoritative"},
+        "state_root": {"type": "string", "minLength": 1, "pattern": "^/"},
+        "archive_locator": {
+          "type": "string", "minLength": 1,
+          "pattern": "^history/releases/[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "issued_by": {"type": "string", "minLength": 1},
+        "created_at": {"$ref": "#/$defs/rfc3339_timestamp"},
+        "candidate_validated_at": {"$ref": "#/$defs/rfc3339_timestamp"},
+        "dispatch_plan": {"$ref": "#/$defs/release_closeout_plan"},
+        "master_card": {"$ref": "#/$defs/release_closeout_master"},
+        "candidate": {"$ref": "#/$defs/release_closeout_candidate"},
+        "git": {"$ref": "#/$defs/release_closeout_git"},
+        "worker_handoffs": {"$ref": "#/$defs/release_closeout_workers"},
+        "live_master_transition": {"$ref": "#/$defs/release_closeout_transition"},
+        "external_authority": {"const": "NONE"},
+        "closeout_digest": {"$ref": "#/$defs/required_digest"}
+      }
+    },
     "master_card": {
       "type": "object",
       "additionalProperties": false,

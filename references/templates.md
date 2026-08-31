@@ -219,6 +219,41 @@ checkless, missing-evidence, or head-mismatched Gate cannot retire the legacy au
 Release-task or plan-authority drift, legacy rewrite/direct promotion, incomplete rerun, mismatched head provenance, registry,
 digest, or monotonic-record failures remain H25.
 
+## Durable v1 release closeout
+
+Use this record only for a local Master-owned closeout after all current Dispatch entries and Master handoffs are terminal, all
+bound Worker Cards are `IDLE`, and fresh schema-v2 candidate evidence is `PASSED` for the exact final Git HEAD:
+
+```yaml
+schema_version: 1
+record_kind: release-closeout
+closeout_revision: <positive-integer>
+release_task_id: <stable-release-task-id>
+outcome: COMPLETED
+protocol: v1-authoritative
+state_root: <absolute-state-root>
+archive_locator: history/releases/<release_task_id>
+issued_by: <plan-issued-by>
+created_at: <rfc3339-timestamp>
+candidate_validated_at: <rfc3339-timestamp>
+dispatch_plan: {locator: dispatch-plan.json, record_revision: <n>, plan_revision: <n>, plan_digest: <digest>, archive_digest: <digest>}
+master_card: {locator: master-card.active.json, record_revision: <n>, state: ACTIVE, release_task_id: <id>, plan_revision: <n>, dispatch_plan_digest: <digest>, frozen_baseline_sha: <sha>, archive_digest: <digest>, handoff_count: <n>, handoff_array_digest: <digest>}
+candidate: {locator: master-card.active.json#/candidate_evidence, schema_version: 2, release_task_id: <id>, release_head_sha: <sha>, plan_revision: <n>, plan_digest: <digest>, status: PASSED, legacy: null, value_digest: <digest>}
+git: {final_release_head_sha: <sha>, final_release_tree_sha: <sha>, head_reachable: true}
+worker_handoffs: {count: <n>, array_digest: <digest>, all_terminal: true, worker_locks: ALL_IDLE}
+live_master_transition: {from_state: ACTIVE, from_record_revision: <n>, to_state: IDLE, to_record_revision: <n>, worker_handoffs_preserved: true}
+external_authority: NONE
+closeout_digest: <digest>
+```
+
+The archive is exactly `state_root/history/releases/<release_task_id>/dispatch-plan.json`, `master-card.active.json`, and
+`closeout.json`. Preserve the first two source byte sequences and the complete ordered handoff array. Validate everything
+before the first archive write; install files with same-directory, no-overwrite atomic writes in Plan → ACTIVE Master →
+closeout order, then atomically clear only the live Master lock to the canonical v1 empty candidate `NONE`. Equal bytes are
+idempotent; conflicting bytes, changed inputs, incomplete history, unsafe paths, or interruption fail closed and leave Master
+`ACTIVE`. This record grants no push, publication, execution, external call, destructive action, cleanup, or v2 authority.
+It also grants no production publication authority.
+
 ## New conversation read-only bootstrap
 
 ```text

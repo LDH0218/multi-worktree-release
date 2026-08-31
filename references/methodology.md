@@ -671,6 +671,36 @@ requires zero opaque digest reuse from legacy aggregate or check fields. Any leg
 authority change, incomplete rerun, mismatched head provenance, bad registry, or digest mismatch remains an H25 failure;
 Master `record_revision` and time must also advance through the ordinary monotonic transition rules.
 
+## Durable v1 release closeout
+
+Closeout is a local, Master-owned recovery record, not a release or publication authority. It may run only after the current
+v1-authoritative Plan is standalone-valid, every Dispatch entry is terminal, every Master handoff is terminal, every bound
+Worker Card is `IDLE`, and the exact final Git HEAD has fresh schema-v2 candidate evidence with `status: PASSED` and
+`legacy: null`.
+
+The archive has exactly three authoritative files under the validated Plan `state_root`:
+
+```text
+state_root/history/releases/<release_task_id>/
+├── dispatch-plan.json
+├── master-card.active.json
+└── closeout.json
+```
+
+`dispatch-plan.json` and `master-card.active.json` preserve the exact source bytes read before closeout. `closeout.json` is a
+schema-version-1 `release-closeout` record whose `closeout_digest` covers the complete canonical object with that field set
+to `null`; it records exact archive byte digests, the ordered handoff-array digest/count, candidate identity and digest, final
+Git HEAD/tree, and the `ACTIVE` to `IDLE` transition. The archive directory and files use no index, pointer, alias, manifest,
+fourth record, cleanup, or v2 adoption behavior.
+
+Write order is strict and fail-closed: validate all inputs first, then no-overwrite atomically install the Plan snapshot, the
+ACTIVE Master snapshot, and `closeout.json`; only after readback verification atomically replace the live Master Card with
+the canonical v1 empty candidate `NONE`, cleared release lock/blocker, and the complete handoff array preserved in order.
+Equal existing bytes are idempotent. Different bytes, changed Plan/Master/candidate/Git inputs, incomplete history, unsafe
+archive paths, or interruption leave the live Master `ACTIVE` and preserve all evidence for explicit recovery. Closeout never
+clears a Worker Card and never authorizes push, tag, release, deploy, execution, external call, destructive operation, or
+production publication.
+
 ## State transitions
 
 Only Master changes Dispatch status. Allowed transitions are:

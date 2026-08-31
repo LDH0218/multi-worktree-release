@@ -191,6 +191,18 @@ snapshot digests. Omitting every previous option preserves single-record output 
 requested snapshot, transition, or cross-record checks. See [references/methodology.md](references/methodology.md) for
 monotonic revisions, terminal states, immutable identity/evidence, and diagnostic rules.
 
+### v1 release closeout
+
+Release closeout is a local Master-owned recovery step, separate from FAST, candidate approval, Git push, and production
+publication. It may archive only a validated terminal Plan, an ACTIVE Master snapshot, and fresh schema-v2 `PASSED` candidate
+evidence for the exact final HEAD, with every bound Worker Card already `IDLE`. The archive layout is exactly
+`state_root/history/releases/<release_task_id>/{dispatch-plan.json,master-card.active.json,closeout.json}`; no index, pointer,
+alias, manifest, fourth record, cleanup, or v2 adoption behavior is permitted. Preserve exact source bytes and the complete
+ordered `worker_handoffs` array. Validate all inputs before the first archive write, install the three files with same-directory
+no-overwrite atomic writes, and clear only the live Master lock after readback verification. Equal bytes are idempotent;
+conflicts, changed inputs, unsafe paths, incomplete history, or interruption fail closed. Closeout grants no push, tag, release,
+deploy, execution, external call, destructive operation, synchronization, or production-publication authority.
+
 ## Exceptions and recovery
 
 - If a Worker discovers an unexpected dependency, wrong assignment, wrong scope, wrong worktree, ownership ambiguity, or baseline

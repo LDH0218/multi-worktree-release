@@ -60,6 +60,10 @@ HISTORICAL_CLI_PAIRS = (
     ("previous_master_card", "master_card_json", "H03",
      "--previous-master-card requires --master-card-json"),
 )
+LOCATOR_PAIRS = (
+    ("plan_locator", "plan", "--plan-locator requires --plan"),
+    ("previous_plan_locator", "previous_plan", "--previous-plan-locator requires --previous-plan"),
+)
 WORKER_ASSIGNMENT_FIELDS = (
     "task_id", "task_spec_revision", "task_spec_digest", "task_spec_path", "plan_revision", "dispatch_wave",
     "source_thread_id", "issued_at", "supersedes_task_id", "worker_generation", "frozen_baseline_sha",
@@ -114,6 +118,7 @@ MODEL_REASON_TO_OWNER = {
     profile["selection_reason"]: owner for owner, profile in MODEL_OWNER_DEFAULTS.items()
 }
 READ_ONLY_TASK_CLASS_RE = re.compile(r"^independent-read-only(?:-|$)")
+RELEASE_TASK_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
 
 class ContractError(ValueError):
@@ -168,6 +173,15 @@ class AuthorizationV2(TypedDict):
     controlled_input_digest: str | None
     expires_at: str | None
     envelope_digest: str
+
+
+class PlanSnapshotRef(TypedDict):
+    role: str
+    physical_input: str
+    physical_snapshot_path: str
+    effective_locator: str
+    locator_source: str
+    snapshot_digest: str
 
 
 def historical_error(diagnostic_id: str, message: str) -> None:
@@ -1452,6 +1466,36 @@ def validate_master_card(value: dict[str, Any], schema: dict[str, Any], *, histo
         raise ContractError("ACTIVE Master card retains blocker evidence")
 
 
+def validate_release_closeout(value: Any, schema: dict[str, Any]) -> None:
+    validate_schema_definition(value, schema, "release_closeout", "release closeout")
+    require_exact_fields(value, schema_required(schema, "release_closeout"), "release closeout")
+    if value["archive_locator"] != f"history/releases/{value['release_task_id']}":
+        raise ContractError("release closeout archive_locator does not match release_task_id")
+    if value["dispatch_plan"]["plan_digest"] != value["master_card"]["dispatch_plan_digest"]:
+        raise ContractError("release closeout Plan/Master digest link mismatch")
+    if value["dispatch_plan"]["plan_revision"] != value["master_card"]["plan_revision"]:
+        raise ContractError("release closeout Plan/Master revision link mismatch")
+    if value["dispatch_plan"]["plan_revision"] != value["candidate"]["plan_revision"]:
+        raise ContractError("release closeout candidate plan revision mismatch")
+    if value["dispatch_plan"]["plan_digest"] != value["candidate"]["plan_digest"]:
+        raise ContractError("release closeout candidate Plan digest mismatch")
+    if value["release_task_id"] != value["master_card"]["release_task_id"]:
+        raise ContractError("release closeout Master release identity mismatch")
+    if value["release_task_id"] != value["candidate"]["release_task_id"]:
+        raise ContractError("release closeout candidate release identity mismatch")
+    if value["candidate"]["release_head_sha"] != value["git"]["final_release_head_sha"]:
+        raise ContractError("release closeout candidate/Git HEAD mismatch")
+    if value["master_card"]["handoff_count"] != value["worker_handoffs"]["count"]:
+        raise ContractError("release closeout handoff count mismatch")
+    if value["master_card"]["handoff_array_digest"] != value["worker_handoffs"]["array_digest"]:
+        raise ContractError("release closeout handoff digest mismatch")
+    transition = value["live_master_transition"]
+    if transition["to_record_revision"] != transition["from_record_revision"] + 1:
+        raise ContractError("release closeout Master record revision must advance by one")
+    if value["closeout_digest"] != object_digest(value, "closeout_digest"):
+        raise ContractError("release closeout digest mismatch")
+
+
 def classify_task_change(old: dict[str, Any], new: dict[str, Any]) -> str:
     if old["task_id"] != new["task_id"]:
         return "SUPERSEDE"
@@ -2100,6 +2144,51 @@ def validate_previous_pairing(args: argparse.Namespace) -> None:
             raise HistoricalUsageError(f"[{diagnostic_id}] {message}")
 
 
+def canonical_locator(value: str | Path, label: str) -> str:
+    raw = str(value)
+    path = Path(raw)
+    if not path.is_absolute():
+        raise HistoricalUsageError(f"[L02] {label} must be an absolute path")
+    try:
+        return str(path.resolve(strict=False))
+    except (OSError, RuntimeError, ValueError) as error:
+        raise HistoricalUsageError(f"[L02] {label} cannot be canonicalized: {error}") from error
+
+
+def validate_locator_pairing(args: argparse.Namespace) -> None:
+    for locator_field, physical_field, message in LOCATOR_PAIRS:
+        if (getattr(args, locator_field, None) is not None
+                and getattr(args, physical_field, None) is None):
+            raise HistoricalUsageError(f"[L01] {message}")
+    for locator_field, _, _ in LOCATOR_PAIRS:
+        locator = getattr(args, locator_field, None)
+        if locator is not None:
+            canonical_locator(locator, f"--{locator_field.replace('_', '-')}")
+
+
+def make_plan_snapshot_ref(value: str | Path, plan: dict[str, Any], locator: str | Path | None,
+                           role: str) -> PlanSnapshotRef:
+    physical_input = str(value)
+    try:
+        physical_snapshot_path = str(Path(value).resolve(strict=False))
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ContractError(f"{role} Plan path cannot be canonicalized: {error}") from error
+    if locator is None:
+        effective_locator = physical_snapshot_path
+        locator_source = "physical-fallback"
+    else:
+        effective_locator = canonical_locator(locator, f"--{role}-plan-locator")
+        locator_source = "explicit"
+    return {
+        "role": role,
+        "physical_input": physical_input,
+        "physical_snapshot_path": physical_snapshot_path,
+        "effective_locator": effective_locator,
+        "locator_source": locator_source,
+        "snapshot_digest": value_digest(plan),
+    }
+
+
 def historical_mode(args: argparse.Namespace) -> bool:
     return any(getattr(args, previous_field, None) is not None
                for previous_field, _, _, _ in HISTORICAL_CLI_PAIRS)
@@ -2486,7 +2575,8 @@ def validate_candidate_transition(previous: dict[str, Any], current: dict[str, A
 
 
 def validate_master_transition(previous: dict[str, Any], current: dict[str, Any],
-                               schema: dict[str, Any] | None = None) -> str:
+                               schema: dict[str, Any] | None = None,
+                               *, allow_closeout_candidate_reset: bool = False) -> str:
     transition = validate_record_transition(previous, current, "Master Card")
     previous_state = previous["state"]
     current_state = current["state"]
@@ -2529,7 +2619,8 @@ def validate_master_transition(previous: dict[str, Any], current: dict[str, Any]
             historical_error("H22", f"illegal handoff transition {old_state} -> {new_state} for {identity}")
         if old_state in {"INTEGRATED", "REWORK_REQUESTED"} and current_handoff != previous_handoff:
             historical_error("H22", f"terminal handoff changed for {identity}")
-    validate_candidate_transition(previous["candidate_evidence"], current["candidate_evidence"], schema)
+    if not (allow_closeout_candidate_reset and previous_state == "ACTIVE" and current_state == "IDLE"):
+        validate_candidate_transition(previous["candidate_evidence"], current["candidate_evidence"], schema)
     return transition
 
 
@@ -2590,7 +2681,8 @@ def validate_plan_worker_consistency(plan: dict[str, Any], worker: dict[str, Any
 
 
 def validate_plan_master_consistency(plan: dict[str, Any], master: dict[str, Any], plan_path: Path | None,
-                                     task_specs: dict[str, dict[str, Any]] | None = None) -> None:
+                                     task_specs: dict[str, dict[str, Any]] | None = None,
+                                     plan_ref: PlanSnapshotRef | None = None) -> None:
     entries = {task["task_id"]: task for task in plan["tasks"]}
     if master["state"] != "IDLE":
         mismatched: list[str] = []
@@ -2600,12 +2692,22 @@ def validate_plan_master_consistency(plan: dict[str, Any], master: dict[str, Any
             mismatched.append("plan_revision")
         if master["dispatch_plan_digest"] != plan["plan_digest"]:
             mismatched.append("dispatch_plan_digest")
-        if plan_path is not None and Path(master["dispatch_plan_path"]).resolve() != plan_path.resolve():
+        expected_locator = (plan_ref["effective_locator"] if plan_ref is not None
+                            else str(plan_path.resolve()) if plan_path is not None else None)
+        if expected_locator is not None and Path(master["dispatch_plan_path"]).resolve() != Path(expected_locator):
             mismatched.append("dispatch_plan_path")
         if master["frozen_baseline_sha"] not in {entry["expected_head"] for entry in entries.values()}:
             mismatched.append("frozen_baseline_sha")
         if mismatched:
-            historical_error("H27", f"Plan/Master release lock mismatch: {mismatched}")
+            locator_context = ""
+            if plan_ref is not None and "dispatch_plan_path" in mismatched:
+                locator_context = (
+                    f" master_dispatch_plan_path={master['dispatch_plan_path']}"
+                    f" master_dispatch_plan_path_canonical={Path(master['dispatch_plan_path']).resolve()}"
+                    f" expected_effective_locator={plan_ref['effective_locator']}"
+                    f" locator_source={plan_ref['locator_source']}"
+                )
+            historical_error("H27", f"Plan/Master release lock mismatch: {mismatched}{locator_context}")
     for handoff in master["worker_handoffs"]:
         entry = entries.get(handoff["task_id"])
         if entry is None:
@@ -2697,13 +2799,14 @@ def validate_worker_master_consistency(worker: dict[str, Any], master: dict[str,
 
 def validate_cross_record_set(plan: dict[str, Any] | None, worker: dict[str, Any] | None,
                               master: dict[str, Any] | None, plan_path: Path | None,
-                              task_specs: dict[str, dict[str, Any]] | None) -> dict[str, str]:
+                              task_specs: dict[str, dict[str, Any]] | None,
+                              plan_ref: PlanSnapshotRef | None = None) -> dict[str, str]:
     results = {"plan-worker": "NOT_RUN", "plan-master": "NOT_RUN", "worker-master": "NOT_RUN"}
     if plan is not None and worker is not None:
         validate_plan_worker_consistency(plan, worker, task_specs or {})
         results["plan-worker"] = "PASS"
     if plan is not None and master is not None:
-        validate_plan_master_consistency(plan, master, plan_path, task_specs)
+        validate_plan_master_consistency(plan, master, plan_path, task_specs, plan_ref)
         results["plan-master"] = "PASS"
     if worker is not None and master is not None:
         validate_worker_master_consistency(worker, master)
@@ -2729,6 +2832,25 @@ def print_historical_report(pair_results: list[tuple[str, dict[str, Any], dict[s
         for relation in ("plan-worker", "plan-master", "worker-master"):
             print(f"historical cross-record {phase} {relation}: {results[relation]}")
     print("historical validation: PASS")
+
+
+def print_plan_locator_report(ref: PlanSnapshotRef, master: dict[str, Any] | None,
+                              result: str) -> None:
+    print(
+        f"record=dispatch-plan role={ref['role']} physical_input={ref['physical_input']} "
+        f"physical_snapshot_path={ref['physical_snapshot_path']} "
+        f"effective_locator={ref['effective_locator']} locator_source={ref['locator_source']} "
+        f"snapshot_digest={ref['snapshot_digest']}"
+    )
+    master_path = "NOT_RUN" if master is None else master["dispatch_plan_path"]
+    canonical_master_path = "NOT_RUN" if master is None else str(Path(master_path).resolve())
+    print(
+        f"check=plan-master-locator role={ref['role']} "
+        f"master_dispatch_plan_path={master_path} "
+        f"master_dispatch_plan_path_canonical={canonical_master_path} "
+        f"expected_effective_locator={ref['effective_locator']} "
+        f"locator_source={ref['locator_source']} result={result}"
+    )
 
 
 def extract_code_block(text: str, marker: str) -> str:
@@ -2936,6 +3058,13 @@ def validate_documented_contracts(repo_root: Path, schema: dict[str, Any]) -> No
                 "optional-Gate freshness contract missing from "
                 f"{relative}: {missing_optional_gate_freshness_terms}"
             )
+        closeout_terms = (
+            "release closeout", "state_root/history/releases", "master-card.active.json", "closeout.json",
+            "no-overwrite", "ACTIVE", "IDLE", "external call", "production publication",
+        )
+        missing_closeout_terms = [term for term in closeout_terms if term not in contents]
+        if missing_closeout_terms:
+            raise ContractError(f"release-closeout contract missing from {relative}: {missing_closeout_terms}")
     design = (repo_root / "design" / "per-gate-evidence.md").read_text(encoding="utf-8")
     head_rerun_terms = ("different `release_head_sha`", "zero opaque digest reuse")
     missing_design_terms = [term for term in head_rerun_terms if term not in design]
@@ -6102,8 +6231,8 @@ def run_candidate_evidence_tests() -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument("--plan", type=Path)
-    parser.add_argument("--previous-plan", type=Path)
+    parser.add_argument("--plan", type=str)
+    parser.add_argument("--previous-plan", type=str)
     parser.add_argument("--task-spec", type=Path)
     parser.add_argument("--worker-card-json", type=Path)
     parser.add_argument("--previous-worker-card", type=Path)
@@ -6116,6 +6245,9 @@ def main() -> int:
     parser.add_argument("--candidate-plan-revision", type=int)
     parser.add_argument("--candidate-plan-digest")
     parser.add_argument("--candidate-evidence-self-test", action="store_true")
+    parser.add_argument("--plan-locator", type=str)
+    parser.add_argument("--previous-plan-locator", type=str)
+    parser.add_argument("--release-closeout-json", type=Path)
     parser.add_argument("--skip-self-test", action="store_true")
     args = parser.parse_args()
 
@@ -6128,6 +6260,7 @@ def main() -> int:
 
     try:
         validate_previous_pairing(args)
+        validate_locator_pairing(args)
     except HistoricalUsageError as error:
         parser.error(str(error))
     is_historical = historical_mode(args)
@@ -6140,6 +6273,10 @@ def main() -> int:
 
     current_plan = current_worker = current_master = None
     previous_plan = previous_worker = previous_master = None
+    current_plan_path = Path(args.plan) if args.plan is not None else None
+    previous_plan_path = Path(args.previous_plan) if args.previous_plan is not None else None
+    current_plan_ref: PlanSnapshotRef | None = None
+    previous_plan_ref: PlanSnapshotRef | None = None
     current_specs: dict[str, dict[str, Any]] = {}
     previous_specs: dict[str, dict[str, Any]] = {}
     pair_results: list[tuple[str, dict[str, Any], dict[str, Any], str]] = []
@@ -6147,10 +6284,11 @@ def main() -> int:
     current_cross = copy.deepcopy(previous_cross)
     try:
         validate_documented_contracts(repo_root, schema)
-        if args.plan:
-            current_plan = load_json(args.plan)
+        if current_plan_path is not None:
+            current_plan = load_json(current_plan_path)
             validate_plan(current_plan, schema)
             current_specs = load_persisted_plan_specs(current_plan, schema)
+            current_plan_ref = make_plan_snapshot_ref(args.plan, current_plan, args.plan_locator, "current")
         if args.task_spec:
             validate_task_spec(load_json(args.task_spec), schema)
         if args.worker_card_json:
@@ -6184,12 +6322,17 @@ def main() -> int:
                     )
                     scope, affected = evaluate_candidate_invalidation(previous_candidate, candidate, schema)
                     print(f"candidate invalidation: {scope} gates={','.join(affected) if affected else 'none'}")
+        if args.release_closeout_json:
+            validate_release_closeout(load_json(args.release_closeout_json), schema)
 
-        if args.previous_plan:
-            previous_plan = load_previous_json(args.previous_plan, "Dispatch Plan")
+        if previous_plan_path is not None:
+            previous_plan = load_previous_json(previous_plan_path, "Dispatch Plan")
             validate_historical_schema_pair(previous_plan, current_plan, "Dispatch Plan")
             validate_plan(previous_plan, schema)
             previous_specs = load_persisted_plan_specs(previous_plan, schema, historical=True)
+            previous_plan_ref = make_plan_snapshot_ref(
+                args.previous_plan, previous_plan, args.previous_plan_locator, "previous",
+            )
             pair_results.append(("dispatch-plan", previous_plan, current_plan,
                                  validate_plan_transition(
                                      previous_plan, current_plan, previous_specs, current_specs,
@@ -6206,9 +6349,9 @@ def main() -> int:
 
         if is_historical:
             previous_cross = validate_cross_record_set(previous_plan, previous_worker, previous_master,
-                                                        args.previous_plan, previous_specs)
+                                                        previous_plan_path, previous_specs, previous_plan_ref)
         current_cross = validate_cross_record_set(current_plan, current_worker, current_master,
-                                                   args.plan, current_specs)
+                                                   current_plan_path, current_specs, current_plan_ref)
     except (ContractError, KeyError, TypeError, OSError, json.JSONDecodeError) as error:
         prefix = "historical validation: FAIL" if is_historical else "contract validation failed:"
         print(f"{prefix} {error}", file=sys.stderr)
@@ -6223,6 +6366,13 @@ def main() -> int:
     if is_historical:
         print_historical_report(pair_results, previous_cross, current_cross,
                                 historical_completeness(previous_plan, previous_worker, previous_master))
+    if args.plan_locator is not None or args.previous_plan_locator is not None:
+        if current_plan_ref is not None:
+            print_plan_locator_report(current_plan_ref, current_master, current_cross["plan-master"])
+        if previous_plan_ref is not None:
+            print_plan_locator_report(previous_plan_ref, previous_master, previous_cross["plan-master"])
+    if args.release_closeout_json:
+        print("release closeout: PASS")
     print("contract validation: PASS")
     return 0
 
