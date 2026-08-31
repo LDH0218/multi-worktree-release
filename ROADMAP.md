@@ -161,7 +161,7 @@
 
 ## 持续测试路线：目标模式任务
 
-FAST 已正式采用。目标模式可以立即使用一次性临时 Git 仓库和临时 JSON fixture 验证 FAST + v1 STRICT，不需要等待或制造真实任务。测试复用当前 `MWR｜Master-1.0`、现有 Worker 对话和五个既有 worktree；除非用户明确要求新增长期责任角色，不创建新对话或 worktree。
+FAST 已正式采用。一次性临时 Git 仓库和临时 JSON fixture 已完成 FAST + v1 STRICT 的契约级模拟，但这不等于真实多对话、多工作树 E2E。真实 E2E 复用当前 `MWR｜Master-1.0`、现有 Worker 对话和五个既有 worktree；除非用户明确要求新增长期责任角色，不创建新对话或 worktree。
 
 ### 已验证基线
 
@@ -172,14 +172,14 @@ FAST 已正式采用。目标模式可以立即使用一次性临时 Git 仓库�
 
 基线保留两个兼容事实，不把它们误报为失败：Dispatch 图 Worker 的空闲 Card 仍是合法 v1 flat default-deny；旧 Master Card 仍为 `ACTIVE`，其旧 HEAD 候选为 `STALE`，表示该严格发布批次尚未正式关闭。
 
-### Test Phase A：即时 FAST 模拟（已完成）
+### Test Phase A：即时 FAST 模拟（临时 fixture 已通过；真实 E2E 待执行）
 
 - [x] 在一次性临时 Git 仓库中完成单文件任务；第一次验收按设计失败，恰好一次局部修正后通过。
 - [x] 证明 FAST 没有创建 Dispatch Plan、Task Spec、Card、额外 worktree、Operation Receipt 或 adoption receipt。
 - [x] 越界路径在交付前被拒绝；错误 baseline 在 `ACTIVE` 前停止；连续第二次验收失败时决定升级 STRICT。
 - [x] 模拟全过程没有 external call、execution、publication 或 destructive action。
 
-### Test Phase B：即时 STRICT 模拟（已完成）
+### Test Phase B：即时 STRICT 模拟（临时 fixture 已通过；真实 E2E 待执行）
 
 - [x] 临时 Plan、Task Spec、Worker Card 和 Master Card 通过 Schema、digest、模型和默认拒绝授权校验。
 - [x] Worker 完成 `IDLE → ACTIVE → AWAITING_INTEGRATION → ACTIVE(rework) → AWAITING_INTEGRATION → IDLE`。
@@ -187,23 +187,23 @@ FAST 已正式采用。目标模式可以立即使用一次性临时 Git 仓库�
 - [x] objective 或 frozen baseline 改变均判定为 `SUPERSEDE`，不得伪装成 `REVISE`。
 - [x] Plan 历史转换、Worker/Master 历史转换和最终三记录 cross-record 一致性分别通过公开 CLI。
 
-### Test Phase C：Candidate、Gate 与负向矩阵（已完成）
+### Test Phase C：Candidate、Gate 与负向矩阵（临时 fixture 已通过；真实 E2E 待执行）
 
 - [x] 模拟集成 HEAD 改变后返回 `ALL`，两个已注册 Gate 全部失效。
 - [x] 旧 HEAD 证据复用被拒绝，没有使用 tree 或 patch 等价旁路。
 - [x] 主契约套件 `88/88`、Candidate evidence 聚焦矩阵 `34/34` 均通过。
 - [x] 真实 `.codex`、五张 Worker Card 和六个工作树在测试前后保持不变或 tracked clean。
 
-### Test Phase D：旧 Master 取消模拟（已完成，未操作 live 状态）
+### Test Phase D：旧 Master 取消模拟（临时 fixture 已通过；live 状态待真实 E2E 关闭）
 
 - [x] 只复制 `mwr-hardening-2026-08-30` 的当前 Plan 和 Master Card 到临时目录。
 - [x] 模拟 `ACTIVE → IDLE`：record/time 前进，活动锁清空，候选归零为 canonical v2 `NONE`，34 条 Worker handoff 原样保留。
 - [x] previous/current Master 历史校验通过；真实 Master Card 仍为 `ACTIVE + STALE`，没有被关闭、取消或 supersede。
 - [x] 记录设计缺口：当前协议没有规范的 Master closeout/history 持久位置，不能把清空后的当前 Card 单独当成可靠关闭历史。
 
-### Test Phase E：结论（已完成）
+### Test Phase E：临时结论（fixture 已完成；真实 E2E 待执行）
 
-- [x] 即时模拟证明当前 FAST + v1 STRICT 的主要成功和失败路径可以运行，未发现需要立即修改正式协议的 release blocker。
+- [x] 即时 fixture 证明当前 FAST + v1 STRICT 的主要成功和失败路径可以运行；该证据不替代真实任务发布、Worker handoff、Master 集成、Gate、推送和 closeout。
 - [x] v2 adoption、FAST binding、cycle fence 和 v2 CLI 均未启用或进入正式路由。
 - [x] 未增加长期测试脚本；临时 harness 和 fixture 不进入仓库。
 - [x] 独立只读复核任务实际完成了两次运行，但应用没有返回可见报告正文，因此独立结论诚实记录为 `NOT_PROVEN`，不推断为 PASS。
@@ -220,7 +220,7 @@ FAST 已正式采用。目标模式可以立即使用一次性临时 Git 仓库�
 
 > 在不启动正式 v2、不修改 live `.codex`、不制造真实交付任务的前提下，立即使用一次性临时 Git 仓库和临时 JSON fixture 执行 ROADMAP.md 的 Test Phase A→E。验证 FAST 一次修正与第二次失败升级、STRICT 状态与返工、默认拒绝授权、SUPERSEDE 边界、Candidate HEAD 失效和旧 Master 取消模拟；运行 88 项主契约和 34 项 Gate 聚焦测试。开始与结束都核对真实状态哈希和工作树洁净度，缺少证据写 `NOT_PROVEN`。只更新本路线图并提交；已有正常 push 授权可以用于 `origin/main`，但 force-push、Tag、GitHub Release、生产发布、破坏性操作和其他外部系统写入仍需单独授权。
 
-上述即时目标已于 2026-08-31 完成。后续目标模式可以重跑同样的临时验证或等待自然发生的真实任务抽样，但不得把真实抽样当成阻塞条件，也不得为它增加新的长期基础设施。
+上述即时 fixture 目标已于 2026-08-31 完成。真实多工作树 E2E 尚未完成，下一批次将复用现有五个 Worker 工作树和对话，解决 closeout/history 与历史 Plan locator 两个 `NOT_PROVEN`，并以真实 handoff、集成、Gate、推送和 Master 关闭证据更新本节。
 
 ## 停止条件
 
