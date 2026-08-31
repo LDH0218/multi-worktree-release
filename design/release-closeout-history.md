@@ -62,19 +62,16 @@ The archive root is derived only from the validated current Plan:
 
 ```text
 <state_root>/history/releases/<release_task_id>/
-├── plan.snapshot.json
-├── master.active.snapshot.json
-├── handoffs/
-│   ├── index.json
-│   └── <task_id>/
-│       └── r<task_spec_revision>-<task_spec_digest_hex>.json
+├── dispatch-plan.json
+├── master-card.active.json
 └── closeout.json
 ```
 
 `<state_root>` is the absolute `state_root` from the Plan. The implementation resolves the parent and verifies that the
-final directory remains below `<state_root>/history/releases`; it does not follow a symlink outside that boundary. No
-other archive file is normative. Temporary siblings used during an atomic write are never treated as completed history and
-must not be deleted automatically after an interruption.
+final directory remains below `<state_root>/history/releases`; it does not follow a symlink outside that boundary. These
+three files are the complete normative archive. There is no handoff file tree, index, pointer, alias, manifest, or fourth
+archive record. Temporary siblings used during an atomic write are never treated as completed history and must not be
+deleted automatically after an interruption.
 
 `release_task_id` and the task-id directory component use this archive-safe grammar:
 
@@ -94,12 +91,12 @@ that policy does not authorize cleanup or deletion of a completed archive.
 
 ### 4.1 Plan snapshot
 
-`plan.snapshot.json` is the exact UTF-8 byte sequence read from the validated current Dispatch Plan. It must include its
+`dispatch-plan.json` is the exact UTF-8 byte sequence read from the validated current Dispatch Plan. It must include its
 original `record_revision`, semantic `plan_revision`, `plan_digest`, release task identity, all task entries, and all
 terminal status decisions. Its outer archive digest is:
 
 ```text
-plan_snapshot_digest = SHA256(exact_bytes(plan.snapshot.json))
+dispatch_plan_archive_digest = SHA256(exact_bytes("dispatch-plan.json"))
 ```
 
 This is separate from the Plan's existing structured digest:
@@ -113,48 +110,33 @@ different current Plan is a conflict, not an equivalent snapshot.
 
 ### 4.2 ACTIVE Master snapshot
 
-`master.active.snapshot.json` is the exact UTF-8 byte sequence read from the validated ACTIVE Master Card before the IDLE
-write. It preserves the complete `worker_handoffs` array and candidate evidence, not a compact reconstruction. Its outer
-archive digest is:
+`master-card.active.json` is the exact UTF-8 byte sequence read from the validated ACTIVE Master Card before the IDLE write.
+It preserves the complete `worker_handoffs` array and candidate evidence, not a compact reconstruction. Its outer archive
+digest is:
 
 ```text
-master_snapshot_digest = SHA256(exact_bytes(master.active.snapshot.json))
+master_card_archive_digest = SHA256(exact_bytes("master-card.active.json"))
 ```
 
 The snapshot must prove `state: ACTIVE`, the same `release_task_id`, `plan_revision`, `dispatch_plan_path`,
 `dispatch_plan_digest`, and `frozen_baseline_sha` as the Plan context. An ACTIVE Card with a blocker, a different Plan
 digest, or a changed release lock is not a closeout input.
 
-### 4.3 Worker handoff archive
+### 4.3 Worker handoff preservation
 
-Every object in `master.active.snapshot.json.worker_handoffs` is written as one canonical JSON object at the deterministic
-handoff path. The object itself remains the exact Master handoff value; the path is only a locator. Each handoff file is
-represented once in `handoffs/index.json`, whose entries have exactly these fields:
+Every object in `master-card.active.json.worker_handoffs` remains inside that exact archived Master Card snapshot. No
+handoff is copied into a fourth file or an index, and no handoff may be dropped because it is old, superseded, rejected,
+or not needed for the current aggregate result. The closeout summarizes the array with:
 
-```json
-{
-  "task_id": "<id>",
-  "task_spec_revision": 1,
-  "task_spec_digest": "sha256:<64-hex>",
-  "plan_revision": 1,
-  "dispatch_wave": 1,
-  "source_thread_id": "<issuer-thread>",
-  "role": "<role>",
-  "frozen_baseline_sha": "<40-hex>",
-  "authorization_envelope_digest": "sha256:<64-hex>",
-  "acceptance_digest": "sha256:<64-hex>",
-  "worker_commit_sha": "<40-hex>",
-  "integrated_as_sha": "<40-hex-or-null>",
-  "state": "INTEGRATED | REWORK_REQUESTED",
-  "locator": "handoffs/<task_id>/r<revision>-<digest_hex>.json",
-  "value_digest": "sha256:<64-hex>"
-}
+```text
+handoff_count = len(master-card.active.json.worker_handoffs)
+handoff_array_digest = SHA256(canonical_json(master-card.worker_handoffs))
 ```
 
-The `value_digest` is `SHA256(canonical_json(handoff_object))`; `index.json` is sorted by the full handoff identity
-`(task_id, task_spec_revision, task_spec_digest, source_thread_id)`. Its archive digest is the SHA-256 of its exact bytes.
-No handoff may be dropped because it is old, superseded, rejected, or not needed for the current aggregate result. A
-terminal `REWORK_REQUESTED` handoff remains historical evidence and is never converted into `INTEGRATED` by closeout.
+The canonical digest preserves the persisted array order and every complete handoff object. A terminal
+`REWORK_REQUESTED` handoff remains historical evidence and is never converted into `INTEGRATED` by closeout. The exact
+archived Master bytes remain the primary evidence; `handoff_array_digest` is an independently checkable summary, not a
+second handoff authority.
 
 ### 4.4 Closeout record
 
@@ -174,25 +156,27 @@ failure:
   "issued_by": "<Plan issued_by>",
   "created_at": "<RFC3339>",
   "candidate_validated_at": "<RFC3339>",
-  "plan_snapshot": {
-    "locator": "plan.snapshot.json",
+  "dispatch_plan": {
+    "locator": "dispatch-plan.json",
     "record_revision": 1,
     "plan_revision": 1,
     "plan_digest": "sha256:<64-hex>",
-    "snapshot_digest": "sha256:<64-hex>"
+    "archive_digest": "sha256:<64-hex>"
   },
-  "master_snapshot": {
-    "locator": "master.active.snapshot.json",
+  "master_card": {
+    "locator": "master-card.active.json",
     "record_revision": 1,
     "state": "ACTIVE",
     "release_task_id": "<id>",
     "plan_revision": 1,
     "dispatch_plan_digest": "sha256:<64-hex>",
     "frozen_baseline_sha": "<40-hex>",
-    "snapshot_digest": "sha256:<64-hex>"
+    "archive_digest": "sha256:<64-hex>",
+    "handoff_count": 0,
+    "handoff_array_digest": "sha256:<64-hex>"
   },
   "candidate": {
-    "locator": "master.active.snapshot.json#/candidate_evidence",
+    "locator": "master-card.active.json#/candidate_evidence",
     "schema_version": 2,
     "release_task_id": "<id>",
     "release_head_sha": "<40-hex>",
@@ -208,9 +192,8 @@ failure:
     "head_reachable": true
   },
   "worker_handoffs": {
-    "index_locator": "handoffs/index.json",
     "count": 0,
-    "index_digest": "sha256:<64-hex>",
+    "array_digest": "sha256:<64-hex>",
     "all_terminal": true,
     "worker_locks": "ALL_IDLE"
   },
@@ -218,7 +201,8 @@ failure:
     "from_state": "ACTIVE",
     "from_record_revision": 1,
     "to_state": "IDLE",
-    "to_record_revision": 2
+    "to_record_revision": 2,
+    "worker_handoffs_preserved": true
   },
   "external_authority": "NONE",
   "closeout_digest": "sha256:<64-hex>"
@@ -226,9 +210,11 @@ failure:
 ```
 
 The example's numbers are placeholders; the field set and relationships are normative. `count` is the exact number of
-archived Master handoffs. `worker_locks: ALL_IDLE` means every Worker Card bound to this release has already been
-reconciled to IDLE; closeout never clears another Worker's lock. If a repository has no Worker assignments, the count is
-zero and the index contains an empty canonical list.
+handoff objects in the archived Master Card, and `array_digest` is the digest of that same ordered array. The nested
+`master_card.handoff_count` and `master_card.handoff_array_digest` must equal the corresponding closeout summary. This
+deliberate duplication is a digest-only cross-record check, not a second handoff record. `worker_locks: ALL_IDLE` means
+every Worker Card bound to this release has already been reconciled to IDLE; closeout never clears another Worker's lock.
+If a repository has no Worker assignments, the count is zero and the canonical handoff array is empty in the Master Card.
 
 `candidate.value_digest` is `SHA256(canonical_json(candidate_evidence))` over the full v2 evidence object in the ACTIVE
 Master snapshot. It is not a newly invented candidate key. `closeout_digest` is:
@@ -295,29 +281,31 @@ The operation is serialized per release-task directory and uses a no-overwrite `
 
 1. Validate the complete source set and calculate all archive bytes and digest relationships without changing the live
    records.
-2. Create the safe archive directory. If a final file already exists, compare its exact bytes; equal bytes are success,
-   different bytes are a hard conflict.
-3. Write and durably flush `plan.snapshot.json`, then atomically install it without replacing an existing final file.
-4. Re-read and verify the Plan snapshot, then write and atomically install `master.active.snapshot.json`. Its exact bytes
-   must still describe the same ACTIVE release lock and Plan digest.
-5. Write each deterministic handoff object and `handoffs/index.json` with the same no-overwrite rule. Verify the complete
-   index, all `value_digest` values, and terminal cross-record relationships.
-6. Build and atomically install `closeout.json` only after the Plan, ACTIVE Master, handoff archive, candidate, and Git
-   checks pass. Re-read the file, recompute `closeout_digest`, and verify the complete record.
-7. Re-read the live Master Card. It must still be byte-equivalent to the archived ACTIVE snapshot (or to the exact active
-   source snapshot used to create it). Build the canonical IDLE projection with `record_revision` incremented by one,
-   `updated_at` advanced, all active release lock fields cleared, no Worker handoffs retained in the live projection, an
-   empty candidate projection, and `blocker: null`. Atomically replace the live Master Card and flush its parent directory.
-8. Read back the live Card and verify the IDLE transition, the expected record revision, and the immutable closeout digest.
+2. Create the safe archive directory. If any of the three final files already exists, compare its exact bytes; equal bytes
+   are success, different bytes are a hard conflict.
+3. Write and durably flush `dispatch-plan.json`, then atomically install it without replacing an existing final file.
+4. Re-read and verify the Plan archive, then write and atomically install `master-card.active.json`. Its exact bytes must
+   still describe the same ACTIVE release lock, Plan digest, complete `worker_handoffs` array, and candidate.
+5. Build and atomically install `closeout.json` only after the Plan, ACTIVE Master, complete handoff array, candidate, and
+   Git checks pass. Re-read the file, recompute `closeout_digest`, and verify the complete record.
+6. Re-read the live Master Card. It must still be byte-equivalent to the archived ACTIVE snapshot (or to the exact active
+   source snapshot used to create it). Build the canonical v1 IDLE projection with `record_revision` incremented by one,
+   `updated_at` advanced, `release_task_id`, Plan revision/path/digest, frozen baseline, and blocker cleared, candidate
+   evidence set to canonical `NONE`, and the complete `worker_handoffs` array preserved byte-for-byte and append-only.
+   Atomically replace the live Master Card and flush its parent directory.
+7. Read back the live Card and verify the IDLE transition, the expected record revision, preserved handoff bytes and digest,
+   cleared active fields, canonical empty candidate, and immutable closeout digest.
 
 The last write is the only live-release-lock mutation. A failed comparison, partial write, changed HEAD, changed Plan, or
 changed Master Card stops the sequence and never silently chooses a newer value. The implementation must use a same-
 directory temporary file, flush file contents when supported, atomically install the final name without replacement, and
 flush the containing directory when supported. A malformed readback is a blocker, not a reason to repair by guesswork.
 
-The live IDLE projection may use the repository's existing v1 empty candidate `NONE` shape (or an already adopted canonical
-empty projection if the repository later has one); the archived ACTIVE snapshot remains the sole closeout evidence. No
-current Schema field is added by this design.
+The live IDLE projection must use the repository's existing v1 empty candidate `NONE` shape. It clears only the active
+release lock, blocker, and candidate fields listed above; `worker_handoffs` is not emptied, reordered, deduplicated, or
+normalized. The archived ACTIVE snapshot remains the complete closeout evidence, while the live v1 handoff array remains an
+append-only historical projection. If the serializer cannot preserve that array byte-for-byte, the transition fails closed.
+No current Schema field is added by this design.
 
 ## 7. Idempotency and conflict rules
 
@@ -346,7 +334,7 @@ inspection. Any discard or replacement requires a separate, explicitly recorded 
 | Before directory or Plan snapshot | Keep Master ACTIVE; revalidate all inputs and retry from the beginning. |
 | After Plan snapshot, before ACTIVE Master snapshot | Compare the stored Plan bytes/digest; reuse only an exact match, then re-read ACTIVE Master. |
 | During/after ACTIVE Master snapshot | Atomic readback must yield either no final file or the exact stored bytes; a conflict blocks. Do not clear the live lock. |
-| During handoff files or index | Reconcile every file and index entry against the ACTIVE snapshot; missing entries may be completed, conflicts block; never omit a handoff. |
+| After the ACTIVE Master archive, before closeout | Recompute the archived `worker_handoffs` array digest and count against `closeout.json` inputs; any missing, reordered, or conflicting handoff blocks; never omit a handoff. |
 | After `closeout.json`, before live IDLE | Verify the closeout and source snapshot, then retry only the expected ACTIVE-to-IDLE transition. The archive remains the durable completion intent. |
 | During live IDLE replacement | Atomic replacement permits only the old valid ACTIVE card or the new valid IDLE card. Any malformed/unknown result blocks manual Master recovery. |
 | After live IDLE readback | Verify the archive, closeout digest, expected IDLE revision, and cleared fields. Never delete the archive or reconstruct history from the IDLE projection. |
@@ -365,7 +353,7 @@ The next implementation should remain modular and v1-compatible:
 1. Safe release-task/path resolution and archive layout checks.
 2. Canonical/exact-byte digest helpers and no-overwrite atomic `write_once` primitive.
 3. Read-only Plan, Task Spec, Master, handoff, Worker Card, candidate, and Git precondition readers.
-4. Fixed snapshot and handoff index writers with conflict detection.
+4. Fixed three-file snapshot writers and handoff-array digest checks with conflict detection.
 5. Closeout record construction and self-digest/readback verification.
 6. Final Master ACTIVE-to-IDLE projection writer with expected-source compare and crash recovery.
 7. Public CLI routing and reporting, without adding closeout authority to FAST or any publication path.
@@ -380,7 +368,7 @@ The acceptance matrix must include at least:
 | Nonterminal Dispatch entry, `RECEIVED` handoff, missing handoff, duplicate identity, or mismatched Task Spec digest | No closeout; live Master remains ACTIVE. |
 | Candidate v1, legacy-only, stale, missing optional evidence, wrong head, or registry/input digest mismatch | No closeout; candidate is not promoted. |
 | Existing identical archive bytes | Idempotent success/no-op. |
-| Existing conflicting Plan, Master, handoff, index, or closeout bytes | Fail closed with preserved evidence and no overwrite. |
+| Existing conflicting Plan, Master, or closeout bytes | Fail closed with preserved evidence and no overwrite. |
 | HEAD or semantic Plan/Gate input changes between validation and write | Abort before IDLE; require fresh revalidation/new cycle. |
 | Crash before each of the four required phases | Recovery follows the interruption matrix and never guesses. |
 | Closeout exists but live Card is still ACTIVE | Retry only the exact final transition. |
