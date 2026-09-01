@@ -5,6 +5,10 @@ identity, state, revision, and authorization fields are never omitted; record ex
 when denied or empty. Omit only fields that the canonical contract explicitly marks optional. Never invent values or authority.
 The machine field and enum authority is [contracts.schema.json](contracts.schema.json); these templates must remain equivalent.
 
+Operational runbooks are [task-lifecycle-sop.md](task-lifecycle-sop.md), [release-sop.md](release-sop.md), and
+[exception-recovery-sop.md](exception-recovery-sop.md). Use [conversation-rotation-sop.md](conversation-rotation-sop.md) for
+conversation lifecycle; these are references only, and this file does not copy their complete rules.
+
 ## Validator root and test invocation
 
 The validator's `--repo-root` points to the Skill source repository root used to load `references/contracts.schema.json` and

@@ -69,6 +69,13 @@ authority. Terminology boundary: Protocol v2 adoption/binding prototypes are exp
 and Candidate evidence schema v2 are formal components of the current v1-authoritative STRICT release flow. This distinction is
 human-readable terminology only; it does not change machine field names, v1 state transitions, or prototype routing.
 
+For day-to-day operation, route the procedure to [task-lifecycle-sop.md](task-lifecycle-sop.md) for FAST/STRICT delivery,
+[release-sop.md](release-sop.md) for integrated-tree candidate, publication, closeout, and rollover, and
+[exception-recovery-sop.md](exception-recovery-sop.md) for stop-and-preserve recovery. These are human runbooks over this
+method, the existing Schema/validator, and persisted records; they add no machine state or role registry. Conversation
+creation, rotation, successor confirmation, and archive decisions remain solely in
+[conversation-rotation-sop.md](conversation-rotation-sop.md).
+
 ## Durable role bindings
 
 A durable role binding is one governance tuple: `responsibility role → current visible conversation → retained worktree →

@@ -69,6 +69,15 @@ flowchart LR
 
 完整方法见 [references/methodology.md](references/methodology.md)。
 
+面向实际操作的三个 SOP：
+
+- [Task Lifecycle SOP](references/task-lifecycle-sop.md)：从 FAST/STRICT 判断、派工和 Worker 执行，到 handoff、集成与 `IDLE` closeout；
+- [Release SOP](references/release-sop.md)：从集成树和 Candidate/Gate 重新认证，到显式发布、push、closeout 与 rollover；
+- [Exception and Recovery SOP](references/exception-recovery-sop.md)：错误基线、Card/digest、范围、阻塞、修订、替代、取消与恢复决策。
+
+这些 SOP 只是现有 Plan、Task Spec、Card、Schema、授权和状态规则的操作入口；持久对话的创建、轮换、确认和归档仍只由
+[Conversation Rotation SOP](references/conversation-rotation-sop.md) 规定。
+
 ## 安装
 
 ### 方式一：直接安装

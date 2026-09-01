@@ -117,6 +117,12 @@ Read the single normative lifecycle procedure for persistent conversations at
 archiving a persistent conversation. It is a human procedure over the existing Plan, Task Specs, Cards, handoffs, and
 Git/worktree evidence; it adds no role registry, machine state, or authority.
 
+Use the operator runbooks for normal delivery and recovery: [task lifecycle](references/task-lifecycle-sop.md) covers
+FAST/STRICT classification through Worker `IDLE`; [release](references/release-sop.md) covers integrated-tree candidate
+evidence, publication, push, closeout, and rollover; and [exception recovery](references/exception-recovery-sop.md) covers
+stop-and-preserve decisions. These are human routing documents over the existing contracts; they add no machine state or role
+registry, and the conversation SOP remains the sole conversation lifecycle authority.
+
 ## Durable role bindings
 
 A durable role binding is one tuple: `responsibility role → current visible conversation → retained worktree → branch`. One
