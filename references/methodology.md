@@ -110,6 +110,13 @@ paths beneath `<MASTER_WORKTREE>/.codex/multi-worktree-release/tasks/`.
 [contracts.schema.json](contracts.schema.json) is the machine-field and enum authority. The examples in this document and
 [templates.md](templates.md) are human-readable projections and must remain schema-equivalent.
 
+### Validator root and test invocation
+
+The validator's `--repo-root` option identifies the Skill source repository root used to load
+`references/contracts.schema.json` and other validator resources; it is not the project being audited, and its existing flag
+and behavior remain compatible. From a project root, run Python unit tests with
+`PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py'` so imports resolve reliably.
+
 The plan is versioned and contains at least:
 
 ```yaml

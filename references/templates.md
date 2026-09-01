@@ -5,6 +5,16 @@ identity, state, revision, and authorization fields are never omitted; record ex
 when denied or empty. Omit only fields that the canonical contract explicitly marks optional. Never invent values or authority.
 The machine field and enum authority is [contracts.schema.json](contracts.schema.json); these templates must remain equivalent.
 
+## Validator root and test invocation
+
+The validator's `--repo-root` points to the Skill source repository root used to load `references/contracts.schema.json` and
+other validator resources; it is not the project being audited. Preserve the existing flag and behavior. From a project root,
+run Python unit tests as follows so imports resolve reliably:
+
+```bash
+PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py'
+```
+
 ## FAST eligibility gate
 
 Use this human-readable preflight before a FAST change; it is not a new persisted machine record. FAST is eligible only when

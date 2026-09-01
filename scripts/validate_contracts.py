@@ -6316,7 +6316,15 @@ def run_candidate_evidence_tests() -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+        help=(
+            "Skill source repository root used to load the contract Schema and validator resources; "
+            "not the project being audited."
+        ),
+    )
     parser.add_argument("--plan", type=str)
     parser.add_argument("--previous-plan", type=str)
     parser.add_argument("--task-spec", type=Path)

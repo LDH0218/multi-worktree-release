@@ -217,6 +217,12 @@ Skill 中的授权字段是协作治理契约，不替代 GitHub、云平台或�
 
 ## 验证
 
+校验器的 `--repo-root` 指向 Skill 源码根目录（Skill source repository root），用来加载 `references/contracts.schema.json` 和其他校验资源；它不是被审查项目的根目录（not the project being audited），该参数及其行为保持兼容。从项目根目录运行 Python 单测时，使用：
+
+```bash
+PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py'
+```
+
 仓库只需要 Python 3，校验器不依赖第三方包：
 
 ```bash

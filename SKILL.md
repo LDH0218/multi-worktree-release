@@ -65,6 +65,11 @@ Read [references/contracts.schema.json](references/contracts.schema.json) when p
 records. After changing this Skill's contracts, or before relying on newly created plan/task/card records, run
 `python3 scripts/validate_contracts.py` and resolve every failed invariant.
 
+The validator's `--repo-root` option identifies the Skill source repository root used to load
+`references/contracts.schema.json` and other validator resources; it does not identify the project being audited. Preserve
+the option and its existing behavior. From a project root, run Python unit tests with
+`PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py'` so imports resolve reliably.
+
 ## Establish repository truth first
 
 1. Read repository-owned agent instructions and the governance files they route to. If present, inspect architecture indexes,
