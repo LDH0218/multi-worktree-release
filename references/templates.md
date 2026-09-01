@@ -164,14 +164,17 @@ ownership comparison, so `src/x` and `src/x/` conflict rather than becoming alia
 
 `model_policy` and `model_profile` may be omitted only for legacy records. After `enforced_from_plan_revision`, every `NEW` or
 `REVISE` task must persist the same exact profile in its Task Spec and Plan entry. Older digest-preserved records below the
-fence remain untouched. The exact defaults are Master `gpt-5.6-sol`/`high`/`default`
+fence remain untouched. The built-in defaults are Master `gpt-5.6-sol`/`high`/`default`
 (`owner-default:master`), ordinary Worker `gpt-5.6-luna`/`max`/`priority`
 (`owner-default:ordinary-worker`), and complex Worker `gpt-5.6-luna`/`max`/`priority`
-(`owner-default:complex-worker`). The prior complex-worker profile is compatibility-only for digest-preserved terminal or
-`GRANDFATHER` records; every `NEW` or `REVISE` assignment uses the current Luna profile. A launcher that cannot honor the
-profile must stop dispatch. The persisted model `service_tier` is the requested scheduler profile, not a claim about the unobservable effective tier;
-dispatch stops when the launcher can prove it cannot honor priority. It is not an authorization route/provider and grants no external
-call, run, publication, destructive operation, synchronization, or scope.
+(`owner-default:complex-worker`). A project may explicitly declare another supported active profile in
+`model_policy.owner_defaults`: Master may use either the built-in Sol profile or the Luna/max/priority profile, while Workers
+use the Luna profile; the `selection_reason` remains bound to the owning role. The prior complex-worker profile is
+compatibility-only for digest-preserved terminal or `GRANDFATHER` records; every `NEW` or `REVISE` assignment uses the
+project-declared profile. A launcher that cannot honor the profile must stop dispatch. The persisted model `service_tier` is the
+requested scheduler profile, not a claim about the unobservable effective tier; dispatch stops when the launcher can prove it cannot honor priority
+(if the launcher can prove it cannot honor priority, dispatch stops). It is not an authorization route/provider and grants no external call, run, publication, destructive operation,
+synchronization, or scope.
 
 A `GRANDFATHER` entry preserves the existing task spec, digest, and its original `task_spec_plan_revision`; do not rewrite the
 task to copy the new global plan fence. `NEW` and `REVISE` task specs bind to the current plan revision. Terminal entries retain

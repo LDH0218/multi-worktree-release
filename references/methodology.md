@@ -219,12 +219,14 @@ Adding the policy or changing a profile is executable semantic content: incremen
 requires a higher `task_spec_revision` and a new digest. Unsupported model/reasoning/tier combinations or a Plan/Task Spec
 profile mismatch stop dispatch.
 
-Owner defaults are exact: Master uses `gpt-5.6-sol` / `high` / `default` with `owner-default:master`; an ordinary Worker uses
+Built-in owner defaults are exact: Master uses `gpt-5.6-sol` / `high` / `default` with `owner-default:master`; an ordinary Worker uses
 `gpt-5.6-luna` / `max` / `priority` with `owner-default:ordinary-worker`; a complex Worker also uses `gpt-5.6-luna` / `max` /
-`priority` with `owner-default:complex-worker`. Master classifies each Worker task as ordinary or complex before publication.
-The prior complex-worker profile is compatibility-only for digest-preserved terminal or `GRANDFATHER` records; every `NEW` or
-`REVISE` assignment uses the current Luna profile. The launcher must honor all three persisted routing fields exactly; if it
-cannot, dispatch stops instead of substituting a model, effort, or tier.
+`priority` with `owner-default:complex-worker`. A project may explicitly declare another supported active profile in
+`model_policy.owner_defaults`: Master may use either the built-in Sol profile or `gpt-5.6-luna` / `max` / `priority`, while Workers
+use the Luna profile; each `selection_reason` remains bound to its owning role. Master classifies each Worker task as ordinary or
+complex before publication. The prior complex-worker profile is compatibility-only for digest-preserved terminal or `GRANDFATHER`
+records; every `NEW` or `REVISE` assignment uses the project-declared profile. The launcher must honor all three persisted routing
+fields exactly; if it cannot, dispatch stops instead of substituting a model, effort, or tier.
 
 The persisted model `service_tier` is the requested scheduler profile, not a claim about the unobservable effective tier. Dispatch stops
 when the launcher can prove it cannot honor priority. It is never authorization `route` or `provider`, and it grants no external

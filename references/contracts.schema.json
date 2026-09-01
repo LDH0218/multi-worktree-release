@@ -109,6 +109,15 @@
           }
         },
         {
+          "description": "A project may explicitly select the supported Luna profile for its Master role.",
+          "properties": {
+            "model": {"const": "gpt-5.6-luna"},
+            "reasoning_effort": {"const": "max"},
+            "service_tier": {"const": "priority"},
+            "selection_reason": {"const": "owner-default:master"}
+          }
+        },
+        {
           "properties": {
             "model": {"const": "gpt-5.6-luna"},
             "reasoning_effort": {"const": "max"},

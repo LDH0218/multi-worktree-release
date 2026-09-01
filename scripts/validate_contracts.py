@@ -114,8 +114,22 @@ LEGACY_MODEL_PROFILES = tuple(
     LEGACY_MODEL_POLICY_OWNER_DEFAULTS[owner]
     for owner in ("complex_worker",)
 )
-MODEL_REASON_TO_OWNER = {
-    profile["selection_reason"]: owner for owner, profile in MODEL_OWNER_DEFAULTS.items()
+PROJECT_MODEL_PROFILE_OPTIONS = {
+    "owner-default:master": (
+        MODEL_OWNER_DEFAULTS["master"],
+        {
+            "model": "gpt-5.6-luna",
+            "reasoning_effort": "max",
+            "service_tier": "priority",
+            "selection_reason": "owner-default:master",
+        },
+    ),
+    "owner-default:ordinary-worker": (
+        MODEL_OWNER_DEFAULTS["ordinary_worker"],
+    ),
+    "owner-default:complex-worker": (
+        MODEL_OWNER_DEFAULTS["complex_worker"],
+    ),
 }
 READ_ONLY_TASK_CLASS_RE = re.compile(r"^independent-read-only(?:-|$)")
 RELEASE_TASK_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
@@ -447,13 +461,11 @@ def validate_model_profile(value: Any, schema: dict[str, Any], label: str = "mod
         if not isinstance(value[field], str) or not value[field]:
             raise ContractError(f"{label}.{field} must be a non-empty string")
     reason = value["selection_reason"]
-    owner = MODEL_REASON_TO_OWNER.get(reason)
-    if owner is not None and value == MODEL_OWNER_DEFAULTS[owner]:
+    if any(value == profile for profile in PROJECT_MODEL_PROFILE_OPTIONS.get(reason, ())):
         return
     if allow_legacy and any(value == profile for profile in LEGACY_MODEL_PROFILES):
         return
-    if owner is None or value != MODEL_OWNER_DEFAULTS[owner]:
-        raise ContractError(f"{label} uses an unsupported model/reasoning/service-tier combination")
+    raise ContractError(f"{label} uses an unsupported model/reasoning/service-tier combination")
 
 
 def validate_model_policy(value: Any, schema: dict[str, Any], plan_revision: int) -> None:
@@ -475,9 +487,6 @@ def validate_model_policy(value: Any, schema: dict[str, Any], plan_revision: int
         validate_model_profile(
             defaults[owner], schema, f"model_policy.owner_defaults.{owner}", allow_legacy=True,
         )
-    if (defaults != MODEL_OWNER_DEFAULTS
-            and defaults != LEGACY_MODEL_POLICY_OWNER_DEFAULTS):
-        raise ContractError("model_policy owner defaults drifted from current or legacy policy")
 
 
 def legacy_model_profile_allowed(entry: dict[str, Any], historical: bool = False) -> bool:
@@ -4373,6 +4382,24 @@ class ContractScenarios(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "unsupported model/reasoning/service-tier combination"):
             validate_model_profile(legacy_complex, self.schema)
         validate_model_profile(legacy_complex, self.schema, allow_legacy=True)
+        project_master = {
+            "model": "gpt-5.6-luna",
+            "reasoning_effort": "max",
+            "service_tier": "priority",
+            "selection_reason": "owner-default:master",
+        }
+        validate_model_profile(project_master, self.schema)
+        project_policy = make_model_policy()
+        project_policy["owner_defaults"] = {
+            "master": copy.deepcopy(project_master),
+            "ordinary_worker": copy.deepcopy(MODEL_OWNER_DEFAULTS["ordinary_worker"]),
+            "complex_worker": copy.deepcopy(MODEL_OWNER_DEFAULTS["complex_worker"]),
+        }
+        validate_model_policy(project_policy, self.schema, plan_revision=1)
+        wrong_owner = copy.deepcopy(MODEL_OWNER_DEFAULTS["master"])
+        wrong_owner["selection_reason"] = "owner-default:ordinary-worker"
+        with self.assertRaisesRegex(ContractError, "unsupported model/reasoning/service-tier combination"):
+            validate_model_profile(wrong_owner, self.schema)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             legacy_root = root / "legacy"

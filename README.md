@@ -187,6 +187,12 @@ task_id + task_spec_revision + source_thread_id
 
 Skill 中的授权字段是协作治理契约，不替代 GitHub、云平台或生产系统自身的访问控制。
 
+### 模型策略
+
+Skill 提供受支持的模型组合，但项目可以在自己的 `model_policy.owner_defaults` 中声明角色默认值。当前内置默认值是 Master
+使用 `gpt-5.6-sol` / `high` / `default`，Worker 使用 `gpt-5.6-luna` / `max` / `priority`；项目也可以为 Master 声明受支持的
+Luna/max/priority 组合。`selection_reason` 必须与角色匹配，模型 profile 与授权 envelope 的 route/provider 完全独立。
+
 ## 仓库结构
 
 ```text

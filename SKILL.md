@@ -193,13 +193,15 @@ executable message.
   every `NEW` or `REVISE` Task Spec and matching Plan entry uses one identical exact `model_profile`; older digest-preserved
   records below the fence may omit it. Changing a profile requires a higher Task Spec revision/digest. Stop dispatch if the
   launcher cannot honor the persisted profile.
-- Use only these owner defaults: Master `gpt-5.6-sol`/`high`/`default` with `owner-default:master`; ordinary Worker
+- Use these built-in owner defaults: Master `gpt-5.6-sol`/`high`/`default` with `owner-default:master`; ordinary Worker
   `gpt-5.6-luna`/`max`/`priority` with `owner-default:ordinary-worker`; complex Worker
-  `gpt-5.6-luna`/`max`/`priority` with `owner-default:complex-worker`. The prior complex-worker profile is compatibility-only
-  for digest-preserved terminal or `GRANDFATHER` records; every `NEW` or `REVISE` assignment uses the current Luna profile.
-  The persisted model `service_tier` is the requested scheduler profile, not a claim about the unobservable effective tier; dispatch stops
-  when the launcher can prove it cannot honor priority. It is never authorization `route`/`provider`, and grants no external
-  call, execution, publication, destructive action, synchronization, or scope expansion.
+  `gpt-5.6-luna`/`max`/`priority` with `owner-default:complex-worker`. A project may declare a different supported active profile
+  in `model_policy.owner_defaults`: Master may select either the built-in Sol profile or `gpt-5.6-luna`/`max`/`priority`, while
+  Workers use the Luna profile. The `selection_reason` must still identify the owning role, and the prior complex-worker Sol
+  profile is compatibility-only for digest-preserved terminal or `GRANDFATHER` records; every `NEW` or `REVISE` assignment uses
+  the project-declared profile. The persisted model `service_tier` is the requested scheduler profile, not a claim about the
+  unobservable effective tier; dispatch stops when the launcher can prove it cannot honor priority. It is never authorization
+  `route`/`provider`, and grants no external call, execution, publication, destructive action, synchronization, or scope expansion.
 - Keep semantic `plan_revision` separate from `record_revision`, which increments on every persisted state update. Preserve the
   state directory as user-owned material whether repository policy tracks it or keeps it local.
 - Use the schema's strict timezone-bearing RFC 3339 grammar for every timestamp: literal `T`, seconds, and `Z` or a colonized
