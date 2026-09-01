@@ -5,6 +5,30 @@ identity, state, revision, and authorization fields are never omitted; record ex
 when denied or empty. Omit only fields that the canonical contract explicitly marks optional. Never invent values or authority.
 The machine field and enum authority is [contracts.schema.json](contracts.schema.json); these templates must remain equivalent.
 
+## FAST eligibility gate
+
+Use this human-readable preflight before a FAST change; it is not a new persisted machine record. FAST is eligible only when
+all checks pass:
+
+```text
+FAST preflight
+- One current task/worktree, no independent parallel responsibility or extra worktree: <PASS/FAIL>
+- Relevant Card in the current worktree is absent or IDLE: <PASS/FAIL>
+- Non-IDLE Card, active Dispatch assignment, or competing durable role binding in the current scope: <NONE/PRESENT>
+- Every intended change is owned by the current role: <PASS/FAIL>
+- Master does not modify Worker-owned business paths: <PASS/FAIL/NOT_APPLICABLE>
+- Risk and verification remain bounded and local: <PASS/FAIL>
+Decision: FAST | STRICT | STOP
+```
+
+Any non-IDLE Card, active Dispatch assignment, or competing durable role binding makes FAST ineligible; choose `STRICT` or
+stop. FAST may modify only current-role-owned paths. Unknown or ambiguous ownership, including a Master request to change
+Worker-owned business paths from the Master worktree, requires `STRICT`.
+
+Terminology boundary: Protocol v2 adoption/binding prototypes are experimental and unrouted. Authorization envelope v2 and
+Candidate evidence schema v2 are formal components of the current v1-authoritative STRICT release flow. This is human-readable
+terminology only; it does not change machine field names, v1 state transitions, or prototype routing.
+
 ## Durable role binding evidence
 
 This is a human-readable Master discovery/rotation/retirement projection, not a new Schema record or role registry. Use the

@@ -15,6 +15,13 @@ Master/Worker setup. **FAST** requires all of these conditions:
 
 - One current Codex task and work directory can complete the change, with no independent
   parallel responsibility or extra worktree.
+- The relevant Card for the current worktree must be absent or `IDLE`, and that
+  worktree/role must have no active Dispatch assignment or competing durable role
+  binding. Any non-`IDLE` Card, active Dispatch assignment, or competing durable
+  role binding makes FAST ineligible; enter `STRICT` or stop.
+- Every path FAST would modify must be clearly owned by the current role. A Master
+  in the Master worktree must not modify Worker-owned business paths; unknown or
+  ambiguous ownership requires `STRICT`.
 - The change has no governance, protocol, Schema, state-machine, authorization,
   security-boundary, persistence, release-semantics, irreversible migration, complex
   production, or long-recovery impact.
@@ -35,8 +42,11 @@ adoption, or Operation Receipt.
 FAST never grants push, publication, external-call, execution/job, destructive, synchronization,
 or scope-expansion authority. Request the exact external mutation immediately before it unless
 already explicitly authorized; local tests are not `create_execution` authority. v1 remains
-authoritative; v2 adoption/binding modules remain experimental and unrouted. FAST adds no v2
-CLI, cycle fence, Schema, validator, runtime state, migration, or compatibility behavior, and
+authoritative. Protocol v2 adoption/binding prototypes are experimental and unrouted.
+Authorization envelope v2 and Candidate evidence schema v2 are formal components of the current
+v1-authoritative STRICT release flow. This distinction is human-readable terminology only; it
+does not change machine field names, v1 state transitions, or prototype routing. FAST adds no
+v2 CLI, cycle fence, Schema, validator, runtime state, migration, or compatibility behavior, and
 is not a generic coding mode.
 
 - **Audit:** inspect the current repository, worktrees, branches, responsibilities, task state, and release process. Make no

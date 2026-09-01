@@ -26,6 +26,10 @@
 需要并行协作、额外工作目录、协议或权限变更、持久状态、发布或生产操作、不可逆修改、长期恢复，或分类不确定时，升级到现有严格流程。
 FAST 不改变外部操作权限，也不会让用户承担内部协调记录；普通无关的单分支编码请求不会因此触发本 Skill。
 
+FAST 入口还要通过工作树锁和所有权预检：当前工作树的相关 Card 必须不存在或为 `IDLE`；任何非 `IDLE` Card、活动 Dispatch assignment 或竞争性 durable role binding 都使 FAST 失效，必须进入 `STRICT` 或停止。FAST 只能修改当前角色拥有的路径；Master 在 Master 工作树不得修改 Worker-owned business paths；所有权未知或有歧义时必须进入 `STRICT`。
+
+术语边界：Protocol v2 adoption/binding prototypes 是实验性且未路由的原型（experimental and unrouted）；Authorization envelope v2 与 Candidate evidence schema v2 是当前 v1-authoritative STRICT 发布流程的正式组件（formal components of the current v1-authoritative STRICT release flow）。这里的“正式”只描述当前流程契约位置，不改变机器字段名、v1 状态转换或原型路由。
+
 轻量 FAST 的采用结论、升级边界和完整 v2 停止条件见 [ROADMAP.md](ROADMAP.md)。
 
 ## 它提供什么
@@ -198,8 +202,8 @@ Skill 中的授权字段是协作治理契约，不替代 GitHub、云平台或�
 │   └── templates.md                 # Dispatch Plan、任务卡与 handoff 模板
 └── scripts/
     ├── validate_contracts.py         # 契约一致性校验器
-    ├── v2_adoption.py                # 非规范 v2 adoption 实验原型
-    ├── v2_fast_binding.py            # 非规范 FAST 身份绑定实验原型
+    ├── v2_adoption.py                # Protocol v2 adoption 实验性、未路由原型
+    ├── v2_fast_binding.py            # Protocol v2 binding 实验性、未路由原型
     ├── test_v2_adoption.py           # adoption 原型离线测试
     └── test_v2_fast_binding.py       # FAST binding 原型离线测试
 ```

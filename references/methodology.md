@@ -36,6 +36,25 @@ new role has durable contract ownership, an independent change cadence, and litt
 Executable messages follow a star topology. Workers may exchange discovery evidence but route all executable cross-layer
 instructions, baselines, synchronization, and rework through Master.
 
+## FAST and STRICT selection
+
+Classify FAST before creating a Dispatch Plan or starting the heavier Master/Worker workflow. FAST is eligible only when one
+current task and worktree can complete a bounded, low-risk change with clear local verification and no independent parallel
+responsibility or extra worktree. The current worktree's relevant Card must be absent or `IDLE`, and that worktree/role must
+have no active Dispatch assignment or competing durable role binding. Any non-`IDLE` Card, active Dispatch assignment, or
+competing durable role binding makes FAST ineligible; enter `STRICT` or stop.
+
+FAST may modify only paths clearly owned by the current role. A Master working in the Master worktree must not modify
+Worker-owned business paths. Unknown or ambiguous ownership requires `STRICT`; ownership must not be guessed from a convenient
+file location or conversation label. Governance, protocol, Schema, state-machine, authorization, persistence, release, security,
+irreversible, production, long-recovery, or otherwise uncertain work also enters `STRICT` before implementation.
+
+FAST never creates or changes a Dispatch Plan, Task Spec, Card, extra worktree, cycle fence, repository adoption record, or
+Operation Receipt, and it never grants external, execution, publication, destructive, synchronization, or scope-expansion
+authority. Terminology boundary: Protocol v2 adoption/binding prototypes are experimental and unrouted. Authorization envelope v2
+and Candidate evidence schema v2 are formal components of the current v1-authoritative STRICT release flow. This distinction is
+human-readable terminology only; it does not change machine field names, v1 state transitions, or prototype routing.
+
 ## Durable role bindings
 
 A durable role binding is one governance tuple: `responsibility role → current visible conversation → retained worktree →
