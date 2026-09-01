@@ -76,16 +76,22 @@ branch`. Each long-lived role has exactly one current visible conversation and o
 pair cannot be concurrently claimed by another role or conversation. This is a derived v1 invariant, not a new machine record:
 Master proves it from the task list, existing Dispatch Plan/Task Specs/Cards, and read-only Git/worktree inventory.
 
-Master owns the binding lifecycle and records its evidence in the existing discovery, task, handoff, or rotation projections:
+Master is the sole lifecycle owner for persistent role bindings and conversation create, rotate, and archive decisions. It records
+evidence in the existing discovery, task, handoff, or rotation projections. The complete normative procedure is
+[conversation-rotation-sop.md](conversation-rotation-sop.md); it adds no role registry or machine state.
 
 - **Create:** inventory current roles and visible conversations, then verify the target worktree and branch are available, their
   full HEAD/status and preserved material are known, and no other role, task, card, or live binding claims them. Bind the role,
   conversation generation, absolute worktree, branch, baseline, and relevant Plan/Task/Card identities before publishing work.
   Creating a worktree or branch follows its own explicit repository authority.
-- **Rotate:** create and verify the successor conversation first, with the same role, retained worktree, and branch. Its
-  read-only bootstrap must confirm the exact path, branch, HEAD/status, preserved material, Plan/Task/Card identities, and
-  current binding. Keep the predecessor visible until that check passes; only then archive the predecessor conversation. This
-  archive is history management, not worktree or branch retirement, and rotation never copies uncommitted files.
+- **Rotate:** create a blank successor first by default, with the same role, retained worktree, branch, and incremented generation;
+  only when the predecessor history is genuinely short and forking is demonstrably necessary may Master use a fork, and Master
+  must record that reason. In either case, complete the predecessor's structured handoff and require the successor's read-only
+  bootstrap plus explicit confirmation. Keep the predecessor visible until that confirmation passes; only then archive the
+  predecessor. The blank default inherits no chat context, the fork exception inherits no authority, this archive is history
+  management rather than worktree or branch retirement, and rotation never copies uncommitted files.
+  Rotation is triggered only by context becoming too long, an explicit user request, or persistent risk; task completion,
+  convenience, or an ordinary pause alone are not triggers.
 - **Duplicate:** if two visible conversations claim one role or retained pair, stop dispatch immediately and keep it stopped
   until Master reconciles the binding. Archive an unassigned duplicate only after proving it has no Task Spec, Card, changed or
   untracked material, or live binding. Mark its worktree as awaiting an explicit cleanup decision; never delete it
@@ -973,16 +979,26 @@ by that Worker requires an explicit rework revision.
 
 ## Rotation and recovery
 
-A new conversation generation performs a read-only bootstrap and does not inherit implementation, runtime, publication,
-destructive, synchronization, or scope-expansion authorization. For a durable binding, Master creates the successor first and
-keeps the predecessor visible until the successor verifies the role, generation, exact worktree, branch, HEAD/status, preserved
-material, Plan/Task/Card identities, and current binding. Only after that evidence is complete may Master archive the
-predecessor conversation. The archive is not a worktree or branch retirement.
+A new conversation generation performs the read-only bootstrap specified by the single normative
+[Conversation Rotation SOP](conversation-rotation-sop.md). It is a blank successor with no inherited chat context by default and
+does not inherit implementation, runtime, publication, destructive, synchronization, or scope-expansion authorization. Only when
+the predecessor history is genuinely short and forking is demonstrably necessary may Master use a fork, with the reason recorded.
+Master verifies current durable state, creates the successor with the same role, retained worktree, branch, and incremented
+generation, completes the predecessor's structured handoff, and waits for explicit successor confirmation before archiving only
+the predecessor.
+The successor recovers facts from persisted records, not chat memory. Rotation preserves Task ID, Task Spec revision/digest, Plan
+identity, and Git worktree/branch/HEAD identity; it never copies uncommitted files, deletes history, or lets task completion alone
+trigger archive. The blank successor is mandatory by default; only when the predecessor history is genuinely short and forking is
+demonstrably necessary may Master use a fork, with the reason recorded. Rotation triggers are limited to context becoming too long,
+an explicit user request, or persistent risk; convenience and an ordinary pause are not triggers.
 
 A rotation handoff records the current plan revision and task revisions and digests, dispatch waves, all worktree SHAs and
 states, patch-equivalent historical forks, active contracts and inputs, latest gates, preserved material, unfinished work,
 blockers and recovery owners, and actions requiring renewed authority. The new generation must not resume an affected task
 under an older plan or task revision or a mismatched digest.
+
+The read-only failure checks are wrong HEAD, wrong worktree, duplicate visible conversation, successor not confirmed, and Worker
+self-archive. Each stops before archive, preserves the predecessor and retained worktree, and leaves reconciliation to Master.
 
 If an old conversation disappears:
 

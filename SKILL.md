@@ -112,6 +112,11 @@ For example: `Master-1.0` or `协议基础设施-1.1`.
 - Treat the title as a human-readable UI projection only. The persisted Dispatch Plan, Task Spec, and state card remain
   authoritative for identity, state, scope, and authorization.
 
+Read the single normative lifecycle procedure for persistent conversations at
+[references/conversation-rotation-sop.md](references/conversation-rotation-sop.md) when creating, rotating, recovering, or
+archiving a persistent conversation. It is a human procedure over the existing Plan, Task Specs, Cards, handoffs, and
+Git/worktree evidence; it adds no role registry, machine state, or authority.
+
 ## Durable role bindings
 
 A durable role binding is one tuple: `responsibility role → current visible conversation → retained worktree → branch`. One
@@ -120,14 +125,22 @@ owned by another role or conversation. This is a governance invariant derived fr
 Task Specs, Worker/Master Cards, and read-only Git/worktree inventory. Do not add a role registry or another machine record in
 v1.
 
+Master is the sole lifecycle owner for persistent role bindings and conversation create, rotate, and archive decisions. Workers
+may report that rotation is needed and provide read-only evidence, but may not create, bind, or archive conversations.
+
 - **Create:** Master first inventories roles, visible conversations, worktrees, branches, cards, plans, dirty/untracked
   material, and baselines. It may bind a new role only after the target worktree and branch are unambiguously available and
   the binding evidence records the role, generation, conversation, absolute worktree, branch, full HEAD, status, and relevant
   Plan/Task/Card identities. Worktree or branch creation follows its own explicit repository authority.
 - **Rotate:** Master creates the successor conversation with the same role, retained worktree, and branch, then waits for its
-  read-only bootstrap to verify the exact path, branch, HEAD/status, Plan/Task/Card identities, and preserved material. Keep
-  the predecessor visible until that verification succeeds; only then archive the predecessor. Archiving conversation history
-  is not worktree or branch retirement, and rotation never copies uncommitted files or deletes either ref.
+  read-only bootstrap to verify the exact path, branch, HEAD/status, Plan/Task/Card identities, and preserved material. The
+  successor is blank by default and receives no copied chat context; only when the predecessor history is genuinely short and
+  forking is demonstrably necessary may Master use a fork, recording that reason. Either path requires the predecessor's
+  structured handoff and explicit successor confirmation before archiving only the predecessor. Keep the predecessor visible
+  until that confirmation succeeds. Rotation is triggered only by context becoming too long, an explicit user request, or a
+  persistent risk; task completion, convenience, or an ordinary pause alone are not triggers. Archiving conversation history is
+  not worktree or branch retirement, and rotation never copies uncommitted files or deletes either ref. Rotation preserves Task
+  ID, Task Spec revision/digest, Plan identity, and Git worktree/branch/HEAD; a fork does not inherit authority.
 - **Duplicate:** If two visible conversations claim one role or retained worktree, stop dispatch for the affected binding
   immediately. Master may archive an unassigned duplicate only after proving it has no Task Spec, Worker/Master Card, changes
   or untracked material, and no live binding. Mark its worktree as awaiting an explicit cleanup decision; never delete it

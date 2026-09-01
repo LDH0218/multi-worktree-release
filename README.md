@@ -139,6 +139,20 @@ $multi-worktree-release 检查所有 Worker 的 handoff、验证证据和工作�
 长期责任角色保持稳定；首次对话从 `1.0` 开始，轮换时递增代次。标题不编码可变的 status、branch、worktree、task ID、
 model profile 或 authorization；标题仅是人类可读的界面投影，持久化 Dispatch Plan、Task Spec 和状态卡才是权威记录。
 
+## 对话轮换
+
+持久对话轮换遵循[《Conversation Rotation SOP》](references/conversation-rotation-sop.md)，由 Master 独立负责角色绑定、创建、轮换和归档决策。
+默认流程是“空白 successor + 结构化 handoff”：空白 successor 是强制默认；只有 predecessor history genuinely short 且 fork
+demonstrably necessary 时，Master 才可使用 fork，并在 handoff 或决策中记录理由。Master 先核对持久状态，再创建同一角色、worktree 和
+branch 的下一代 successor，完成 predecessor handoff，等待 successor 完成只读核对并明确确认，最后只归档 predecessor。默认的 blank
+successor 不继承聊天上下文，必须从持久化记录恢复事实；fork 例外也不继承任何新的实现、发布、破坏性、同步或扩展范围授权；Worker
+可以报告需要轮换，但不能自行创建、绑定或归档对话。
+
+轮换保持 Task ID、Task Spec revision/digest、Plan 身份以及 Git worktree/branch/HEAD 身份，不复制未提交文件，不删除 worktree、branch、
+Task Spec、Card、commit 或其他历史。轮换触发仅限 context too long、explicit user request 或 persistent risk；task completion、convenience
+和 ordinary pause 都不是触发条件。错误 HEAD、错误 worktree、重复可见对话、未确认 successor 或 Worker 自归档请求都必须停止并保留
+predecessor 与工作树。
+
 ## 持久状态放在哪里
 
 默认状态文件位于 Master 工作树：
@@ -214,7 +228,8 @@ Luna/max/priority 组合。`selection_reason` 必须与角色匹配，模型 pro
 ├── references/
 │   ├── contracts.schema.json        # 机器可读契约 Schema
 │   ├── methodology.md               # 完整方法与治理规则
-│   └── templates.md                 # Dispatch Plan、任务卡与 handoff 模板
+│   ├── templates.md                 # Dispatch Plan、任务卡与 handoff 模板
+│   └── conversation-rotation-sop.md # 持久对话轮换的唯一规范 SOP
 └── scripts/
     ├── validate_contracts.py         # 契约一致性校验器
     ├── v2_adoption.py                # Protocol v2 adoption 实验性、未路由原型

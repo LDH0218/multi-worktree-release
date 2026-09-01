@@ -64,13 +64,85 @@ Master preflight
 Decision and evidence: <MASTER_DECISION / READ_ONLY_EVIDENCE / RECOVERY_OWNER>
 ```
 
-For `ROTATE`, create and verify the successor conversation with the same role, worktree, and branch before archiving the
-predecessor. Keep the predecessor visible until its successor's read-only bootstrap passes; then archive only the predecessor
-conversation. Conversation archive is history management, not worktree or branch retirement. For `DUPLICATE_RECONCILIATION`,
+For `ROTATE`, create a blank successor by default with the same role, retained worktree, branch, and incremented generation. Only
+when the predecessor history is genuinely short and forking is demonstrably necessary may Master use a fork, and the handoff or
+decision must record that reason. In either case, complete the predecessor's structured handoff and require the successor's
+read-only bootstrap and explicit confirmation before archiving the predecessor. Keep the predecessor visible until that
+confirmation passes; then archive only the predecessor conversation. Rotation is triggered only by context becoming too long, an
+explicit user request, or persistent risk; task completion, convenience, and an ordinary pause alone are not triggers.
+Conversation archive is history management, not worktree or branch retirement. For `DUPLICATE_RECONCILIATION`,
 stop dispatch immediately; archive an unassigned duplicate only after proving it has no Task Spec, Card, changed or untracked
 material, or live binding, and mark its worktree as awaiting an explicit cleanup decision. For `RETIRE`, the reason must be a
 topology adjustment, role retirement, or major migration; reconcile active work and preserved material first. Worktree or branch
 deletion is never implied and needs separate explicit destructive authorization.
+
+The complete normative sequence is [conversation-rotation-sop.md](conversation-rotation-sop.md). The templates below are
+human-readable projections only: Master owns every lifecycle decision, the successor is blank and read-only by default, a fork is
+only the documented short-history/genuine-necessity exception, and the predecessor stays visible until explicit successor
+confirmation. The mode and trigger labels below are prompts, not new persisted machine states.
+
+## Conversation rotation SOP
+
+### Master rotation handoff
+
+```text
+Master rotation handoff
+Action: ROTATE
+Role: <ROLE>
+Predecessor conversation: <TASK/TITLE/OLD_GENERATION>
+Successor conversation: <TASK/TITLE/NEW_GENERATION_OR_TARGET>
+Retained worktree: <ABSOLUTE_PATH>
+Branch: <BRANCH>
+HEAD and status: <FULL_SHA / CLEAN_OR_PRESERVED_DETAILS>
+Dispatch Plan: <PATH / RELEASE_TASK_ID / PLAN_REVISION / RECORD_REVISION / PLAN_DIGEST>
+Task Specs: <TASK_ID / TASK_SPEC_REVISION / TASK_SPEC_DIGEST / PATH>
+Worker/Master Cards and handoffs: <IDENTITIES / STATES / REVISIONS / SHAS>
+Preserved material, blockers, unfinished work, and latest gates: <DETAILS_OR_NONE>
+
+Blank successor with no inherited chat context or authority (required for BLANK_DEFAULT): <true / documented fork exception>
+Successor mode: BLANK_DEFAULT | FORK_EXCEPTION
+Fork exception reason (required only for short history + genuine necessity): <DETAILS_OR_NOT_APPLICABLE>
+Rotation trigger: CONTEXT_TOO_LONG | EXPLICIT_USER_REQUEST | PERSISTENT_RISK
+Same role, retained worktree, branch, and incremented generation: <PASS/FAIL>
+Successor read-only bootstrap and explicit confirmation required: true
+Predecessor remains visible until confirmation: true
+Archive target after confirmation: predecessor conversation only
+Master decision: <PROCEED_TO_SUCCESSOR_BOOTSTRAP / STOP_AND_PRESERVE>
+```
+
+### Successor read-only confirmation
+
+```text
+Successor read-only confirmation
+Role and generation: <ROLE / NEW_GENERATION>
+Predecessor remains visible: <PASS/FAIL>
+Blank successor with no inherited chat context: <PASS/FAIL>
+Absolute worktree and branch: <PATH / BRANCH>
+HEAD and status: <FULL_SHA / CLEAN_OR_PRESERVED_DETAILS>
+One-to-one role/worktree binding: <PASS/FAIL>
+Plan, Task Spec, Card, and handoff identities/digests: <PASS/FAIL / DETAILS>
+Preserved dirty or untracked material: <PATHS_OR_NONE>
+No copied files, synchronization, reset, archive, or scope expansion performed: <PASS/FAIL>
+
+Confirmation: <EXPLICIT PASS — MASTER MAY ARCHIVE PREDECESSOR / STOP_AND_PRESERVE>
+Unresolved mismatch or blocker: <NONE_OR_DETAILS>
+```
+
+### Rotation failure-stop report
+
+```text
+Conversation rotation failure-stop report
+Check: <WRONG_HEAD / WRONG_WORKTREE / DUPLICATE_VISIBLE_CONVERSATION / SUCCESSOR_NOT_CONFIRMED / WORKER_SELF_ARCHIVE / OTHER>
+Actual: <OBSERVED_FACT>
+Expected: <RECORDED_FACT>
+Evidence: <READ_ONLY_COMMAND_OR_RECORD>
+Required result: STOP_AND_PRESERVE
+- Predecessor remains visible: true
+- Retained worktree and branch remain untouched: true
+- Task/Plan/Card records remain unchanged: true
+- Archive, deletion, reset, synchronization, and scope expansion performed: none
+Recovery owner and next decision: <MASTER / RECONCILE / REVISE / SUPERSEDE / CANCEL / TAKEOVER>
+```
 
 ## Task Dependency and Dispatch Plan
 
@@ -383,6 +455,10 @@ For example: `Master-1.0` or `协议基础设施-1.1`.
 ## New conversation read-only bootstrap
 
 ```text
+This is a new conversation generation. The default is a blank successor with no inherited chat context or implementation, runtime,
+publication, destructive, synchronization, or scope-expansion authority. Only when the predecessor history is genuinely short and
+forking is demonstrably necessary may Master document a fork exception and its reason; the exception still inherits no authority.
+Recover all facts from the persisted records and read-only Git/worktree checks.
 You are the <ROLE>-<GENERATION> task in project context <PROJECT>.
 Use only the absolute worktree <ABSOLUTE_WORKTREE> on branch <BRANCH>; expected HEAD is <FULL_SHA>.
 
@@ -750,7 +826,7 @@ Authorization
 - Publication, deletion, scope expansion, and synchronization: not inherited.
 
 Read all repository governance and the state card. Verify path, branch, HEAD, status, the one-to-one role binding, and this
-handoff without modification. Keep the predecessor visible until this successor bootstrap passes; only Master may then archive
-the predecessor. On mismatch, report and stop. On agreement, update current facts and wait; do not resume work or external
+handoff without modification. Keep the predecessor visible until this successor bootstrap and explicit confirmation pass; only
+Master may then archive the predecessor. On mismatch, report and stop. On agreement, update current facts and wait; do not resume work or external
 authority yourself.
 ```
