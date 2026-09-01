@@ -130,6 +130,15 @@ $multi-worktree-release 检查所有 Worker 的 handoff、验证证据和工作�
 - **Operate**：派发、跟踪、恢复、验收和集成多任务交付；
 - **Review**：检查流程契约、模板和状态是否互相一致。
 
+## 持久对话命名
+
+在项目上下文内，每个持久 Master 或 Worker 对话使用 `<responsibility-role>-<conversation-generation>` 作为标题，例如
+`Master-1.0`、`协议基础设施-1.1`。项目名或 Skill 名（包括项目简称 `MWR`）属于项目上下文和持久化记录，不重复放在标题中；
+全局或无项目上下文的视图不自行添加项目名前缀，除非用户明确要求特殊命名约定。
+
+长期责任角色保持稳定；首次对话从 `1.0` 开始，轮换时递增代次。标题不编码可变的 status、branch、worktree、task ID、
+model profile 或 authorization；标题仅是人类可读的界面投影，持久化 Dispatch Plan、Task Spec 和状态卡才是权威记录。
+
 ## 持久状态放在哪里
 
 默认状态文件位于 Master 工作树：

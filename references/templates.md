@@ -364,10 +364,26 @@ deterministic, no-overwrite atomic bytes; equal bytes are idempotent, while conf
 closed. Closeout discovers one fixed sidecar per distinct Plan worktree when explicit inputs are omitted, and explicit inputs
 must reconcile exactly to the same worktree set before any archive write.
 
+## Persistent conversation naming
+
+Within the project context, name each persistent Master or Worker conversation
+`<responsibility-role>-<conversation-generation>`.
+For example: `Master-1.0` or `协议基础设施-1.1`.
+
+- Keep the long-lived responsibility role stable. The project or Skill name, including the project abbreviation `MWR`, belongs
+  in project context and persisted records rather than the title. Use a specific role rather than a temporary task description,
+  and omit the generic `Worker` label when the role is already clear.
+- Start the first conversation for a role at `1.0`. When rotating that role to a new conversation, increment the generation
+  suffix to `1.1`, `1.2`, and so on while reusing the role's worktree and branch.
+- Do not invent a project prefix in a global or unscoped view unless the user explicitly requests a special naming convention.
+- Do not encode mutable status, branch, worktree, task ID, model profile, or authorization in the title.
+- Treat the title as a human-readable UI projection only. The persisted Dispatch Plan, Task Spec, and state card remain
+  authoritative for identity, state, scope, and authorization.
+
 ## New conversation read-only bootstrap
 
 ```text
-You are <PROJECT>'s <ROLE>-<GENERATION> task.
+You are the <ROLE>-<GENERATION> task in project context <PROJECT>.
 Use only the absolute worktree <ABSOLUTE_WORKTREE> on branch <BRANCH>; expected HEAD is <FULL_SHA>.
 
 Read the repository governance, architecture index if present, WORKTREE_SCOPE.md, and WORKTREE_TASK.md completely.

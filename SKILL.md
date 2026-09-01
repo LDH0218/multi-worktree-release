@@ -98,13 +98,16 @@ change requires Master to publish a superseding Task Spec and recompute all depe
 
 ## Name persistent conversations
 
-Name each persistent Master or Worker conversation `<project-short-name>｜<responsibility-role>-<conversation-generation>`.
-For example: `MWR｜Master-1.0` or `MWR｜授权模型-1.0`.
+Within the project context, name each persistent Master or Worker conversation
+`<responsibility-role>-<conversation-generation>`.
+For example: `Master-1.0` or `协议基础设施-1.1`.
 
-- Keep the project prefix and long-lived responsibility role stable. Use a specific role rather than a temporary task
-  description, and omit the generic `Worker` label when the role is already clear.
+- Keep the long-lived responsibility role stable. The project or Skill name, including the project abbreviation `MWR`, belongs
+  in project context and persisted records rather than the title. Use a specific role rather than a temporary task description,
+  and omit the generic `Worker` label when the role is already clear.
 - Start the first conversation for a role at `1.0`. When rotating that role to a new conversation, increment the generation
   suffix to `1.1`, `1.2`, and so on while reusing the role's worktree and branch.
+- Do not invent a project prefix in a global or unscoped view unless the user explicitly requests a special naming convention.
 - Do not encode mutable status, branch, worktree, task ID, model profile, or authorization in the title.
 - Treat the title as a human-readable UI projection only. The persisted Dispatch Plan, Task Spec, and state card remain
   authoritative for identity, state, scope, and authorization.
