@@ -12,6 +12,42 @@ The MWR repository's own maintenance follows the existing [Task Lifecycle SOP](t
 security, Git, CI, and production authorities; transporting this document or a handoff does not transfer
 them.
 
+## Trigger, owner, inputs, evidence, and outcomes
+
+**Triggers.** Use this SOP before enabling MWR in a project, before creating its first pilot
+assignment, after a material change to the source pin, ownership, state-root policy, or authority
+boundary, and before expanding beyond a bounded pilot. Use it again when an adoption check fails or
+the project is being exited.
+
+**Owner.** The adopting project's owner or Master owns the adoption decision and its evidence. MWR's
+Master owns MWR self-maintenance. Workers and auditors may collect or report facts within their
+assignments but may not bind roles, create authority, approve adoption, or archive or delete material.
+
+**Required inputs.** Use the current project root, branch/worktree and full `HEAD`/status; the existing
+task, role, conversation, Plan/Card, dependency, recovery, retention, CI/release, and authorization
+boundaries; the exact pinned MWR source and compatibility files; the proposed pilot scope; and the
+owner's production, external, destructive, and v2-routing decisions. Preserve any dirty or untracked
+material before inspection.
+
+**Retained evidence.** Keep the source pin, project/role/worktree map, baseline and status, ownership
+and binding checks, route decision, Plan/Task/Card identities when STRICT, checks and results,
+authorization actually used, preserved material, pilot/recovery observations, and the owner's adoption
+or exit decision in the project's existing planning or handoff evidence. Do not create an adoption
+registry or treat this human projection as an authoritative record.
+
+**Results.** `PASS` means every required input and pilot criterion is current, independently evidenced,
+compatible with the project's authorities, and accepted by the owner; it permits only the next already
+authorized adoption step. `FAIL` means evidence contradicts a requirement or an unsafe/forbidden action
+occurred; stop and preserve for owner-directed recovery. `NOT_PROVEN` means evidence is missing,
+ambiguous, stale, partial, or unverifiable; do not treat the adoption or pilot as accepted. These labels
+are human decision results, not machine states or permissions.
+
+**Stop conditions.** Stop and preserve for the Exception and Recovery SOP on wrong identity, baseline,
+source pin, ownership, role/conversation/worktree binding, dependency, state root, model, authorization,
+scope, or recovery evidence; unexpected dirty or overlapping material; missing pilot evidence; any
+uncertain FAST condition; or any request to enable v2, alter runtime authority, publish, execute,
+delete/clean up, synchronize, or use production authority without a separate authorization.
+
 ## Adoption boundaries and owners
 
 | Scope | Owner | Safe default |

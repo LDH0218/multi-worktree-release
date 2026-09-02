@@ -12,6 +12,44 @@ alone governs conversation lifecycle; [Task Lifecycle SOP](task-lifecycle-sop.md
 governs stops. The four governance SOPs route audit, adoption, SOP change, and retention decisions but
 cannot override those core procedures or persisted contracts.
 
+## Trigger, owner, inputs, evidence, and outcomes
+
+**Triggers.** Use this SOP before proposing or editing any MWR SOP, before classifying or reviewing a
+change, before freezing a release batch that depends on the SOP, before integration or publication,
+and when deprecating, rolling back, or discovering an in-flight semantic change.
+
+**Owner.** The document owner proposes the change and supplies its rationale. Master owns the class,
+scope, Task/Plan revision, compatibility decision, integration, and release-batch decision. A Worker
+may edit only its assigned paths; a reviewer reports evidence and does not grant document or release
+authority.
+
+**Required inputs.** Read the current eight-SOP map, core SOP boundaries, `SKILL.md`, repository
+instructions, methodology, templates, Schema, validator, relevant Plan/Task/Card/handoff and release
+evidence, the exact source/baseline and complete diff, the proposed old and new rules, affected
+triggers/owners/evidence/stops, compatibility and rollback path, reviewer, and any authorization or
+release impact. A contract, runtime, v2, FAST, or release implementation request is out of scope for
+this SOP.
+
+**Retained evidence.** Keep the exact source and changed paths, old/new rule comparison, change class,
+owner and reviewer, Task Spec/Plan identity and revision when applicable, baseline and commit, checks
+and results, compatibility and release-freeze decision, integration mapping, deprecation route, and
+rollback/stop decision in existing Git and task/review projections. Do not create an SOP registry or
+silently rewrite a persisted record.
+
+**Results.** `PASS` means the class, authority boundary, compatibility, evidence, and review are all
+proven and the owner may take only the next already authorized step. `FAIL` means the proposal
+contradicts a contract/SOP, changes meaning without the required STRICT revision, or a forbidden action
+occurred; stop and preserve. `NOT_PROVEN` means a required source, owner, reviewer, compatibility fact,
+authorization, or provenance item is missing, ambiguous, stale, or unverifiable; do not infer approval.
+These labels are human review results, not machine states or permissions.
+
+**Stop conditions.** Stop under the Exception and Recovery SOP for wrong identity, baseline, scope,
+owner, worktree, generation, dependency, source, revision, digest, or Card state; dirty or overlapping
+material; a semantic change disguised as editorial; missing review or authorization; an in-flight silent
+change; a request to alter Schema, validator, state transitions, FAST/v2/release implementation, or
+conversation-lifecycle authority; or any unsanctioned synchronization, execution, publication,
+destructive action, deletion, cleanup, amendment, or scope expansion.
+
 ## Change classes and ownership
 
 Classify before editing. If the class is uncertain, use STRICT and stop until the owner decides.

@@ -12,6 +12,46 @@ governs Worker/Card completion, the [Release SOP](release-sop.md) governs closeo
 [Exception and Recovery SOP](exception-recovery-sop.md) governs unsafe or incomplete retirement. A
 Worker may report retention facts but may not archive a conversation, retire a binding, or delete data.
 
+## Trigger, owner, inputs, evidence, and outcomes
+
+**Triggers.** Use this SOP before archiving or retiring a conversation, role binding, worktree, branch,
+Task Spec, Card, Plan, closeout, candidate, handoff, or other evidence; before considering deletion or
+cleanup; after a release or task reaches a terminal result; and after an interrupted or disputed
+retention decision.
+
+**Owner.** Master owns MWR retention, release closeout, rollover, and binding decisions, subject to the
+Conversation Rotation SOP for conversation creation/successor/archive decisions. The existing project
+owner owns project-specific retention, legal, and security obligations. Workers may report facts but may
+not archive conversations, retire bindings, or delete or clean up data.
+
+**Required inputs.** Identify the exact item and locator, task/release and role/conversation identity,
+owner, branch/worktree and full `SHA`/status, dirty or untracked material, reachable commits and
+references, active or historical Plan/Card/handoff/candidate/recovery evidence, legal/security holds,
+retention policy, archive bytes/digests where relevant, and the separate exact authority and scope for
+any destructive operation.
+
+**Retained evidence.** Keep the source bytes and complete record lineage, item path/locator, identity,
+owner and references, baseline/current SHA and status, preserved material, archive bytes or digest,
+retention reason, dependency and hold checks, decision owner, authorization scope, and recovery or
+rollback decision in the existing task, Plan, handoff, closeout, or rotation projections. This SOP and
+its compact projection are not a retention registry or deletion queue.
+
+**Results.** `PASS` means the exact retention/archive/retirement decision is current, all references and
+obligations are reconciled, required bytes are preserved, and any destructive scope has its independent
+valid authorization; it permits only the next existing owner-authorized step. `FAIL` means a requirement
+is contradicted, retained evidence is damaged, or an unauthorized destructive action occurred; stop and
+preserve. `NOT_PROVEN` means identity, ownership, references, policy, archive bytes, authority, or
+recovery evidence is missing, ambiguous, stale, partial, or unverifiable; retain the material and do
+not infer permission. These labels are human results, not machine states or deletion authority.
+
+**Stop conditions.** Stop under the Exception and Recovery SOP for a wrong or ambiguous target,
+identity, owner, branch/worktree, SHA, status, binding, dependency, hold, archive, or record; dirty or
+unpreserved user material; missing or incomplete provenance/backup; unclear retention period; absent,
+expired, cross-capability, or overbroad destructive authorization; archive/deletion confusion; or any
+request to reset, overwrite, discard, synchronize, force-push, batch-clean, delete, or automatically
+retire material without already-proven exact independent authority. This task authorizes no deletion or
+cleanup.
+
 ## Default retention policy
 
 Retain each item until the relevant task, release, recovery, legal, security, and user obligations are
