@@ -9,6 +9,11 @@ Operational runbooks are [task-lifecycle-sop.md](task-lifecycle-sop.md), [releas
 [exception-recovery-sop.md](exception-recovery-sop.md). Use [conversation-rotation-sop.md](conversation-rotation-sop.md) for
 conversation lifecycle; these are references only, and this file does not copy their complete rules.
 
+Governance routes are [sop-compliance-audit-sop.md](sop-compliance-audit-sop.md),
+[project-adoption-sop.md](project-adoption-sop.md), [sop-change-governance-sop.md](sop-change-governance-sop.md), and
+[retention-retirement-sop.md](retention-retirement-sop.md). Use them for audit, adoption, SOP change, and retention
+decisions; they are reference-only links and do not duplicate machine contracts or core SOP rules.
+
 ## Validator root and test invocation
 
 The validator's `--repo-root` points to the Skill source repository root used to load `references/contracts.schema.json` and

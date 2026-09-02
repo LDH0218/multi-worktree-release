@@ -69,11 +69,15 @@ flowchart LR
 
 完整方法见 [references/methodology.md](references/methodology.md)。
 
-面向实际操作的三个 SOP：
+面向实际操作的八个 SOP：
 
 - [Task Lifecycle SOP](references/task-lifecycle-sop.md)：从 FAST/STRICT 判断、派工和 Worker 执行，到 handoff、集成与 `IDLE` closeout；
 - [Release SOP](references/release-sop.md)：从集成树和 Candidate/Gate 重新认证，到显式发布、push、closeout 与 rollover；
 - [Exception and Recovery SOP](references/exception-recovery-sop.md)：错误基线、Card/digest、范围、阻塞、修订、替代、取消与恢复决策。
+- [SOP Compliance Audit](references/sop-compliance-audit-sop.md)：审计 FAST、STRICT、release、recovery、adoption、变更、保留和对话轮换的实际执行证据；
+- [Project Adoption SOP](references/project-adoption-sop.md)：覆盖 MWR 自维护及其他项目接入、角色/worktree 映射、试运行、版本固定与失败退出；
+- [SOP Change Governance](references/sop-change-governance-sop.md)：区分编辑性与规范性变化，处理批次冻结、兼容性、废弃和回滚；
+- [Retention and Retirement SOP](references/retention-retirement-sop.md)：规定对话、工作树、分支、任务记录、证据和 closeout 的保留与删除前核对。
 
 这些 SOP 只是现有 Plan、Task Spec、Card、Schema、授权和状态规则的操作入口；持久对话的创建、轮换、确认和归档仍只由
 [Conversation Rotation SOP](references/conversation-rotation-sop.md) 规定。
@@ -238,7 +242,14 @@ Luna/max/priority 组合。`selection_reason` 必须与角色匹配，模型 pro
 │   ├── contracts.schema.json        # 机器可读契约 Schema
 │   ├── methodology.md               # 完整方法与治理规则
 │   ├── templates.md                 # Dispatch Plan、任务卡与 handoff 模板
-│   └── conversation-rotation-sop.md # 持久对话轮换的唯一规范 SOP
+│   ├── conversation-rotation-sop.md # 持久对话轮换的唯一规范 SOP
+│   ├── task-lifecycle-sop.md        # FAST/STRICT 任务交付与恢复入口
+│   ├── release-sop.md               # 集成、Candidate、发布、closeout 与 rollover 入口
+│   ├── exception-recovery-sop.md    # 停止、保留和异常恢复入口
+│   ├── sop-compliance-audit-sop.md  # 实际执行合规审计入口
+│   ├── project-adoption-sop.md      # MWR 自维护与项目接入入口
+│   ├── sop-change-governance-sop.md # SOP 变化分类、冻结与回滚入口
+│   └── retention-retirement-sop.md  # 保留、归档、退出与删除前核对入口
 └── scripts/
     ├── validate_contracts.py         # 契约一致性校验器
     ├── v2_adoption.py                # Protocol v2 adoption 实验性、未路由原型

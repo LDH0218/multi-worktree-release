@@ -123,6 +123,14 @@ evidence, publication, push, closeout, and rollover; and [exception recovery](re
 stop-and-preserve decisions. These are human routing documents over the existing contracts; they add no machine state or role
 registry, and the conversation SOP remains the sole conversation lifecycle authority.
 
+For governance operations, route to [SOP Compliance Audit](references/sop-compliance-audit-sop.md) for evidence-based
+execution audits, [Project Adoption](references/project-adoption-sop.md) for MWR self-maintenance or another project's
+adoption, [SOP Change Governance](references/sop-change-governance-sop.md) for editorial/normative SOP changes, and
+[Retention and Retirement](references/retention-retirement-sop.md) for archive, retirement, and deletion-boundary review.
+These four documents are human governance runbooks over the same records and four core SOPs; they add no machine state,
+role registry, authoritative record, Schema field, validator behavior, or runtime/v2/release implementation. Missing or
+ambiguous evidence remains `NOT_PROVEN` and routes to exception recovery.
+
 ## Durable role bindings
 
 A durable role binding is one tuple: `responsibility role → current visible conversation → retained worktree → branch`. One

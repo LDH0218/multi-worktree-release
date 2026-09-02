@@ -76,6 +76,14 @@ method, the existing Schema/validator, and persisted records; they add no machin
 creation, rotation, successor confirmation, and archive decisions remain solely in
 [conversation-rotation-sop.md](conversation-rotation-sop.md).
 
+For governance support, use [sop-compliance-audit-sop.md](sop-compliance-audit-sop.md) for actual execution evidence,
+[project-adoption-sop.md](project-adoption-sop.md) for MWR self-maintenance and other-project adoption,
+[sop-change-governance-sop.md](sop-change-governance-sop.md) for editorial/normative SOP changes and release-batch
+freezes, and [retention-retirement-sop.md](retention-retirement-sop.md) for retention, archive, retirement, and deletion
+boundaries. These four governance runbooks are human routing documents over the same records; they add no machine state,
+role registry, authoritative record, Schema field, validator behavior, or runtime/v2/release implementation. Missing or
+ambiguous evidence remains `NOT_PROVEN` and follows the existing recovery procedure.
+
 ## Durable role bindings
 
 A durable role binding is one governance tuple: `responsibility role → current visible conversation → retained worktree →
