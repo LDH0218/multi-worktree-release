@@ -82,6 +82,10 @@ flowchart LR
 这些 SOP 只是现有 Plan、Task Spec、Card、Schema、授权和状态规则的操作入口；持久对话的创建、轮换、确认和归档仍只由
 [Conversation Rotation SOP](references/conversation-rotation-sop.md) 规定。
 
+统一操作入口见 [Operator Execution Map](references/operator-execution-map.md)：先做只读身份与契约校验，再分流到 FAST、STRICT、
+治理/轮换或异常保留路径；严格流程固定为集成树验收 → Candidate → 独立发布决定 → closeout → rollover。该入口图只复用现有命令和证据，
+不新增状态、记录、授权或外部变更包装。
+
 ## 安装
 
 ### 方式一：直接安装
@@ -242,6 +246,7 @@ Luna/max/priority 组合。`selection_reason` 必须与角色匹配，模型 pro
 │   ├── contracts.schema.json        # 机器可读契约 Schema
 │   ├── methodology.md               # 完整方法与治理规则
 │   ├── templates.md                 # Dispatch Plan、任务卡与 handoff 模板
+│   ├── operator-execution-map.md    # 统一入口、FAST/STRICT、发布与异常顺序
 │   ├── conversation-rotation-sop.md # 持久对话轮换的唯一规范 SOP
 │   ├── task-lifecycle-sop.md        # FAST/STRICT 任务交付与恢复入口
 │   ├── release-sop.md               # 集成、Candidate、发布、closeout 与 rollover 入口

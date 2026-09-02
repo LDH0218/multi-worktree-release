@@ -131,6 +131,10 @@ These four documents are human governance runbooks over the same records and fou
 role registry, authoritative record, Schema field, validator behavior, or runtime/v2/release implementation. Missing or
 ambiguous evidence remains `NOT_PROVEN` and routes to exception recovery.
 
+Use [Operator Execution Map](references/operator-execution-map.md) as the single human entry for the ordered universal gate,
+FAST/STRICT split, integrated-tree validation, candidate/publication separation, closeout/rollover order, and immediate
+`STOP_AND_PRESERVE` routing. It maps only existing commands and evidence sources; it adds no authority or wrapper command.
+
 ## Durable role bindings
 
 A durable role binding is one tuple: `responsibility role → current visible conversation → retained worktree → branch`. One

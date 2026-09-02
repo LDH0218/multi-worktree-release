@@ -14,6 +14,11 @@ Governance routes are [sop-compliance-audit-sop.md](sop-compliance-audit-sop.md)
 [retention-retirement-sop.md](retention-retirement-sop.md). Use them for audit, adoption, SOP change, and retention
 decisions; they are reference-only links and do not duplicate machine contracts or core SOP rules.
 
+Use the [Operator Execution Map](operator-execution-map.md) as the single human routing entry before selecting a template. It
+orders validation before mutation, FAST/STRICT selection, integration before Candidate, separate publication authorization,
+closeout before rollover, and `STOP_AND_PRESERVE` on missing or conflicting evidence. It is a projection only and introduces no
+template record, command wrapper, or authority.
+
 ## Validator root and test invocation
 
 The validator's `--repo-root` points to the Skill source repository root used to load `references/contracts.schema.json` and

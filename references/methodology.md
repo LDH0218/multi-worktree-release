@@ -84,6 +84,11 @@ boundaries. These four governance runbooks are human routing documents over the 
 role registry, authoritative record, Schema field, validator behavior, or runtime/v2/release implementation. Missing or
 ambiguous evidence remains `NOT_PROVEN` and follows the existing recovery procedure.
 
+Use the [Operator Execution Map](operator-execution-map.md) as the single human entry for the fixed order of validation before
+mutation, FAST/STRICT selection, integrated-tree validation before Candidate, separate Candidate approval and publication,
+closeout before rollover, and immediate `STOP_AND_PRESERVE`. It only routes to the existing commands, records, and SOPs; it
+does not add a command wrapper, machine state, authority, or record.
+
 ## Durable role bindings
 
 A durable role binding is one governance tuple: `responsibility role → current visible conversation → retained worktree →

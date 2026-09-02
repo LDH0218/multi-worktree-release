@@ -19,6 +19,7 @@
 - repository adoption 存储原型已经完成，但尚未正式启用。
 - 轻量 FAST 路由已经在 Skill 中生效；FAST request / receipt 身份绑定仍是实验原型，不参与当前路由。
 - 当前文档入口共有八个 SOP：[Task Lifecycle](references/task-lifecycle-sop.md)、[Release](references/release-sop.md)、[Exception and Recovery](references/exception-recovery-sop.md)、[Conversation Rotation](references/conversation-rotation-sop.md) 四个核心执行/恢复流程，以及 [SOP Compliance Audit](references/sop-compliance-audit-sop.md)、[Project Adoption](references/project-adoption-sop.md)、[SOP Change Governance](references/sop-change-governance-sop.md)、[Retention and Retirement](references/retention-retirement-sop.md) 四个治理流程。后四个只是人工审计、接入、变更和保留的路由，不新增机器状态、角色注册表、权威记录、Schema 字段或运行时权限；Conversation Rotation 仍是唯一对话生命周期权威。
+- 统一人类操作入口为 [Operator Execution Map](references/operator-execution-map.md)：先验证再变更，按 FAST/STRICT 分流，集成后才能生成 Candidate，Candidate 批准与发布分离，closeout 后才能 rollover；任一证据缺失或冲突立即 `STOP_AND_PRESERVE`。入口图不新增命令、状态、记录或权限。
 - 完整 v2 迁移保持冻结；cycle fence、v2 CLI、Schema 迁移和正式 adoption 不进入当前范围。
 
 ## 当前进度
