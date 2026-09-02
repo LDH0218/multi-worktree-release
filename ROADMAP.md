@@ -178,7 +178,7 @@
 
 ## 持续测试路线：目标模式任务
 
-FAST 已正式采用。一次性临时 Git 仓库和临时 JSON fixture 已完成 FAST + v1 STRICT 的契约级模拟；随后已复用 `MWR｜Master-1.0`、现有 Worker 对话和五个既有 worktree 完成一次真实 STRICT 多工作树 E2E，没有创建额外长期角色或 worktree。
+FAST 已正式采用。一次性临时 Git 仓库和临时 JSON fixture 已完成 FAST + v1 STRICT 的契约级模拟；随后已复用 `Master-1.0`、现有 Worker 对话和五个既有 worktree 完成一次真实 STRICT 多工作树 E2E，没有创建额外长期角色或 worktree。
 
 ### 已验证基线
 
