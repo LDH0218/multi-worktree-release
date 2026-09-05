@@ -72,7 +72,7 @@ the option and its existing behavior. From a project root, run Python unit tests
 
 The three local state writers keep this distinction explicit: their `--repo-root` is the business Master
 repository whose Git state is checked, while optional `--skill-root` selects the installed Skill resources
-and defaults to the directory containing the installed scripts. Each writer reads the Plan's canonical
+and defaults to the Skill root, parent of the installed scripts directory. Each writer reads the Plan's canonical
 `state_root` before acquiring the persistent `<state_root>/.mwr-state.lock`; cooperating writers hold that
 exclusive lock through validation, writes, and readback, wait no longer than five seconds, and fail without
 business-state writes on conflict. The carrier is outside release archives, remains present after release,

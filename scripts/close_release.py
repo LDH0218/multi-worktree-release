@@ -801,8 +801,14 @@ def close_release(*, repo_root: Path, plan_path: Path, master_card_path: Path,
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=Path, default=SCRIPT_DIR.parent)
-    parser.add_argument("--skill-root", type=Path, default=SCRIPT_DIR.parent)
+    parser.add_argument(
+        "--repo-root", type=Path, default=SCRIPT_DIR.parent,
+        help="business Master repository root whose Git/state is checked (not the Skill root)",
+    )
+    parser.add_argument(
+        "--skill-root", type=Path, default=SCRIPT_DIR.parent,
+        help="Skill root, parent of the installed scripts directory; default: parent of the installed scripts directory",
+    )
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--master-card-json", type=Path)
     parser.add_argument("--worker-card-json", type=Path, action="append", default=[])

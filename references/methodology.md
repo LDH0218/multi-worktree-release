@@ -159,7 +159,7 @@ and behavior remain compatible. From a project root, run Python unit tests with
 
 The local writer APIs and CLIs use a separate root contract: their `--repo-root` is the business Master
 repository whose Git state is checked, while optional `--skill-root` selects installed Skill resources and
-defaults to the directory containing the installed script. Worker-card bootstrap/transition, closeout, and
+defaults to the Skill root, parent of the installed scripts directory. Worker-card bootstrap/transition, closeout, and
 rollover all derive the canonical Plan `state_root` before acquiring `<state_root>/.mwr-state.lock` and
 hold that persistent exclusive carrier through validation, writes, and readback. A competing cooperating
 writer waits no longer than five seconds and then fails without business-state writes; the carrier is outside

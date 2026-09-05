@@ -256,6 +256,353 @@ class IdentityAndCloseoutAuditTests(unittest.TestCase):
             )
             self.assertEqual(result["state"], "ACTIVE")
 
+    def test_archived_completed_idle_history_reuses_same_worktree_after_rollover(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = CloseoutFixture(Path(directory))
+            fixture.close(now="2026-01-02T00:00:00Z")
+            history = json.loads(fixture.worker_path.read_text())["last_task"]
+            next_plan_path, next_master_path, next_plan, next_master = build_next_release(fixture)
+            next_spec_path = fixture.tasks_root / "next-worker-task.json"
+            next_spec = contracts.load_json(next_spec_path)
+            next_spec.update({
+                "worktree": str(fixture.worker_worktree),
+                "branch": "task/reused-worker",
+            })
+            next_spec["task_spec_digest"] = contracts.object_digest(next_spec, "task_spec_digest")
+            write_json(next_spec_path, next_spec)
+            next_entry = next_plan["tasks"][0]
+            next_entry.update({
+                "worktree": next_spec["worktree"],
+                "branch": next_spec["branch"],
+                "task_spec_digest": next_spec["task_spec_digest"],
+            })
+            next_plan["plan_digest"] = contracts.object_digest(next_plan, "plan_digest")
+            write_json(next_plan_path, next_plan)
+            next_master["dispatch_plan_digest"] = next_plan["plan_digest"]
+            write_json(next_master_path, next_master)
+
+            result = rollover_release.rollover_release(
+                repo_root=fixture.repo, plan_path=fixture.plan_path,
+                master_card_path=fixture.master_path,
+                next_plan_path=next_plan_path, next_master_card_path=next_master_path,
+            )
+            self.assertEqual(result["status"], "PASS")
+
+            live_plan = contracts.load_json(fixture.plan_path)
+            previous_live_plan = copy.deepcopy(live_plan)
+            live_plan.update({
+                "record_revision": live_plan["record_revision"] + 1,
+                "updated_at": "2026-01-02T00:00:03Z",
+            })
+            live_plan["plan_digest"] = contracts.object_digest(live_plan, "plan_digest")
+            live_master = contracts.load_json(fixture.master_path)
+            previous_live_master = copy.deepcopy(live_master)
+            live_master.update({
+                "record_revision": live_master["record_revision"] + 1,
+                "updated_at": "2026-01-02T00:00:04Z",
+                "dispatch_plan_digest": live_plan["plan_digest"],
+            })
+            schema = contracts.load_json(REPO_ROOT / "references" / "contracts.schema.json")
+            contracts.validate_plan_transition(previous_live_plan, live_plan)
+            contracts.validate_master_transition(previous_live_master, live_master, schema)
+            write_json(fixture.plan_path, live_plan)
+            write_json(fixture.master_path, live_master)
+
+            active = active_card_for(next_spec)
+            active.update({
+                "record_revision": 5,
+                "updated_at": "2026-01-02T00:01:00Z",
+                "last_task": copy.deepcopy(history),
+            })
+            transitioned = worker_card_sidecar.transition_worker_card(
+                repo_root=fixture.repo, plan_path=fixture.plan_path,
+                master_card_path=fixture.master_path, task_id=next_spec["task_id"],
+                worker_card_path=fixture.worker_path, card=active,
+            )
+            self.assertEqual(transitioned["state"], "ACTIVE")
+
+    def test_archived_idle_history_rejects_cross_worktree_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = CloseoutFixture(Path(directory))
+            fixture.close(now="2026-01-02T00:00:00Z")
+            next_plan_path, next_master_path, next_plan, next_master = build_next_release(fixture)
+            next_spec = contracts.load_json(fixture.tasks_root / "next-worker-task.json")
+            next_worktree = Path(next_spec["worktree"])
+            copied_card = next_worktree / worker_card_sidecar.SIDECAR_NAME
+            copied_card.write_bytes(fixture.worker_path.read_bytes())
+            before = copied_card.read_bytes()
+            result = rollover_release.rollover_release(
+                repo_root=fixture.repo, plan_path=fixture.plan_path,
+                master_card_path=fixture.master_path,
+                next_plan_path=next_plan_path, next_master_card_path=next_master_path,
+            )
+            self.assertEqual(result["status"], "PASS")
+
+            active = active_card_for(next_spec)
+            active.update({
+                "record_revision": 5,
+                "updated_at": "2026-01-02T00:01:00Z",
+                "last_task": copy.deepcopy(json.loads(fixture.worker_path.read_text())["last_task"]),
+            })
+            with self.assertRaisesRegex(worker_card_sidecar.SidecarError, "another physical Worker worktree"):
+                worker_card_sidecar.transition_worker_card(
+                    repo_root=fixture.repo, plan_path=fixture.plan_path,
+                    master_card_path=fixture.master_path, task_id=next_spec["task_id"],
+                    worker_card_path=copied_card, card=active,
+                )
+            self.assertEqual(copied_card.read_bytes(), before)
+
+    def test_archived_idle_history_rejects_tampered_release_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = CloseoutFixture(Path(directory))
+            fixture.close(now="2026-01-02T00:00:00Z")
+            next_plan_path, next_master_path, next_plan, next_master = build_next_release(fixture)
+            next_spec = contracts.load_json(fixture.tasks_root / "next-worker-task.json")
+            next_spec.update({
+                "worktree": str(fixture.worker_worktree),
+                "branch": "task/reused-worker",
+            })
+            next_spec["task_spec_digest"] = contracts.object_digest(next_spec, "task_spec_digest")
+            write_json(fixture.tasks_root / "next-worker-task.json", next_spec)
+            next_entry = next_plan["tasks"][0]
+            next_entry.update({
+                "worktree": next_spec["worktree"],
+                "branch": next_spec["branch"],
+                "task_spec_digest": next_spec["task_spec_digest"],
+            })
+            next_plan["plan_digest"] = contracts.object_digest(next_plan, "plan_digest")
+            write_json(next_plan_path, next_plan)
+            next_master["dispatch_plan_digest"] = next_plan["plan_digest"]
+            write_json(next_master_path, next_master)
+            result = rollover_release.rollover_release(
+                repo_root=fixture.repo, plan_path=fixture.plan_path,
+                master_card_path=fixture.master_path,
+                next_plan_path=next_plan_path, next_master_card_path=next_master_path,
+            )
+            self.assertEqual(result["status"], "PASS")
+
+            archived_plan_path = fixture.archive / "dispatch-plan.json"
+            archived_plan = contracts.load_json(archived_plan_path)
+            archived_plan["record_revision"] += 1
+            write_json(archived_plan_path, archived_plan)
+
+            active = active_card_for(next_spec)
+            active.update({
+                "record_revision": 5,
+                "updated_at": "2026-01-02T00:01:00Z",
+                "last_task": copy.deepcopy(json.loads(fixture.worker_path.read_text())["last_task"]),
+            })
+            with self.assertRaisesRegex(worker_card_sidecar.SidecarError, "archived"):
+                worker_card_sidecar.transition_worker_card(
+                    repo_root=fixture.repo, plan_path=fixture.plan_path,
+                    master_card_path=fixture.master_path, task_id=next_spec["task_id"],
+                    worker_card_path=fixture.worker_path, card=active,
+                )
+
+    def test_archived_idle_history_can_skip_one_closed_release(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = CloseoutFixture(Path(directory))
+            fixture.close(now="2026-01-02T00:00:00Z")
+            history = json.loads(fixture.worker_path.read_text())["last_task"]
+
+            release2_plan_path, release2_master_path, _, _ = build_next_release(fixture)
+            release2_spec = contracts.load_json(fixture.tasks_root / "next-worker-task.json")
+            rollover2 = rollover_release.rollover_release(
+                repo_root=fixture.repo, plan_path=fixture.plan_path,
+                master_card_path=fixture.master_path,
+                next_plan_path=release2_plan_path, next_master_card_path=release2_master_path,
+            )
+            self.assertEqual(rollover2["status"], "PASS")
+
+            release2_plan = contracts.load_json(fixture.plan_path)
+            release2_plan["tasks"][0]["dispatch_status"] = "CANCELLED"
+            release2_plan["tasks"][0]["revision_decision"] = "CANCELLED"
+            release2_plan.update({
+                "record_revision": release2_plan["record_revision"] + 1,
+                "updated_at": "2026-01-02T00:00:03Z",
+                "ready_wave": None,
+                "blocked_tasks": [],
+            })
+            release2_plan["plan_digest"] = contracts.object_digest(release2_plan, "plan_digest")
+            release2_master = contracts.load_json(fixture.master_path)
+            release2_master.update({
+                "record_revision": release2_master["record_revision"] + 1,
+                "updated_at": "2026-01-02T00:00:04Z",
+                "dispatch_plan_digest": release2_plan["plan_digest"],
+            })
+            release2_candidate = contracts.make_candidate_v2(
+                head=fixture.head,
+                plan_revision=release2_plan["plan_revision"],
+                plan_digest=release2_plan["plan_digest"],
+            )
+            release2_candidate["release_task_id"] = release2_plan["release_task_id"]
+            contracts.refresh_candidate_inputs(release2_candidate, refresh_evidence=True)
+            release2_master["candidate_evidence"] = release2_candidate
+            release2_worktree = Path(release2_spec["worktree"])
+            release2_worker = contracts.make_idle_worker_card()
+            release2_worker.update({
+                "record_revision": 2,
+                "updated_at": "2026-01-02T00:00:05Z",
+                "last_task": {
+                    "task_id": release2_spec["task_id"],
+                    "task_spec_revision": release2_spec["task_spec_revision"],
+                    "task_spec_digest": release2_spec["task_spec_digest"],
+                    "outcome": "CANCELLED",
+                    "worker_commit_sha": None,
+                    "integrated_as_sha": None,
+                },
+            })
+            write_json(fixture.plan_path, release2_plan)
+            write_json(fixture.master_path, release2_master)
+            write_json(release2_worktree / worker_card_sidecar.SIDECAR_NAME, release2_worker)
+            schema = contracts.load_json(REPO_ROOT / "references/contracts.schema.json")
+            contracts.validate_plan(release2_plan, schema)
+            contracts.validate_master_card(release2_master, schema)
+            contracts.validate_cross_record_set(
+                release2_plan, release2_worker, release2_master, fixture.plan_path,
+                {release2_spec["task_id"]: release2_spec},
+            )
+            close2 = close_release.close_release(
+                repo_root=fixture.repo, plan_path=fixture.plan_path,
+                master_card_path=fixture.master_path,
+                worker_card_paths=[release2_worktree / worker_card_sidecar.SIDECAR_NAME],
+                now="2026-01-02T00:00:06Z",
+            )
+            self.assertEqual(close2["status"], "PASS")
+
+            release3_worktree = fixture.root / "release3-worker-worktree"
+            release3_worktree.mkdir()
+            release3_spec_path = fixture.tasks_root / "release3-worker-task.json"
+            release3_spec = contracts.make_task_spec_at(release3_spec_path)
+            release3_spec.update({
+                "task_id": "release3-worker-task",
+                "source_thread_id": "master-release3",
+                "owner_role": "next-api",
+                "worktree": str(release3_worktree),
+                "branch": "task/release3-worker",
+                "expected_head": fixture.head,
+                "plan_revision": 1,
+                "objective": "open the release after an idle gap",
+                "commit_message": "feat: release three work",
+            })
+            release3_spec["task_spec_digest"] = contracts.object_digest(
+                release3_spec, "task_spec_digest",
+            )
+            write_json(release3_spec_path, release3_spec)
+            release3_plan = contracts.make_plan_for_spec(release3_spec, "PUBLISHED", plan_revision=1)
+            release3_plan.update({
+                "record_revision": 1,
+                "release_task_id": "release-3",
+                "issued_by": "master-release3",
+                "state_root": str(fixture.state),
+                "task_specs_root": str(fixture.tasks_root),
+                "issued_at": "2026-01-02T00:00:07Z",
+                "updated_at": "2026-01-02T00:00:07Z",
+            })
+            release3_master = contracts.make_active_master_card(
+                release3_plan, str(fixture.plan_path),
+            )
+            release3_master.update({
+                "record_revision": json.loads(fixture.master_path.read_text())["record_revision"] + 1,
+                "updated_at": "2026-01-02T00:00:08Z",
+                "frozen_baseline_sha": fixture.head,
+                "worker_handoffs": [],
+                "candidate_evidence": close_release.empty_live_candidate(),
+            })
+            release3_plan["plan_digest"] = contracts.object_digest(release3_plan, "plan_digest")
+            release3_master["dispatch_plan_digest"] = release3_plan["plan_digest"]
+            staging = fixture.root / "release3-staging"
+            staging.mkdir()
+            release3_plan_path = staging / "next-plan.json"
+            release3_master_path = staging / "next-master.json"
+            write_json(release3_plan_path, release3_plan)
+            write_json(release3_master_path, release3_master)
+
+            release3_spec.update({
+                "worktree": str(fixture.worker_worktree),
+                "branch": "task/reused-worker-after-gap",
+            })
+            release3_spec["task_spec_digest"] = contracts.object_digest(
+                release3_spec, "task_spec_digest",
+            )
+            write_json(release3_spec_path, release3_spec)
+            release3_plan["tasks"][0].update({
+                "worktree": release3_spec["worktree"],
+                "branch": release3_spec["branch"],
+                "task_spec_digest": release3_spec["task_spec_digest"],
+            })
+            release3_plan["plan_digest"] = contracts.object_digest(release3_plan, "plan_digest")
+            release3_master["dispatch_plan_digest"] = release3_plan["plan_digest"]
+            write_json(release3_plan_path, release3_plan)
+            write_json(release3_master_path, release3_master)
+            rollover3 = rollover_release.rollover_release(
+                repo_root=fixture.repo, plan_path=fixture.plan_path,
+                master_card_path=fixture.master_path,
+                next_plan_path=release3_plan_path, next_master_card_path=release3_master_path,
+            )
+            self.assertEqual(rollover3["status"], "PASS")
+
+            active = active_card_for(release3_spec)
+            active.update({
+                "record_revision": 5,
+                "updated_at": "2026-01-02T00:00:09Z",
+                "last_task": copy.deepcopy(history),
+            })
+            transitioned = worker_card_sidecar.transition_worker_card(
+                repo_root=fixture.repo, plan_path=fixture.plan_path,
+                master_card_path=fixture.master_path,
+                task_id=release3_spec["task_id"], worker_card_path=fixture.worker_path,
+                card=active,
+            )
+            self.assertEqual(transitioned["state"], "ACTIVE")
+
+    def test_archived_cancelled_history_preserves_existing_worker_sha_semantics(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = CloseoutFixture(Path(directory), status="CANCELLED")
+            cancelled = contracts.load_json(fixture.worker_path)
+            cancelled["last_task"]["worker_commit_sha"] = fixture.head
+            write_json(fixture.worker_path, cancelled)
+            fixture.close(now="2026-01-02T00:00:00Z")
+            history = json.loads(fixture.worker_path.read_text())["last_task"]
+            next_plan_path, next_master_path, next_plan, next_master = build_next_release(fixture)
+            next_spec = contracts.load_json(fixture.tasks_root / "next-worker-task.json")
+            next_spec.update({
+                "worktree": str(fixture.worker_worktree),
+                "branch": "task/reused-worker",
+            })
+            next_spec["task_spec_digest"] = contracts.object_digest(next_spec, "task_spec_digest")
+            write_json(fixture.tasks_root / "next-worker-task.json", next_spec)
+            next_entry = next_plan["tasks"][0]
+            next_entry.update({
+                "worktree": next_spec["worktree"],
+                "branch": next_spec["branch"],
+                "task_spec_digest": next_spec["task_spec_digest"],
+            })
+            next_plan["plan_digest"] = contracts.object_digest(next_plan, "plan_digest")
+            write_json(next_plan_path, next_plan)
+            next_master["dispatch_plan_digest"] = next_plan["plan_digest"]
+            write_json(next_master_path, next_master)
+            result = rollover_release.rollover_release(
+                repo_root=fixture.repo, plan_path=fixture.plan_path,
+                master_card_path=fixture.master_path,
+                next_plan_path=next_plan_path, next_master_card_path=next_master_path,
+            )
+            self.assertEqual(result["status"], "PASS")
+
+            active = active_card_for(next_spec)
+            active.update({
+                "record_revision": 5,
+                "updated_at": "2026-01-02T00:01:00Z",
+                "last_task": copy.deepcopy(history),
+            })
+            transitioned = worker_card_sidecar.transition_worker_card(
+                repo_root=fixture.repo, plan_path=fixture.plan_path,
+                master_card_path=fixture.master_path, task_id=next_spec["task_id"],
+                worker_card_path=fixture.worker_path, card=active,
+            )
+            self.assertEqual(transitioned["state"], "ACTIVE")
+            self.assertEqual(transitioned["last_task"]["worker_commit_sha"], fixture.head)
+
     def test_closeout_reconciles_noncanonical_copy_but_reads_live_canonical_card(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = CloseoutFixture(Path(directory))
@@ -298,6 +645,50 @@ class IdentityAndCloseoutAuditTests(unittest.TestCase):
 
 
 class RecoveryAndHistoryAuditTests(unittest.TestCase):
+    def test_missing_sidecar_at_initial_revised_activation_needs_no_rework_without_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = WorkerTransitionFixture(root)
+            fixture.worker_path.rename(root / "untouched-idle.json")
+            write_json(root / "old-spec.json", copy.deepcopy(fixture.spec))
+
+            fixture.spec_path = fixture.tasks_root / "worker-task-r2.json"
+            fixture.spec.update({
+                "task_spec_path": str(fixture.spec_path),
+                "task_spec_revision": 2,
+                "plan_revision": 2,
+            })
+            fixture.spec["acceptance"].append("clarified before activation")
+            fixture.spec["task_spec_digest"] = contracts.object_digest(
+                fixture.spec, "task_spec_digest",
+            )
+            write_json(fixture.spec_path, fixture.spec)
+
+            fixture.plan.update({"plan_revision": 2, "record_revision": 2})
+            entry = fixture.plan["tasks"][0]
+            entry.update({
+                "task_spec_revision": 2,
+                "task_spec_plan_revision": 2,
+                "task_spec_path": str(fixture.spec_path),
+                "task_spec_digest": fixture.spec["task_spec_digest"],
+                "acceptance_digest": contracts.value_digest(fixture.spec["acceptance"]),
+                "revision_decision": "REVISE",
+            })
+            fixture.plan["plan_digest"] = contracts.object_digest(fixture.plan, "plan_digest")
+            write_json(fixture.plan_path, fixture.plan)
+            fixture.master = contracts.make_active_master_card(fixture.plan, str(fixture.plan_path))
+            fixture.master["frozen_baseline_sha"] = fixture.baseline
+            write_json(fixture.master_path, fixture.master)
+
+            result = worker_card_sidecar.transition_worker_card(
+                repo_root=fixture.repo,
+                plan_path=fixture.plan_path,
+                master_card_path=fixture.master_path,
+                task_id=fixture.spec["task_id"],
+                card=fixture.active(),
+            )
+            self.assertTrue(result["state"] == "ACTIVE")
+
     def test_expired_cancelled_worker_snapshot_can_return_to_idle(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = WorkerTransitionFixture(Path(directory))
@@ -687,6 +1078,8 @@ class LockAndResourceAuditTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("--skill-root", result.stdout)
+                self.assertIn("business Master repository", result.stdout)
+                self.assertIn("Skill root, parent of the installed scripts directory", result.stdout)
 
     def test_two_process_rollover_race_has_one_winner_and_no_mixed_batch(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

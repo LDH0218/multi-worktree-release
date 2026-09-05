@@ -656,7 +656,7 @@ class CloseReleaseTests(unittest.TestCase):
             self.assertEqual(fixture.worker_path.read_bytes(), active_bytes)
 
     def test_closeout_rejects_missing_duplicate_extra_symlink_invalid_non_idle_stale_and_cross_worktree(self) -> None:
-        cases = ("missing", "duplicate", "symlink", "invalid", "non-idle", "stale")
+        cases = ("missing", "duplicate", "extra", "symlink", "invalid", "non-idle", "stale")
         for scenario in cases:
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
                 fixture = CloseoutFixture(Path(directory))
@@ -665,6 +665,10 @@ class CloseReleaseTests(unittest.TestCase):
                     paths = None
                 elif scenario == "duplicate":
                     paths = [fixture.worker_path, fixture.worker_path]
+                elif scenario == "extra":
+                    extra = fixture.root / "extra-worker.json"
+                    extra.write_bytes(fixture.worker_path.read_bytes())
+                    paths = [fixture.worker_path, extra]
                 elif scenario == "symlink":
                     outside = fixture.root / "outside.json"
                     outside.write_bytes(fixture.worker_path.read_bytes())

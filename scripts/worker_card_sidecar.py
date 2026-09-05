@@ -17,6 +17,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from validate_contracts import (  # noqa: E402
     ContractError,
+    canonical_worktree_identity,
     canonical_json,
     default_authorization_v2,
     load_json,
@@ -24,6 +25,7 @@ from validate_contracts import (  # noqa: E402
     validate_cross_record_set,
     validate_master_card,
     validate_plan,
+    validate_release_rollover,
     validate_worker_transition,
     validate_worker_card,
     value_digest,
@@ -238,8 +240,160 @@ def _validate_card_task_binding(card: dict[str, Any], task_id: str, label: str) 
         )
 
 
+def _validate_archived_idle_history(*, history: dict[str, Any], current_spec: dict[str, Any],
+                                    target: Path, plan: dict[str, Any], schema: dict[str, Any],
+                                    plan_path: Path, master_card_path: Path, repo_root: Path) -> None:
+    """Prove an IDLE history from a verified prior release chain.
+
+    A rollover deliberately starts a new live Plan, so the prior task may no
+    longer be a live Plan entry.  Each rollover receipt binds one archived
+    closeout to the next release; walking that existing chain binds the
+    retained Worker identity, outcome and physical worktree.  Every link is
+    checked before a new Card can reuse that directory.
+    """
+    try:
+        import rollover_release  # noqa: PLC0415
+
+        current_plan_bytes = plan_path.read_bytes()
+        current_master_bytes = master_card_path.read_bytes()
+        if current_plan_bytes != canonical_json(plan):
+            raise SidecarError("live Dispatch Plan is not canonical JSON")
+        if current_master_bytes != canonical_json(load_json(master_card_path)):
+            raise SidecarError("live Master Card is not canonical JSON")
+        history_task_id = history["task_id"]
+        state_root = Path(plan["state_root"])
+        release_id = plan["release_task_id"]
+        visited_releases: set[str] = set()
+        candidates: list[dict[str, Any]] = []
+        while True:
+            if release_id in visited_releases:
+                raise SidecarError("release rollover history contains a cycle")
+            visited_releases.add(release_id)
+            receipt_path = rollover_release.safe_rollover_receipt_path(state_root, release_id)
+            rollover_release.verify_receipt_path(receipt_path)
+            receipt_bytes, receipt = rollover_release.read_json_bytes(
+                receipt_path, "release rollover receipt",
+            )
+            if receipt_bytes != canonical_json(receipt):
+                raise SidecarError("release rollover receipt is not canonical JSON")
+            validate_release_rollover(receipt, schema)
+            if receipt["next_release_task_id"] != release_id:
+                raise SidecarError("release rollover receipt does not bind its release")
+
+            (
+                closeout, archived_plan, archived_plan_bytes, archived_master,
+                _archived_master_bytes, _source_master, source_master_bytes,
+            ) = rollover_release.verify_archive(
+                repo_root=repo_root,
+                live_plan_path=plan_path,
+                state_root=state_root,
+                previous_release=receipt["previous_release_task_id"],
+                schema=schema,
+            )
+            if receipt["source_live_plan"]["value_digest"] != rollover_release.digest_bytes(archived_plan_bytes):
+                raise SidecarError("release rollover source Plan digest does not match the archive")
+            if receipt["source_live_master_card"]["value_digest"] != rollover_release.digest_bytes(source_master_bytes):
+                raise SidecarError("release rollover source Master digest does not match the closeout projection")
+            expected_closeout = receipt["previous_closeout"]
+            observed_closeout = {
+                "locator": f"history/releases/{receipt['previous_release_task_id']}/closeout.json",
+                "closeout_digest": closeout["closeout_digest"],
+                "dispatch_plan_digest": closeout["dispatch_plan"]["archive_digest"],
+                "master_card_digest": closeout["master_card"]["archive_digest"],
+            }
+            if expected_closeout != observed_closeout:
+                raise SidecarError("release rollover closeout does not match the archived release")
+
+            archived_specs = load_persisted_plan_specs(archived_plan, schema, historical=True)
+            archived_spec = archived_specs.get(history_task_id)
+            archived_entry = next(
+                (entry for entry in archived_plan["tasks"] if entry["task_id"] == history_task_id),
+                None,
+            )
+            if archived_spec is not None or archived_entry is not None:
+                if archived_spec is None or archived_entry is None:
+                    raise SidecarError("archived IDLE last_task task evidence is incomplete")
+                if (history["task_spec_revision"], history["task_spec_digest"]) == (
+                        archived_entry["task_spec_revision"], archived_entry["task_spec_digest"]):
+                    candidates.append({
+                        "release": receipt["previous_release_task_id"],
+                        "plan": archived_plan,
+                        "master": archived_master,
+                        "spec": archived_spec,
+                        "entry": archived_entry,
+                    })
+
+            previous_release = receipt["previous_release_task_id"]
+            previous_receipt_path = rollover_release.safe_rollover_receipt_path(
+                state_root, previous_release,
+            )
+            if not os.path.lexists(previous_receipt_path):
+                break
+            release_id = previous_release
+
+        if len(candidates) != 1:
+            if not candidates:
+                raise SidecarError(
+                    f"verified release history does not contain IDLE last_task: {history_task_id}"
+                )
+            raise SidecarError("verified release history contains ambiguous IDLE last_task evidence")
+        archived_spec = candidates[0]["spec"]
+        archived_entry = candidates[0]["entry"]
+        archived_master = candidates[0]["master"]
+        expected_status = {
+            "COMPLETED": "INTEGRATED",
+            "CANCELLED": "CANCELLED",
+            "SUPERSEDED": "SUPERSEDED",
+        }[history["outcome"]]
+        if archived_entry["dispatch_status"] != expected_status:
+            raise SidecarError("IDLE last_task outcome does not match the archived Dispatch status")
+
+        archived_worktree = _directory(Path(archived_spec["worktree"]), "archived Worker worktree")
+        current_worktree = _directory(Path(current_spec["worktree"]), "current Worker worktree")
+        if canonical_worktree_identity(str(archived_worktree), "archived Worker worktree") != \
+                canonical_worktree_identity(str(current_worktree), "current Worker worktree"):
+            raise SidecarError("archived IDLE last_task belongs to another physical Worker worktree")
+        if archived_worktree / SIDECAR_NAME != target.parent / SIDECAR_NAME:
+            raise SidecarError("archived IDLE last_task sidecar does not match the target Worker worktree")
+
+        archived_handoffs = [
+            handoff for handoff in archived_master["worker_handoffs"]
+            if (handoff["task_id"], handoff["task_spec_revision"], handoff["task_spec_digest"],
+                handoff["source_thread_id"])
+            == (history_task_id, archived_spec["task_spec_revision"],
+                archived_spec["task_spec_digest"], archived_spec["source_thread_id"])
+        ]
+        if history["outcome"] == "COMPLETED":
+            if history["worker_commit_sha"] is None or history["integrated_as_sha"] is None:
+                raise SidecarError("COMPLETED IDLE last_task lacks committed integration evidence")
+            if len(archived_handoffs) != 1:
+                raise SidecarError("archived completed Worker task lacks one exact Master handoff")
+            handoff = archived_handoffs[0]
+            if handoff["state"] != "INTEGRATED":
+                raise SidecarError("archived completed Worker task is not integrated")
+            if (handoff["worker_commit_sha"], handoff["integrated_as_sha"]) != (
+                    history["worker_commit_sha"], history["integrated_as_sha"]):
+                raise SidecarError("archived Master handoff does not match IDLE last_task SHAs")
+        elif archived_handoffs:
+            if len(archived_handoffs) != 1:
+                raise SidecarError("archived terminal Worker task has duplicate Master handoff evidence")
+            handoff = archived_handoffs[0]
+            if handoff["state"] != "REWORK_REQUESTED":
+                raise SidecarError("archived terminal Worker task has incompatible Master handoff evidence")
+            if (handoff["worker_commit_sha"], handoff["integrated_as_sha"]) != (
+                    history["worker_commit_sha"], history["integrated_as_sha"]):
+                raise SidecarError("archived Master handoff does not match terminal IDLE last_task evidence")
+    except SidecarError:
+        raise
+    except (ContractError, KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise SidecarError(f"archived IDLE history verification failed: {error}") from error
+
+
 def _validate_existing_card_binding(card: dict[str, Any], task_id: str, target: Path,
-                                    specs: dict[str, dict[str, Any]]) -> None:
+                                    specs: dict[str, dict[str, Any]], *,
+                                    current_spec: dict[str, Any], plan: dict[str, Any],
+                                    schema: dict[str, Any], plan_path: Path,
+                                    master_card_path: Path, repo_root: Path) -> None:
     """Bind an existing sidecar to its requested task and physical worktree."""
     if card["state"] != "IDLE":
         _validate_card_task_binding(card, task_id, "existing")
@@ -249,13 +403,22 @@ def _validate_existing_card_binding(card: dict[str, Any], task_id: str, target: 
     if history_task_id is None:
         return
     history_spec = specs.get(history_task_id)
-    if history_spec is None:
-        raise SidecarError(
-            f"existing IDLE last_task is absent from the current Plan: {history_task_id}"
+    same_current_identity = history_spec is not None and (
+        (history["task_spec_revision"], history["task_spec_digest"])
+        == (history_spec["task_spec_revision"], history_spec["task_spec_digest"])
+    )
+    if not same_current_identity:
+        _validate_archived_idle_history(
+            history=history,
+            current_spec=current_spec,
+            target=target,
+            plan=plan,
+            schema=schema,
+            plan_path=plan_path,
+            master_card_path=master_card_path,
+            repo_root=repo_root,
         )
-    if (history["task_spec_revision"], history["task_spec_digest"]) != (
-            history_spec["task_spec_revision"], history_spec["task_spec_digest"]):
-        raise SidecarError("existing IDLE last_task Task Spec identity is stale")
+        return
     history_target = _expected_sidecar(history_spec)
     if history_target != target:
         raise SidecarError(
@@ -646,7 +809,19 @@ def _validate_initial_activation(card: dict[str, Any], entry: dict[str, Any], sp
                                  master: dict[str, Any]) -> None:
     if card["state"] != "ACTIVE":
         raise SidecarError("missing prior Worker Card is allowed only for ACTIVE activation")
-    if card["task_spec_revision"] > 1:
+    history = card["last_task"]
+    committed_history = (
+        history["task_id"] == card["task_id"]
+        and history["task_spec_revision"] < card["task_spec_revision"]
+        and (history["worker_commit_sha"] is not None or history["integrated_as_sha"] is not None)
+    )
+    committed_handoff = any(
+        handoff["task_id"] == card["task_id"]
+        and handoff["task_spec_revision"] < card["task_spec_revision"]
+        and handoff["worker_commit_sha"] is not None
+        for handoff in master["worker_handoffs"]
+    )
+    if committed_history or committed_handoff:
         _require_rework_handoff(master, entry, spec, card)
 
 
@@ -686,7 +861,15 @@ def _transition_worker_card_locked(*, repo_root: Path, skill_root: Path, plan_pa
         raw, previous = _read_canonical_card(
             target, schema, enforce_authorization_expiry=enforce_expiry,
         )
-        _validate_existing_card_binding(previous, resolved_task_id, target, specs)
+        _validate_existing_card_binding(
+            previous, resolved_task_id, target, specs,
+            current_spec=spec,
+            plan=plan,
+            schema=schema,
+            plan_path=plan_path,
+            master_card_path=master_card_path,
+            repo_root=repo_root,
+        )
         if raw == data:
             return card
         _validate_transition_evidence(previous, card, plan, spec, master)
@@ -729,8 +912,14 @@ def transition_worker_card(*, repo_root: Path, plan_path: Path, master_card_path
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=Path, default=SCRIPT_DIR.parent)
-    parser.add_argument("--skill-root", type=Path, default=SCRIPT_DIR.parent)
+    parser.add_argument(
+        "--repo-root", type=Path, default=SCRIPT_DIR.parent,
+        help="business Master repository root for Plan/state records (not the Skill root)",
+    )
+    parser.add_argument(
+        "--skill-root", type=Path, default=SCRIPT_DIR.parent,
+        help="Skill root, parent of the installed scripts directory; default: parent of the installed scripts directory",
+    )
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--master-card-json", type=Path)
     parser.add_argument("--task-id", required=True)

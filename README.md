@@ -279,7 +279,7 @@ PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py'
 ```
 
 三个本地写入器的根目录约定不同：它们的 `--repo-root` 指向要检查 Git 状态的业务 Master 仓库，
-可选的 `--skill-root` 指向已安装的 Skill 资源，默认是脚本所在目录的父目录。写入器先从 Plan
+可选的 `--skill-root` 指向已安装的 Skill 资源，默认是 Skill root, parent of the installed scripts directory（安装的 scripts 目录的父目录）。写入器先从 Plan
 读取规范化的 `state_root`，再在 `<state_root>/.mwr-state.lock` 上持有同一个排他锁直到校验、写入和
 回读完成；最多等待五秒，冲突时不写入 Plan、Card、archive 或 receipt 业务状态。锁载体位于三文件
 archive 之外，进程退出后保留且不删除；rollover 的恢复仍只允许 receipt 支持的向前完成，不允许回滚。

@@ -142,7 +142,7 @@ worktree/branch/history, or authorizes push, release, deploy, execution, externa
 actions, or v2 adoption.
 
 For the writer-root boundary, pass the business Master repository as `--repo-root`; optional `--skill-root`
-selects the installed Skill resources and defaults to the script's parent. The writer derives the Plan's
+selects the installed Skill resources and defaults to Skill root, parent of the installed scripts directory. The writer derives the Plan's
 canonical `state_root` and holds `<state_root>/.mwr-state.lock` through validation, the three archive writes,
 live-Master replacement, and readback. A cooperating writer waits no longer than five seconds and then fails
 without changing Plan, Card, archive, or receipt business state. The persistent carrier is outside the archive
