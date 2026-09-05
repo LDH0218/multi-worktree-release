@@ -141,6 +141,13 @@ empty candidate and cleared lock. Closeout never clears a Worker Card, archives 
 worktree/branch/history, or authorizes push, release, deploy, execution, external calls, destructive
 actions, or v2 adoption.
 
+For the writer-root boundary, pass the business Master repository as `--repo-root`; optional `--skill-root`
+selects the installed Skill resources and defaults to the script's parent. The writer derives the Plan's
+canonical `state_root` and holds `<state_root>/.mwr-state.lock` through validation, the three archive writes,
+live-Master replacement, and readback. A cooperating writer waits no longer than five seconds and then fails
+without changing Plan, Card, archive, or receipt business state. The persistent carrier is outside the archive
+and is never deleted.
+
 ### Idempotency and interruption
 
 - Equal existing archive bytes are idempotent and may be verified again.
@@ -169,5 +176,9 @@ procedure. Rollover is not an ordinary Plan status transition and never rewrites
    complete forward. Any receipt conflict, source drift, inherited candidate/authorization/handoff,
    unsafe path, dirty current tree, or unreachable historical head stops without rollback, cleanup, or
    dispatch.
+
+Rollover uses the same state-root lock for receipt installation and both live-record replacements. Do not use
+the lock carrier as an archive record or infer rollback authority from it; the receipt remains the
+forward-recovery boundary.
 
 Rollover grants no Worker, external, push, publication, destructive, synchronization, or v2 authority.

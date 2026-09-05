@@ -33,6 +33,12 @@ from validate_contracts import (  # noqa: E402
     validate_release_rollover,
     value_digest,
 )
+from state_lock import (  # noqa: E402
+    StateLockError,
+    canonical_state_root,
+    exclusive_state_lock,
+    plan_state_root,
+)
 
 
 class RolloverError(ValueError):
@@ -258,9 +264,12 @@ def replace_live(path: Path, expected: bytes, replacement: bytes, label: str) ->
         raise RolloverError(f"cannot replace live {label}: {error}") from error
 
 
-def rollover_release(*, repo_root: Path, plan_path: Path, master_card_path: Path,
-                     next_plan_path: Path, next_master_card_path: Path) -> dict[str, Any]:
+def _rollover_release_locked(*, repo_root: Path, skill_root: Path, plan_path: Path,
+                             master_card_path: Path, next_plan_path: Path,
+                             next_master_card_path: Path,
+                             locked_state_root: Path) -> dict[str, Any]:
     repo_root = repo_root.resolve()
+    skill_root = skill_root.resolve()
     plan_path = plan_path.resolve(strict=False)
     master_card_path = master_card_path.resolve(strict=False)
     next_plan_path = next_plan_path.resolve(strict=False)
@@ -275,7 +284,20 @@ def rollover_release(*, repo_root: Path, plan_path: Path, master_card_path: Path
     current_master_bytes, _current_master = read_json_bytes(master_card_path, "live Master Card")
     target_plan_bytes, target_plan = read_json_bytes(next_plan_path, "next Dispatch Plan")
     target_master_bytes, target_master = read_json_bytes(next_master_card_path, "next Master Card")
-    schema = load_json(repo_root / "references" / "contracts.schema.json")
+    try:
+        current_state_root = canonical_state_root(current_plan["state_root"])
+        target_state_root = canonical_state_root(target_plan["state_root"])
+    except (KeyError, StateLockError) as error:
+        raise RolloverError(f"Plan state_root cannot be bound to the held lock: {error}") from error
+    if current_state_root != locked_state_root:
+        raise RolloverError(
+            f"live Plan state_root changed while locking: expected={locked_state_root}, observed={current_state_root}"
+        )
+    if target_state_root != locked_state_root:
+        raise RolloverError(
+            f"next Plan state_root differs from the held lock: expected={locked_state_root}, observed={target_state_root}"
+        )
+    schema = load_json(skill_root / "references" / "contracts.schema.json")
     if not isinstance(schema, dict):
         raise RolloverError("contracts schema is not an object")
     try:
@@ -366,21 +388,45 @@ def rollover_release(*, repo_root: Path, plan_path: Path, master_card_path: Path
     }
 
 
+def rollover_release(*, repo_root: Path, plan_path: Path, master_card_path: Path,
+                     next_plan_path: Path, next_master_card_path: Path,
+                     skill_root: Path | None = None) -> dict[str, Any]:
+    """Open one next release while holding the shared state-root lock."""
+    selected_skill_root = (skill_root or SCRIPT_DIR.parent).resolve()
+    try:
+        locked_state_root = plan_state_root(plan_path)
+        with exclusive_state_lock(locked_state_root):
+            return _rollover_release_locked(
+                repo_root=repo_root,
+                skill_root=selected_skill_root,
+                plan_path=plan_path,
+                master_card_path=master_card_path,
+                next_plan_path=next_plan_path,
+                next_master_card_path=next_master_card_path,
+                locked_state_root=locked_state_root,
+            )
+    except StateLockError as error:
+        raise RolloverError(str(error)) from error
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=SCRIPT_DIR.parent)
+    parser.add_argument("--skill-root", type=Path, default=SCRIPT_DIR.parent)
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--master-card-json", type=Path)
     parser.add_argument("--next-plan-json", type=Path, required=True)
     parser.add_argument("--next-master-card-json", type=Path, required=True)
     args = parser.parse_args()
     repo_root = args.repo_root.resolve()
+    skill_root = args.skill_root.resolve()
     plan = args.plan or repo_root / ".codex" / "multi-worktree-release" / "dispatch-plan.json"
     master = args.master_card_json or repo_root / ".codex" / "multi-worktree-release" / "master-card.json"
     try:
         result = rollover_release(
             repo_root=repo_root, plan_path=plan, master_card_path=master,
             next_plan_path=args.next_plan_json, next_master_card_path=args.next_master_card_json,
+            skill_root=skill_root,
         )
     except (RolloverError, ContractError, OSError, json.JSONDecodeError) as error:
         print(f"release rollover: FAIL {error}", file=sys.stderr)

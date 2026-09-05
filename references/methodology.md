@@ -157,6 +157,14 @@ The validator's `--repo-root` option identifies the Skill source repository root
 and behavior remain compatible. From a project root, run Python unit tests with
 `PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py'` so imports resolve reliably.
 
+The local writer APIs and CLIs use a separate root contract: their `--repo-root` is the business Master
+repository whose Git state is checked, while optional `--skill-root` selects installed Skill resources and
+defaults to the directory containing the installed script. Worker-card bootstrap/transition, closeout, and
+rollover all derive the canonical Plan `state_root` before acquiring `<state_root>/.mwr-state.lock` and
+hold that persistent exclusive carrier through validation, writes, and readback. A competing cooperating
+writer waits no longer than five seconds and then fails without business-state writes; the carrier is outside
+release archives and is never deleted. Rollover recovery remains receipt-backed and forward-only.
+
 The plan is versioned and contains at least:
 
 ```yaml
@@ -807,6 +815,10 @@ archive paths, or interruption leave the live Master `ACTIVE` and preserve all e
 clears a Worker Card and never authorizes push, tag, release, deploy, execution, external call, destructive operation, or
 production publication.
 
+The closeout writer holds the canonical state-root lock while rereading every canonical Worker sidecar, installing the exact
+three archive files, replacing the live Master projection, and verifying readback. A lock conflict fails before any Plan, Card,
+archive, or receipt business write; the persistent carrier is not an archive record.
+
 ## v1 release rollover
 
 The three-file closeout archive is the complete authority for a closed release. The live Plan and live `IDLE` Master Card are
@@ -837,8 +849,10 @@ the prior release archive; it never adds a fourth archive file or changes the ar
 compare-and-swap → live Master compare-and-swap → readback cross-record validation. If the process stops after replacing only
 the Plan, the same receipt and exact staged target bytes permit only forward completion. Any other mixed bytes, receipt conflict,
 unsafe path, source drift, inherited candidate/authorization/handoff, non-empty target handoff list, dirty current Git state, or
-unreachable archived release head stops without dispatch, rollback, or cleanup. Rollover grants no Worker, external, push,
-publication, destructive, synchronization, or v2 authority.
+unreachable archived release head stops without dispatch, rollback, or cleanup. Rollover holds the same canonical state-root
+lock for receipt installation and both live-record replacements; the receipt and exact staged target bytes are the only forward
+recovery evidence after a Plan-only interruption. Rollover grants no Worker, external, push, publication, destructive,
+synchronization, or v2 authority.
 
 The canonical Worker Card machine record is the complete schema-valid card at the fixed ignored path
 `<WORKTREE>/WORKTREE_TASK.json`. `WORKTREE_TASK.md` remains a compact human projection and is never implicitly parsed as JSON

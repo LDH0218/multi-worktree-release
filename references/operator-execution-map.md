@@ -58,7 +58,9 @@ only within its assignment.
 
    For a transition with retained snapshots, add the matching `--previous-plan`,
    `--previous-worker-card`, and `--previous-master-card` options. Run the command from the repository
-   whose contracts are being checked; `--repo-root` remains the existing Skill-source-root option.
+   whose contracts are being checked; `--repo-root` remains the existing Skill-source-root option for the validator.
+   The three local writers use `--repo-root` for the business Master repository whose Git state they check and
+   accept an optional `--skill-root` for installed Skill resources (default: the directory containing the script).
 4. Confirm the requested paths, dependency/ownership edges, frozen full SHA, plan/task/card identity,
    model profile, and complete authorization are exactly the persisted values. A denied capability is
    explicit `false`/`null`/`0`; it is never inferred from a test, model, message, or service tier.
@@ -88,15 +90,22 @@ does not grant authority.
 | Read-only | `git status --short --branch`, `git rev-parse HEAD`, `git branch --show-current`, `git worktree list --porcelain`, `git diff --name-only`, `git log`, and reading Plan/Task Spec/Card/handoff files | Establish identity, ancestry, status, preserved material, and ownership before mutation. Any operator may inspect; never infer authority from the output alone. |
 | Validation-only | `python3 scripts/validate_contracts.py` with the applicable current/previous record options; `PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py'`; `git diff --check`; available Skill Creator `quick_validate.py` | Prove contract shape, cross-record history, tests, and diff integrity. Validation must precede each state-changing step; a passing test does not grant external authority. |
 | Local state-changing | `git add <owned-paths>` and `git commit -m '<message>'`; ordinary Master-owned `git merge`/`git cherry-pick` integration; `git worktree add` when a separately approved STRICT topology requires it | Changes local Git or coordination state. Workers commit only their allowed paths and never integrate or create extra worktrees; Master owns integration and topology decisions. A handed-off commit is immutable. |
-| Local state-changing | `python3 scripts/worker_card_sidecar.py --repo-root <MASTER_WORKTREE> --plan <PLAN_JSON> --master-card-json <MASTER_CARD_JSON> --task-id <TASK_ID> --transition --card-json <COMPLETE_CARD_JSON>` | The official atomic Worker Card transition. Use only for the bound Worker's legal transition or an explicitly recorded Master bootstrap/takeover; it changes no Plan, Master Card, Markdown, Git, or external state. |
-| Local state-changing | `python3 scripts/close_release.py --repo-root <MASTER_WORKTREE> --plan <PLAN_JSON> --master-card-json <MASTER_CARD_JSON> --worker-card-json <WORKER_CARD_JSON> --release-task-id <RELEASE_TASK_ID>` | Master-only local closeout after all closeout gates and the publication decision. It writes the exact existing three-file archive; it is not publication, cleanup, or deletion authority. |
-| Local state-changing | `python3 scripts/rollover_release.py --repo-root <MASTER_WORKTREE> --plan <PLAN_JSON> --master-card-json <MASTER_CARD_JSON> --next-plan-json <NEXT_PLAN_JSON> --next-master-card-json <NEXT_MASTER_CARD_JSON>` | Master-only next-release transition after verified closeout. It writes the existing immutable rollover receipt and forward compare-and-swap records; it is not a rollback or Worker dispatch grant. |
+| Local state-changing | `python3 scripts/worker_card_sidecar.py --repo-root <MASTER_WORKTREE> --skill-root <SKILL_ROOT> --plan <PLAN_JSON> --master-card-json <MASTER_CARD_JSON> --task-id <TASK_ID> --transition --card-json <COMPLETE_CARD_JSON>` | The official atomic Worker Card transition. Use only for the bound Worker's legal transition or an explicitly recorded Master bootstrap/takeover; it changes no Plan, Master Card, Markdown, Git, or external state. `--skill-root` is optional and defaults to the installed script's parent. |
+| Local state-changing | `python3 scripts/close_release.py --repo-root <MASTER_WORKTREE> --skill-root <SKILL_ROOT> --plan <PLAN_JSON> --master-card-json <MASTER_CARD_JSON> --worker-card-json <WORKER_CARD_JSON> --release-task-id <RELEASE_TASK_ID>` | Master-only local closeout after all closeout gates and the publication decision. It writes the exact existing three-file archive; it is not publication, cleanup, or deletion authority. `--skill-root` is optional and defaults to the installed script's parent. |
+| Local state-changing | `python3 scripts/rollover_release.py --repo-root <MASTER_WORKTREE> --skill-root <SKILL_ROOT> --plan <PLAN_JSON> --master-card-json <MASTER_CARD_JSON> --next-plan-json <NEXT_PLAN_JSON> --next-master-card-json <NEXT_MASTER_CARD_JSON>` | Master-only next-release transition after verified closeout. It writes the existing immutable rollover receipt and forward compare-and-swap records; it is not a rollback or Worker dispatch grant. `--skill-root` is optional and defaults to the installed script's parent. |
 | Local state-changing (separate destructive authorization) | Deletion, cleanup, or branch/ref removal | These are not implied by closeout, `IDLE`, rollover, or any other route. Prove the exact target and independent destructive scope immediately before any such local mutation; never batch or wrap it here. |
 | Separately authorized external mutation | `git push <remote> <ref>`, production publication/deployment, or external service calls | Never hide these behind a new wrapper or infer them from Candidate approval, tests, closeout, model profile, or Card state. Each exact target, scope, and capability needs its own current authorization immediately before use. |
 
 The `close_release.py` and `rollover_release.py` entries are existing local state transitions, not new
 records or new authority. No command in this map combines validation with publication, push, deletion,
 cleanup, or another external mutation.
+
+All three writers derive the canonical `state_root` from the Plan and acquire one persistent exclusive
+carrier at `<state_root>/.mwr-state.lock` before rereading records. They hold it through validation,
+business writes, and readback, wait at most five seconds, and fail without Plan, Card, archive, or receipt
+writes when another cooperating writer holds it. The carrier is outside every three-file release archive,
+persists after process exit, and is never deleted. Master-owned Plan/Card writers must use the same helper;
+arbitrary bypass writers are outside this protection. Rollover recovery is receipt-backed and forward-only.
 
 ## FAST route — short path only
 

@@ -28,6 +28,12 @@ from validate_contracts import (  # noqa: E402
     validate_worker_card,
     value_digest,
 )
+from state_lock import (  # noqa: E402
+    StateLockError,
+    canonical_state_root,
+    exclusive_state_lock,
+    plan_state_root,
+)
 
 
 SIDECAR_NAME = "WORKTREE_TASK.json"
@@ -153,20 +159,36 @@ def _existing_or_install(path: Path, data: bytes) -> bool:
             raise SidecarError(f"sidecar installed but temporary sibling remains: {temporary}") from error
 
 
-def _load_context(repo_root: Path, plan_path: Path, master_card_path: Path) -> tuple[
+def _assert_locked_state_root(plan: dict[str, Any], locked_state_root: Path | None) -> None:
+    if locked_state_root is None:
+        return
+    try:
+        actual = canonical_state_root(plan["state_root"])
+    except (KeyError, StateLockError) as error:
+        raise SidecarError(f"Plan state_root cannot be bound to the held lock: {error}") from error
+    if actual != locked_state_root:
+        raise SidecarError(
+            f"Plan state_root changed while locking: expected={locked_state_root}, observed={actual}"
+        )
+
+
+def _load_context(repo_root: Path, skill_root: Path, plan_path: Path, master_card_path: Path,
+                  locked_state_root: Path | None = None) -> tuple[
     dict[str, Any], dict[str, dict[str, Any]], dict[str, Any], dict[str, Any], Path
 ]:
     """Load and validate the current Master-owned records without writing them."""
     repo_root = _directory(repo_root, "Master repository")
+    skill_root = _directory(skill_root, "Skill root")
     plan_path = _regular_file(_canonical(plan_path, "Dispatch Plan"), "Dispatch Plan")
     master_card_path = _regular_file(_canonical(master_card_path, "Master Card"), "Master Card")
     schema_path = _regular_file(
-        _canonical(repo_root / "references" / "contracts.schema.json", "contract Schema"),
+        _canonical(skill_root / "references" / "contracts.schema.json", "contract Schema"),
         "contract Schema",
     )
     try:
         schema = load_json(schema_path)
         _, plan = _read_json(plan_path, "Dispatch Plan")
+        _assert_locked_state_root(plan, locked_state_root)
         validate_plan(plan, schema)
         specs = load_persisted_plan_specs(plan, schema)
         _, master = _read_json(master_card_path, "Master Card")
@@ -213,6 +235,32 @@ def _validate_card_task_binding(card: dict[str, Any], task_id: str, label: str) 
         raise SidecarError(
             f"{label} Worker Card identity does not match explicit task_id: "
             f"expected={task_id!r}, observed={bound_task_id!r}"
+        )
+
+
+def _validate_existing_card_binding(card: dict[str, Any], task_id: str, target: Path,
+                                    specs: dict[str, dict[str, Any]]) -> None:
+    """Bind an existing sidecar to its requested task and physical worktree."""
+    if card["state"] != "IDLE":
+        _validate_card_task_binding(card, task_id, "existing")
+        return
+    history = card["last_task"]
+    history_task_id = history["task_id"]
+    if history_task_id is None:
+        return
+    history_spec = specs.get(history_task_id)
+    if history_spec is None:
+        raise SidecarError(
+            f"existing IDLE last_task is absent from the current Plan: {history_task_id}"
+        )
+    if (history["task_spec_revision"], history["task_spec_digest"]) != (
+            history_spec["task_spec_revision"], history_spec["task_spec_digest"]):
+        raise SidecarError("existing IDLE last_task Task Spec identity is stale")
+    history_target = _expected_sidecar(history_spec)
+    if history_target != target:
+        raise SidecarError(
+            "existing IDLE last_task belongs to another Worker worktree: "
+            f"expected={history_target}, observed={target}"
         )
 
 
@@ -456,14 +504,17 @@ def _matching_handoff(plan: dict[str, Any], specs: dict[str, dict[str, Any]],
     return spec, handoff
 
 
-def _validate_inputs(repo_root: Path, plan_path: Path, master_card_path: Path,
-                     task_id: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any],
-                                              dict[str, Any], Path]:
+def _validate_inputs(repo_root: Path, skill_root: Path, plan_path: Path, master_card_path: Path,
+                     task_id: str, locked_state_root: Path | None = None
+                     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any],
+                                dict[str, Any], Path]:
     repo_root = _directory(repo_root, "Master repository")
+    skill_root = _directory(skill_root, "Skill root")
     plan_path = _regular_file(_canonical(plan_path, "Dispatch Plan"), "Dispatch Plan")
     master_card_path = _regular_file(_canonical(master_card_path, "Master Card"), "Master Card")
     _, plan = _read_json(plan_path, "Dispatch Plan")
-    schema_path = _canonical(repo_root / "references" / "contracts.schema.json", "contract Schema")
+    _assert_locked_state_root(plan, locked_state_root)
+    schema_path = _canonical(skill_root / "references" / "contracts.schema.json", "contract Schema")
     try:
         schema = load_json(schema_path)
         validate_plan(plan, schema)
@@ -488,13 +539,13 @@ def _validate_inputs(repo_root: Path, plan_path: Path, master_card_path: Path,
     return plan, spec, handoff, master, schema, worktree
 
 
-def bootstrap_worker_card(*, repo_root: Path, plan_path: Path, master_card_path: Path,
-                          task_id: str, worker_card_path: Path | None = None) -> dict[str, Any]:
+def _bootstrap_worker_card_locked(*, repo_root: Path, skill_root: Path, plan_path: Path,
+                                  master_card_path: Path, task_id: str,
+                                  worker_card_path: Path | None,
+                                  locked_state_root: Path) -> dict[str, Any]:
     """Create or verify one IDLE sidecar from terminal Plan/Master evidence."""
-    if not isinstance(task_id, str) or not task_id:
-        raise SidecarError("task_id must be a non-empty string")
     _, _, handoff, master, schema, worktree = _validate_inputs(
-        repo_root, plan_path, master_card_path, task_id,
+        repo_root, skill_root, plan_path, master_card_path, task_id, locked_state_root,
     )
     expected_path = worktree / SIDECAR_NAME
     target = expected_path if worker_card_path is None else _canonical(worker_card_path, "Worker Card sidecar")
@@ -530,6 +581,29 @@ def bootstrap_worker_card(*, repo_root: Path, plan_path: Path, master_card_path:
     except (ContractError, KeyError, TypeError) as error:
         raise SidecarError(f"Worker Card sidecar readback is invalid: {error}") from error
     return result
+
+
+def bootstrap_worker_card(*, repo_root: Path, plan_path: Path, master_card_path: Path,
+                          task_id: str, worker_card_path: Path | None = None,
+                          skill_root: Path | None = None) -> dict[str, Any]:
+    """Create or verify one IDLE sidecar from terminal Plan/Master evidence."""
+    if not isinstance(task_id, str) or not task_id:
+        raise SidecarError("task_id must be a non-empty string")
+    selected_skill_root = (skill_root or SCRIPT_DIR.parent).resolve()
+    try:
+        locked_state_root = plan_state_root(plan_path)
+        with exclusive_state_lock(locked_state_root):
+            return _bootstrap_worker_card_locked(
+                repo_root=repo_root,
+                skill_root=selected_skill_root,
+                plan_path=plan_path,
+                master_card_path=master_card_path,
+                task_id=task_id,
+                worker_card_path=worker_card_path,
+                locked_state_root=locked_state_root,
+            )
+    except StateLockError as error:
+        raise SidecarError(str(error)) from error
 
 
 def _validate_transition_evidence(previous: dict[str, Any], current: dict[str, Any],
@@ -576,9 +650,10 @@ def _validate_initial_activation(card: dict[str, Any], entry: dict[str, Any], sp
         _require_rework_handoff(master, entry, spec, card)
 
 
-def transition_worker_card(*, repo_root: Path, plan_path: Path, master_card_path: Path,
-                           card: dict[str, Any], task_id: str | None = None,
-                           worker_card_path: Path | None = None) -> dict[str, Any]:
+def _transition_worker_card_locked(*, repo_root: Path, skill_root: Path, plan_path: Path,
+                                   master_card_path: Path, card: dict[str, Any],
+                                   task_id: str | None, worker_card_path: Path | None,
+                                   locked_state_root: Path) -> dict[str, Any]:
     """Atomically persist one Worker-owned complete JSON Card transition.
 
     The input is a JSON object supplied by the Worker; the Markdown projection
@@ -588,7 +663,9 @@ def transition_worker_card(*, repo_root: Path, plan_path: Path, master_card_path
     """
     if not isinstance(card, dict):
         raise SidecarError("Worker Card transition requires a complete JSON object")
-    plan, specs, master, schema, plan_path = _load_context(repo_root, plan_path, master_card_path)
+    plan, specs, master, schema, plan_path = _load_context(
+        repo_root, skill_root, plan_path, master_card_path, locked_state_root,
+    )
     resolved_task_id = _resolve_task_id(task_id, card, worker_card_path, specs)
     spec = specs.get(resolved_task_id)
     if spec is None:
@@ -609,8 +686,7 @@ def transition_worker_card(*, repo_root: Path, plan_path: Path, master_card_path
         raw, previous = _read_canonical_card(
             target, schema, enforce_authorization_expiry=enforce_expiry,
         )
-        if previous["state"] != "IDLE":
-            _validate_card_task_binding(previous, resolved_task_id, "existing")
+        _validate_existing_card_binding(previous, resolved_task_id, target, specs)
         if raw == data:
             return card
         _validate_transition_evidence(previous, card, plan, spec, master)
@@ -626,9 +702,35 @@ def transition_worker_card(*, repo_root: Path, plan_path: Path, master_card_path
     return result
 
 
+def transition_worker_card(*, repo_root: Path, plan_path: Path, master_card_path: Path,
+                           card: dict[str, Any], task_id: str | None = None,
+                           worker_card_path: Path | None = None,
+                           skill_root: Path | None = None) -> dict[str, Any]:
+    """Atomically persist one Worker-owned complete JSON Card transition under the state lock."""
+    if not isinstance(card, dict):
+        raise SidecarError("Worker Card transition requires a complete JSON object")
+    selected_skill_root = (skill_root or SCRIPT_DIR.parent).resolve()
+    try:
+        locked_state_root = plan_state_root(plan_path)
+        with exclusive_state_lock(locked_state_root):
+            return _transition_worker_card_locked(
+                repo_root=repo_root,
+                skill_root=selected_skill_root,
+                plan_path=plan_path,
+                master_card_path=master_card_path,
+                card=card,
+                task_id=task_id,
+                worker_card_path=worker_card_path,
+                locked_state_root=locked_state_root,
+            )
+    except StateLockError as error:
+        raise SidecarError(str(error)) from error
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=SCRIPT_DIR.parent)
+    parser.add_argument("--skill-root", type=Path, default=SCRIPT_DIR.parent)
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--master-card-json", type=Path)
     parser.add_argument("--task-id", required=True)
@@ -637,6 +739,7 @@ def main() -> int:
     parser.add_argument("--card-json", "--transition-card-json", dest="transition_card_json", type=Path)
     args = parser.parse_args()
     repo_root = args.repo_root.resolve()
+    skill_root = args.skill_root.resolve()
     plan_path = args.plan or repo_root / ".codex" / "multi-worktree-release" / "dispatch-plan.json"
     master_card_path = args.master_card_json or repo_root / ".codex" / "multi-worktree-release" / "master-card.json"
     try:
@@ -654,6 +757,7 @@ def main() -> int:
                 task_id=args.task_id,
                 worker_card_path=args.worker_card_json,
                 card=card,
+                skill_root=skill_root,
             )
         else:
             card = bootstrap_worker_card(
@@ -662,6 +766,7 @@ def main() -> int:
                 master_card_path=master_card_path,
                 task_id=args.task_id,
                 worker_card_path=args.worker_card_json,
+                skill_root=skill_root,
             )
     except (SidecarError, ContractError, KeyError, TypeError, OSError, json.JSONDecodeError) as error:
         print(f"worker card sidecar: FAIL {error}", file=sys.stderr)

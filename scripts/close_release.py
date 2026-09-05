@@ -36,6 +36,12 @@ from validate_contracts import (  # noqa: E402
     validate_worker_card,
     value_digest,
 )
+from state_lock import (  # noqa: E402
+    StateLockError,
+    canonical_state_root,
+    exclusive_state_lock,
+    plan_state_root,
+)
 
 
 TERMINAL_DISPATCH_STATES = {"INTEGRATED", "CANCELLED", "SUPERSEDED"}
@@ -598,13 +604,23 @@ def archive_paths(archive: Path) -> tuple[Path, Path, Path]:
     return tuple(archive / name for name in ARCHIVE_NAMES)  # type: ignore[return-value]
 
 
-def close_release(*, repo_root: Path, plan_path: Path, master_card_path: Path,
-                  worker_card_paths: list[Path] | None = None, release_task_id: str | None = None,
-                  now: str | None = None) -> dict[str, Any]:
+def _close_release_locked(*, repo_root: Path, skill_root: Path, plan_path: Path,
+                          master_card_path: Path, worker_card_paths: list[Path] | None,
+                          release_task_id: str | None, now: str | None,
+                          locked_state_root: Path) -> dict[str, Any]:
     repo_root = repo_root.resolve()
+    skill_root = skill_root.resolve()
     plan_path = plan_path.resolve(strict=False)
     plan_bytes, plan = read_json_bytes(plan_path, "Dispatch Plan")
-    schema = load_json(repo_root / "references" / "contracts.schema.json")
+    try:
+        actual_state_root = canonical_state_root(plan["state_root"])
+    except (KeyError, StateLockError) as error:
+        raise CloseoutError(f"Plan state_root cannot be bound to the held lock: {error}") from error
+    if actual_state_root != locked_state_root:
+        raise CloseoutError(
+            f"Plan state_root changed while locking: expected={locked_state_root}, observed={actual_state_root}"
+        )
+    schema = load_json(skill_root / "references" / "contracts.schema.json")
     try:
         validate_plan(plan, schema)
         specs = load_persisted_plan_specs(plan, schema)
@@ -761,9 +777,32 @@ def close_release(*, repo_root: Path, plan_path: Path, master_card_path: Path,
     return {"status": "PASS", "archive": str(archive), "live_master": "IDLE", "idempotent": not replaced}
 
 
+def close_release(*, repo_root: Path, plan_path: Path, master_card_path: Path,
+                  worker_card_paths: list[Path] | None = None, release_task_id: str | None = None,
+                  now: str | None = None, skill_root: Path | None = None) -> dict[str, Any]:
+    """Close out one release while holding its canonical state-root lock."""
+    selected_skill_root = (skill_root or SCRIPT_DIR.parent).resolve()
+    try:
+        locked_state_root = plan_state_root(plan_path)
+        with exclusive_state_lock(locked_state_root):
+            return _close_release_locked(
+                repo_root=repo_root,
+                skill_root=selected_skill_root,
+                plan_path=plan_path,
+                master_card_path=master_card_path,
+                worker_card_paths=worker_card_paths,
+                release_task_id=release_task_id,
+                now=now,
+                locked_state_root=locked_state_root,
+            )
+    except StateLockError as error:
+        raise CloseoutError(str(error)) from error
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=SCRIPT_DIR.parent)
+    parser.add_argument("--skill-root", type=Path, default=SCRIPT_DIR.parent)
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--master-card-json", type=Path)
     parser.add_argument("--worker-card-json", type=Path, action="append", default=[])
@@ -771,6 +810,7 @@ def main() -> int:
     parser.add_argument("--now", help="RFC 3339 timestamp for deterministic local tests")
     args = parser.parse_args()
     repo_root = args.repo_root.resolve()
+    skill_root = args.skill_root.resolve()
     plan = args.plan or repo_root / ".codex" / "multi-worktree-release" / "dispatch-plan.json"
     master = args.master_card_json or repo_root / ".codex" / "multi-worktree-release" / "master-card.json"
     try:
@@ -781,6 +821,7 @@ def main() -> int:
             worker_card_paths=list(args.worker_card_json),
             release_task_id=args.release_task_id,
             now=args.now,
+            skill_root=skill_root,
         )
     except (CloseoutError, ContractError, KeyError, TypeError, OSError, json.JSONDecodeError) as error:
         print(f"release closeout: FAIL {error}", file=sys.stderr)

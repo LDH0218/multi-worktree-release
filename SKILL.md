@@ -70,6 +70,14 @@ The validator's `--repo-root` option identifies the Skill source repository root
 the option and its existing behavior. From a project root, run Python unit tests with
 `PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py'` so imports resolve reliably.
 
+The three local state writers keep this distinction explicit: their `--repo-root` is the business Master
+repository whose Git state is checked, while optional `--skill-root` selects the installed Skill resources
+and defaults to the directory containing the installed scripts. Each writer reads the Plan's canonical
+`state_root` before acquiring the persistent `<state_root>/.mwr-state.lock`; cooperating writers hold that
+exclusive lock through validation, writes, and readback, wait no longer than five seconds, and fail without
+business-state writes on conflict. The carrier is outside release archives, remains present after release,
+and is never deleted. Rollover remains receipt-backed forward recovery only; it never rolls back a partial batch.
+
 ## Establish repository truth first
 
 1. Read repository-owned agent instructions and the governance files they route to. If present, inspect architecture indexes,
@@ -281,6 +289,10 @@ no-overwrite atomic writes, and clear only the live Master lock after readback v
 conflicts, changed inputs, unsafe paths, incomplete history, or interruption fail closed. Closeout grants no push, tag, release,
 deploy, execution, external call, destructive operation, synchronization, or production-publication authority.
 
+Closeout acquires the canonical state-root lock before rereading Plan, Master, and every canonical Worker sidecar and holds it
+through the three archive writes, live-Master replacement, and readback. A competing writer fails within the five-second bound
+without changing Plan, Card, archive, or receipt business state; the persistent lock carrier is not part of the three-file archive.
+
 ### v1 release rollover
 
 After a successful closeout, use `scripts/rollover_release.py`—not an ordinary Plan transition—to open the next independent
@@ -293,6 +305,9 @@ baseline must equal the current clean Master Git HEAD. Old Worker directories or
 rollover: the verified closeout is the authority for the closed release. Any byte conflict, incomplete/forged archive,
 dirty/unreachable Git state, inherited handoff or candidate, incorrect target baseline, or interrupted state outside the exact
 source/target bytes fails closed; a receipt-backed Plan-only interruption may only resume forward, never roll back or dispatch.
+
+Rollover uses the same canonical state-root lock for receipt installation and both live-record replacements. The receipt and exact
+staged target bytes remain the only recovery evidence after a Plan-only interruption; no rollback or mixed-batch repair is inferred.
 
 The canonical local Worker Card evidence is the schema-valid full card at the fixed ignored path
 `<WORKTREE>/WORKTREE_TASK.json`; `WORKTREE_TASK.md` is only a human projection and is never implicitly parsed as JSON. Every
