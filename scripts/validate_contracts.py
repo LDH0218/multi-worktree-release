@@ -25,7 +25,7 @@ RFC3339_PATTERN = (
     r"(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$"
 )
 RFC3339_RE = re.compile(RFC3339_PATTERN)
-SUPERSEDE_FIELDS = {"objective", "owner_role", "worktree", "expected_head", "authorization"}
+SUPERSEDE_FIELDS = {"objective", "owner_role", "worktree", "branch", "expected_head", "authorization"}
 DISPATCH_TRANSITIONS = {
     "GATED": {"READY", "CANCELLED", "SUPERSEDED"},
     "READY": {"PUBLISHED", "CANCELLED", "SUPERSEDED"},
@@ -442,6 +442,20 @@ def canonical_repository_path(value: Any, label: str) -> str:
     return "/".join(segments)
 
 
+def canonical_worktree_identity(value: Any, label: str = "worktree") -> tuple[Any, ...]:
+    """Compare existing directories by identity and absent worktrees by canonical path."""
+    validate_nonempty_string(value, label)
+    path = Path(cast(str, value))
+    try:
+        canonical = path.resolve(strict=False)
+        if path.is_dir():
+            stat = path.stat()
+            return ("directory", stat.st_dev, stat.st_ino)
+    except (OSError, RuntimeError) as error:
+        raise ContractError(f"{label} cannot be canonicalized: {error}") from error
+    return ("path", str(canonical))
+
+
 def validate_repository_path_list(value: Any, label: str) -> list[str]:
     if not isinstance(value, list):
         raise ContractError(f"{label} must be an array")
@@ -855,7 +869,7 @@ def validate_plan(value: dict[str, Any], schema: dict[str, Any]) -> None:
         raise ContractError("dispatch plan digest mismatch")
     ids: list[str] = []
     entries: dict[str, dict[str, Any]] = {}
-    active_worktrees: dict[str, str] = {}
+    active_worktrees: dict[tuple[Any, ...], str] = {}
     for task in value["tasks"]:
         require_schema_fields(task, schema, "dispatch_task", "dispatch task")
         task_id = task["task_id"]
@@ -879,10 +893,11 @@ def validate_plan(value: dict[str, Any], schema: dict[str, Any]) -> None:
                 schema["$defs"]["dispatch_task"]["properties"]["revision_decision"]["enum"]):
             raise ContractError(f"unknown revision decision for {task_id}: {task['revision_decision']}")
         if task["dispatch_status"] not in {"INTEGRATED", "SUPERSEDED", "CANCELLED"}:
-            prior = active_worktrees.get(task["worktree"])
+            worktree_identity = canonical_worktree_identity(task["worktree"], f"{task_id}.worktree")
+            prior = active_worktrees.get(worktree_identity)
             if prior:
                 raise ContractError(f"active tasks {prior} and {task_id} share worktree {task['worktree']}")
-            active_worktrees[task["worktree"]] = task_id
+            active_worktrees[worktree_identity] = task_id
         for field in ("task_spec_digest", "acceptance_digest", "authorization_envelope_digest"):
             validate_digest(task[field], f"{task_id}.{field}")
         for field in ("blocked_by", "parallel_with"):
@@ -1259,7 +1274,8 @@ def validate_dispatch_graph_and_model_routing(plan: dict[str, Any], specs: dict[
                 raise ContractError(f"parallel dependency conflict between {left} and {right}")
             if entries[left]["dispatch_wave"] != entries[right]["dispatch_wave"]:
                 raise ContractError(f"parallel peers have unequal waves: {left}, {right}")
-            if entries[left]["worktree"] == entries[right]["worktree"]:
+            if canonical_worktree_identity(entries[left]["worktree"], f"{left}.worktree") == \
+                    canonical_worktree_identity(entries[right]["worktree"], f"{right}.worktree"):
                 raise ContractError(f"parallel peers share worktree: {left}, {right}")
             overlaps = sorted(
                 {f"{left}:{left_path} <-> {right}:{right_path}"
@@ -1539,6 +1555,35 @@ def classify_task_change(old: dict[str, Any], new: dict[str, Any]) -> str:
     if new["task_spec_digest"] == old["task_spec_digest"]:
         raise ContractError("changed executable content requires a new task-spec digest")
     return "REVISE"
+
+
+def validate_task_spec_transition(previous_plan: dict[str, Any], current_plan: dict[str, Any],
+                                  previous_specs: dict[str, dict[str, Any]],
+                                  current_specs: dict[str, dict[str, Any]]) -> None:
+    """Reject immutable assignment changes hidden behind an in-place revision."""
+    previous_tasks = {task["task_id"]: task for task in previous_plan["tasks"]}
+    current_tasks = {task["task_id"]: task for task in current_plan["tasks"]}
+    for task_id in sorted(set(previous_specs) & set(current_specs), key=lambda item: item.encode("utf-8")):
+        change = classify_task_change(previous_specs[task_id], current_specs[task_id])
+        if change == "SUPERSEDE":
+            historical_error(
+                "H14",
+                f"task {task_id} changed immutable assignment fields in place; "
+                "publish a new successor with supersedes_task_id",
+            )
+        if change != "REVISE":
+            continue
+        previous_entry = previous_tasks[task_id]
+        current_entry = current_tasks[task_id]
+        if current_plan["plan_revision"] <= previous_plan["plan_revision"]:
+            historical_error("H14", f"task {task_id} REVISE requires a higher plan revision")
+        if current_entry["revision_decision"] != "REVISE":
+            historical_error(
+                "H14",
+                f"task {task_id} changed executable content without revision_decision=REVISE",
+            )
+        if current_entry["task_spec_revision"] <= previous_entry["task_spec_revision"]:
+            historical_error("H14", f"task {task_id} REVISE requires a higher task revision")
 
 
 def candidate_invalidation(old_head: str, new_head: str, old_gate_digest: str, new_gate_digest: str) -> str:
@@ -2329,6 +2374,9 @@ def validate_plan_transition(previous: dict[str, Any], current: dict[str, Any],
                 historical_error("H14", f"task {task_id} SUPERSEDE decision requires SUPERSEDED status")
             elif decision == "CANCELLED" and current_task["dispatch_status"] != "CANCELLED":
                 historical_error("H14", f"task {task_id} CANCELLED decision requires CANCELLED status")
+
+    if previous_specs is not None and current_specs is not None:
+        validate_task_spec_transition(previous, current, previous_specs, current_specs)
 
     added = sorted(set(current_tasks) - set(previous_tasks))
     if added and current_plan_revision == previous_plan_revision:

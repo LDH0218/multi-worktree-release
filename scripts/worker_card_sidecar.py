@@ -318,10 +318,12 @@ def _validate_current_card(card: dict[str, Any], plan: dict[str, Any],
         raise SidecarError(f"Worker Card validation failed: {error}") from error
 
 
-def _read_canonical_card(path: Path, schema: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
+def _read_canonical_card(path: Path, schema: dict[str, Any], *,
+                         enforce_authorization_expiry: bool = True
+                         ) -> tuple[bytes, dict[str, Any]]:
     raw, card = _read_json(path, "Worker Card sidecar")
     try:
-        validate_worker_card(card, schema)
+        validate_worker_card(card, schema, enforce_authorization_expiry=enforce_authorization_expiry)
         canonical = canonical_json(card)
     except (ContractError, KeyError, TypeError) as error:
         raise SidecarError(f"existing Worker Card sidecar is invalid: {error}") from error
@@ -546,12 +548,22 @@ def _validate_transition_evidence(previous: dict[str, Any], current: dict[str, A
     entry = next(task for task in plan["tasks"] if task["task_id"] == transition_task_id)
     previous_revision = previous["task_spec_revision"]
     previous_history_revision = previous["last_task"]["task_spec_revision"]
-    old_revision = previous_revision if previous_revision is not None else previous_history_revision
+    previous_task_id = previous["task_id"] or previous["last_task"]["task_id"]
+    same_task = previous_task_id == current["task_id"]
+    old_revision = None
+    if same_task:
+        old_revision = previous_revision if previous_revision is not None else previous_history_revision
     if current["state"] == "ACTIVE":
         rework = previous["state"] == "AWAITING_INTEGRATION"
         rework = rework or (old_revision is not None and current["task_spec_revision"] > old_revision)
         if rework:
-            _require_rework_handoff(master, entry, spec, current, previous)
+            uncommitted_blocked_revision = (
+                previous["state"] == "BLOCKED"
+                and previous["worker_commit_sha"] is None
+                and current["task_spec_revision"] > previous["task_spec_revision"]
+            )
+            if not uncommitted_blocked_revision:
+                _require_rework_handoff(master, entry, spec, current, previous)
     elif current["state"] == "AWAITING_INTEGRATION":
         _validate_received_handoff(master, entry, spec, current)
 
@@ -590,9 +602,15 @@ def transition_worker_card(*, repo_root: Path, plan_path: Path, master_card_path
         raise SidecarError("Worker Card sidecar must be exactly beside its bound Worker worktree")
 
     _validate_current_card(card, plan, specs, master, schema, plan_path)
+    _validate_card_task_binding(card, resolved_task_id, "transition input")
     data = canonical_json(card)
     if os.path.lexists(target):
-        raw, previous = _read_canonical_card(target, schema)
+        enforce_expiry = entry["dispatch_status"] not in TERMINAL_DISPATCH_STATES
+        raw, previous = _read_canonical_card(
+            target, schema, enforce_authorization_expiry=enforce_expiry,
+        )
+        if previous["state"] != "IDLE":
+            _validate_card_task_binding(previous, resolved_task_id, "existing")
         if raw == data:
             return card
         _validate_transition_evidence(previous, card, plan, spec, master)
