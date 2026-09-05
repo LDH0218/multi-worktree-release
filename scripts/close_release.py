@@ -330,32 +330,60 @@ def expected_worker_worktrees(plan: dict[str, Any]) -> dict[Path, str]:
 
 def select_worker_card_paths(plan: dict[str, Any], requested: list[Path] | None) -> list[Path]:
     expected = expected_worker_worktrees(plan)
-    if not requested:
-        return [worktree / WORKER_CARD_SIDECAR for worktree in sorted(expected)]
-    canonical: list[Path] = []
-    for path in requested:
-        resolved = safe_worker_card_path(path)
-        if resolved in canonical:
+    canonical = [worktree / WORKER_CARD_SIDECAR for worktree in sorted(expected)]
+    if requested:
+        requested_paths = [safe_worker_card_path(path) for path in requested]
+        if len(requested_paths) != len(canonical):
+            raise CloseoutError(
+                "explicit Worker Card inputs must cover every bound canonical sidecar"
+            )
+        if len(set(requested_paths)) != len(requested_paths):
             raise CloseoutError("duplicate Worker Card input path")
-        canonical.append(resolved)
     return canonical
 
 
-def load_worker_cards(paths: list[Path], schema: dict[str, Any]) -> list[tuple[Path, dict[str, Any]]]:
-    if len({str(safe_worker_card_path(path)) for path in paths}) != len(paths):
-        raise CloseoutError("duplicate Worker Card input path")
+def _read_worker_card(path: Path, schema: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
+    path = safe_worker_card_path(path)
+    require_regular_file(path, "Worker Card")
+    raw, card = read_json_bytes(path, "Worker Card")
+    try:
+        validate_worker_card(card, schema)
+    except (ContractError, KeyError, TypeError) as error:
+        raise CloseoutError(f"invalid Worker Card {path}: {error}") from error
+    if card["state"] != "IDLE":
+        raise CloseoutError(f"Worker Card is not IDLE: {path}")
+    return raw, card
+
+
+def load_worker_cards(paths: list[Path], schema: dict[str, Any],
+                      explicit_paths: list[Path] | None = None
+                      ) -> list[tuple[Path, dict[str, Any]]]:
+    """Read every canonical sidecar and reconcile optional snapshots by bytes."""
     cards: list[tuple[Path, dict[str, Any]]] = []
+    canonical_bytes: list[bytes] = []
     for path in paths:
-        path = safe_worker_card_path(path)
-        require_regular_file(path, "Worker Card")
-        _, card = read_json_bytes(path, "Worker Card")
-        try:
-            validate_worker_card(card, schema)
-        except (ContractError, KeyError, TypeError) as error:
-            raise CloseoutError(f"invalid Worker Card {path}: {error}") from error
-        if card["state"] != "IDLE":
-            raise CloseoutError(f"Worker Card is not IDLE: {path}")
+        raw, card = _read_worker_card(path, schema)
         cards.append((path, card))
+        canonical_bytes.append(raw)
+
+    if explicit_paths:
+        if len(explicit_paths) != len(cards):
+            raise CloseoutError(
+                "explicit Worker Card inputs must cover every bound canonical sidecar"
+            )
+        matches: set[int] = set()
+        for explicit_path in explicit_paths:
+            raw, _ = _read_worker_card(explicit_path, schema)
+            matching = [index for index, canonical_raw in enumerate(canonical_bytes)
+                        if raw == canonical_raw]
+            if len(matching) != 1 or matching[0] in matches:
+                raise CloseoutError(
+                    f"explicit Worker Card is not byte-identical to exactly one canonical sidecar: "
+                    f"{explicit_path}"
+                )
+            matches.add(matching[0])
+        if len(matches) != len(cards):
+            raise CloseoutError("explicit Worker Card inputs do not reconcile to canonical sidecars")
     return cards
 
 
@@ -583,7 +611,7 @@ def close_release(*, repo_root: Path, plan_path: Path, master_card_path: Path,
     except (ContractError, KeyError, TypeError, OSError, json.JSONDecodeError) as error:
         raise CloseoutError(f"Plan validation failed: {error}") from error
     worker_paths = select_worker_card_paths(plan, worker_card_paths)
-    workers = load_worker_cards(worker_paths, schema)
+    workers = load_worker_cards(worker_paths, schema, explicit_paths=worker_card_paths or None)
     archive = archive_directory(plan)
     check_archive_directory(archive)
     plan_archive_path, master_archive_path, closeout_path = archive_paths(archive)

@@ -203,6 +203,19 @@ def _expected_sidecar(spec: dict[str, Any]) -> Path:
     return worktree / SIDECAR_NAME
 
 
+def _validate_card_task_binding(card: dict[str, Any], task_id: str, label: str) -> None:
+    """Require the supplied card's current identity to name the requested task."""
+    if card["state"] == "IDLE":
+        bound_task_id = card["last_task"]["task_id"]
+    else:
+        bound_task_id = card["task_id"]
+    if bound_task_id != task_id:
+        raise SidecarError(
+            f"{label} Worker Card identity does not match explicit task_id: "
+            f"expected={task_id!r}, observed={bound_task_id!r}"
+        )
+
+
 def _handoff_matches(master: dict[str, Any], card: dict[str, Any]) -> list[dict[str, Any]]:
     identity = (card["task_id"], card["task_spec_revision"], card["task_spec_digest"],
                 card["source_thread_id"])
