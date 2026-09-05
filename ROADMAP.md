@@ -1,4 +1,4 @@
-# Roadmap：FAST 已采用；当前 STRICT 批次已完成；完整 v2 继续冻结
+# Roadmap：八项审查缺陷已本地修复；尚未发布；完整 v2 继续冻结
 
 > 状态：非规范路线图。本文描述后续产品方向和执行顺序，不改变当前 `SKILL.md`、Schema、校验器或既有 v1 行为。
 
@@ -22,7 +22,63 @@
 - 统一人类操作入口为 [Operator Execution Map](references/operator-execution-map.md)：先验证再变更，按 FAST/STRICT 分流，集成后才能生成 Candidate，Candidate 批准与发布分离，closeout 后才能 rollover；任一证据缺失或冲突立即 `STOP_AND_PRESERVE`。入口图不新增命令、状态、记录或权限。
 - 完整 v2 迁移保持冻结；cycle fence、v2 CLI、Schema 迁移和正式 adoption 不进入当前范围。
 
-## 当前进度
+## 2026-09-05：八项审查缺陷本地修复
+
+本轮交付是**本地修复及集成验收完成，尚未发布**。沿用
+`mwr-fast-eligibility-guardrails-2026-09-01` 批次；Master 保持 `ACTIVE`，Candidate 保持 `NONE`。
+历史批次的发布/closeout 结果不能代表本轮已发布。本轮不 push、不打 Tag、不创建 Release、不执行真实 closeout。
+
+复用 `协议基础设施-1.1` 与原 `588d` 工作树，在 `codex/audit-eight-fixes-2026-09-05`
+完成任务 `mwr-fix-audit-eight-defects`。原分支、旧 Task Spec、提交和 handoff 均保留。
+使用一次有范围返工（revision 2）补齐合法历史恢复；不改变 Schema、状态机、FAST、实验性 v2，亦不新增 SOP。
+
+| # | 已修复的问题 | 正式回归与验证要点 |
+| --- | --- | --- |
+| 1 | Card 参数任务、内容身份与目标工作树错配 | 写入及幂等返回前校验当前身份和保留的 IDLE 历史；错误工作树的 Card 字节保持不变。 |
+| 2 | closeout 用旧 IDLE 副本绕过真实 ACTIVE Card | 始终读取规范侧边文件；显式副本必须与真实文件逐字节一致；缺失、非 IDLE、过时及多余输入仍拒绝。 |
+| 3 | 并发状态写入造成混合 release | 四个本地写入口共享规范 state_root 的进程锁；双进程竞争最多一个目标成功，超时不写业务记录，中断按原 receipt 向前恢复。 |
+| 4 | 旧授权过期阻止合法取消收尾 | 历史快照与当前执行授权分开校验；合法终态可回 IDLE，过期授权不能重新执行。 |
+| 5 | 未提交任务修订恢复被误当成已交付返工 | 未提交 BLOCKED 恢复和修订任务首次激活不虚构 handoff；真实交付返工仍保留原 SHA 和 `REWORK_REQUESTED`。 |
+| 6 | 完整历史校验遗漏 objective 等不可变目标 | 比较前后完整 Task Spec；拒绝伪装成 REVISE 的目标/所有者/工作树/基线/授权变更，保留合法 SUPERSEDE。 |
+| 7 | 工作树路径别名绕过活动绑定去重 | 规范化路径并在目录存在时核对目录身份；兼容历史目录不存在的只读校验，不改写历史路径或摘要。 |
+| 8 | 业务仓库根与 Skill 资源根耦合 | 三个写入器支持独立 `--skill-root`；默认取安装的 scripts 目录的父目录。业务仓库无需复制 Schema，独立校验器的 `--repo-root` 含义不变。 |
+
+新增正式回归位于 [审查修复测试](scripts/test_audit_fixes.py) 和
+[进程锁测试](scripts/test_state_lock.py)，并复用原有 closeout/rollover 测试。
+返工同时验证：rollover 后同一 Worker 复用、live Plan/Master 正常更新后的激活、跨过一个闲置批次的历史恢复、
+归档篡改/跨工作树复制的拒绝，以及合法取消历史中的提交 SHA 保留。
+
+### 本地集成与验收证据
+
+| Worker 提交 | main 集成提交 |
+| --- | --- |
+| `90ce1ebb3b09541da937bf6b004f2554e6d58333` | `dfccff667eb1edce79f50f20e4ac87a73a19aafa` |
+| `a6725db5d868006e98546c7a71afacc7596ea3a1` | `05cd07a64a534e5d0add5a9b4b1d859387916983` |
+| `b88bcb37365fdeee2546565fdea5a21738efa4d7` | `6bfc0ee5a0e1692e6cba408d8193246fcec0714a` |
+| `bdd2c9f5723ca122d5501209835f3d44cac876c8`（唯一返工） | `ec32b112dc706a2b01fdac125b391eb690c38bae` |
+
+三组提交作为一个完整修复批次验收，不把中间提交当作独立发布版本。实际分组中，工作树别名校验在第二组，
+完整 Card 身份收紧涉及第三组及返工；未为了调整分组而重写原提交。
+
+- Master 独立审查总差异并按序集成；集成实现树与最终 Worker 交付树完全一致。
+- 本任务 revision 2 已登记为 `INTEGRATED`；Worker 经官方 sidecar 回到 `IDLE`（record revision 36），保留最终提交映射；Master 继续保持 `ACTIVE / NONE`。
+- `python3 scripts/validate_contracts.py`：91/91 PASS。
+- `PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py'`：83/83 PASS（原基线 61 项）。
+- `python3 scripts/validate_contracts.py --candidate-evidence-self-test`：36/36 PASS，按实际运行数量记录。
+- 原八项审查输入独立重放、Python 编译、Schema 解析、修改文档链接和 `git diff --check`：PASS。
+- 独立临时业务 Git 仓库中，真实 Worker 提交、Master 集成、Card 回 IDLE、Candidate、closeout、rollover、
+  幂等重试及后续 Worker 激活：PASS；仅证明临时完整生命周期，不伪装成本轮真实发布。
+- main 集成后重新运行验收；最终文档提交后的 main 检查结果由本次执行回报记录，不复用 Worker HEAD 的结果。
+- 其余真实工作树、Card、旧 Task Spec 和历史归档未变；只更新本轮获授权的协调记录。
+
+### 保留的验证限制
+
+- Skill Creator `quick_validate.py`：`NOT_PROVEN`，本地缺少 PyYAML；没有安装依赖，也不写成 PASS。
+- 掉电级持久性、实际对话调度及生效服务层级仍为待验证风险；请求的模型策略不等于运行层证明。
+- 共享锁只约束合作工具，不阻止绕过工具的任意文件写入；锁载体不是新的业务权威记录。
+- 现场跨项目抽样与完整 v2 停车区仍按原边界保留，不扩大本轮修复范围。
+
+## 既有路线进度
 
 - Phase 0～3：已完成。
 - Phase 4：已采用 FAST 作为低风险任务的默认路径。
@@ -34,7 +90,7 @@
 - 2026-08-31 已完成第二个 STRICT 批次启动能力的离线实现与恢复测试：`release-rollover` 以 prior closeout 为历史权威，支持新 live Plan/Master 的 fail-closed、可恢复启动。
 - 2026-08-31 已用 `release-rollover` 启动并完成真实批次 `mwr-role-bindings-2026-08-31`：修复空 Candidate 首次 fresh 认证路径，完成重新验收、正常推送和可恢复 closeout；最终 release HEAD 为 `9c4ed496be3f68edf8dca4c4955703be2c1744ae`，closeout digest 为 `sha256:6b205274ed6689e071589bb00e0beb633a4f8cc9adbe1793e99e9589b580277e`，live Master 已回到 `IDLE`。
 
-## 当前 STRICT 批次：已完成
+## 历史 STRICT 批次（2026-08-31）：已完成
 
 本批次没有重新设计整个架构，也没有改变已采用的 FAST 路径。以下收尾顺序已全部完成；归档证据位于 `history/releases/mwr-role-bindings-2026-08-31/`。
 
