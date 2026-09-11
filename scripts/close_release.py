@@ -94,6 +94,12 @@ def archive_directory(plan: dict[str, Any]) -> Path:
     state_root = Path(plan["state_root"])
     if not state_root.is_absolute():
         raise CloseoutError("Plan state_root must be absolute")
+    # Inspect the supplied path before resolve() hides a redirected archive.
+    current = Path(state_root.anchor)
+    for component in (state_root / "history" / "releases" / release_task_id).parts[1:]:
+        current /= component
+        if current.is_symlink() and current not in {Path("/var"), Path("/tmp"), Path("/home")}:
+            raise CloseoutError(f"closeout archive contains a symlink component: {current}")
     try:
         state_root_real = state_root.resolve(strict=False)
         boundary = (state_root_real / "history" / "releases").resolve(strict=False)

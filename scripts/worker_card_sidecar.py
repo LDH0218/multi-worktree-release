@@ -192,7 +192,10 @@ def _load_context(repo_root: Path, skill_root: Path, plan_path: Path, master_car
         _, plan = _read_json(plan_path, "Dispatch Plan")
         _assert_locked_state_root(plan, locked_state_root)
         validate_plan(plan, schema)
-        specs = load_persisted_plan_specs(plan, schema)
+        # Validate every assignment's integrity, without making unrelated expiry
+        # a global lock. _validate_current_card still enforces the target Card's
+        # current authorization and exact Task Spec equality before any write.
+        specs = load_persisted_plan_specs(plan, schema, enforce_authorization_expiry=False)
         _, master = _read_json(master_card_path, "Master Card")
         validate_master_card(master, schema)
         validate_cross_record_set(plan, None, master, plan_path, specs)

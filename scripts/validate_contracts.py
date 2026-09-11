@@ -1287,7 +1287,8 @@ def validate_dispatch_graph_and_model_routing(plan: dict[str, Any], specs: dict[
 
 
 def load_persisted_plan_specs(value: dict[str, Any], schema: dict[str, Any],
-                              historical: bool = False) -> dict[str, dict[str, Any]]:
+                              historical: bool = False, *,
+                              enforce_authorization_expiry: bool = True) -> dict[str, dict[str, Any]]:
     specs: dict[str, dict[str, Any]] = {}
     for entry in value["tasks"]:
         path = Path(entry["task_spec_path"])
@@ -1297,7 +1298,8 @@ def load_persisted_plan_specs(value: dict[str, Any], schema: dict[str, Any],
             raise ContractError(f"persisted task spec not found: {path}")
         try:
             spec = load_json(path)
-            enforce_expiry = not historical and entry["dispatch_status"] not in TERMINAL_DISPATCH_STATES
+            enforce_expiry = (enforce_authorization_expiry and not historical
+                              and entry["dispatch_status"] not in TERMINAL_DISPATCH_STATES)
             validate_task_spec(
                 spec, schema, enforce_authorization_expiry=enforce_expiry,
                 allow_legacy_model_profile=legacy_model_profile_allowed(entry, historical=historical),

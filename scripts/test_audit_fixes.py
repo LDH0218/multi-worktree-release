@@ -46,6 +46,94 @@ def active_card_for(spec: dict[str, object]) -> dict[str, object]:
 
 
 class IdentityAndCloseoutAuditTests(unittest.TestCase):
+    def test_closeout_rejects_internal_archive_symlinks_before_writes(self) -> None:
+        for level in ("history", "releases", "release"):
+            with self.subTest(level=level), tempfile.TemporaryDirectory() as directory:
+                fixture = CloseoutFixture(Path(directory))
+                if level == "history":
+                    target = fixture.state / "other-history"
+                    link = fixture.state / "history"
+                elif level == "releases":
+                    (fixture.state / "history").mkdir()
+                    target = fixture.state / "history" / "other-releases"
+                    link = fixture.state / "history" / "releases"
+                else:
+                    boundary = fixture.state / "history" / "releases"
+                    boundary.mkdir(parents=True)
+                    target = boundary / "other-release"
+                    link = boundary / "release-1"
+                target.mkdir()
+                link.symlink_to(target, target_is_directory=True)
+                plan_before = fixture.plan_path.read_bytes()
+                with self.assertRaisesRegex(close_release.CloseoutError, "symlink component"):
+                    fixture.close(now="2026-01-02T00:00:00Z")
+                self.assertEqual(list(target.iterdir()), [])
+                self.assertEqual(fixture.master_path.read_bytes(), fixture.active_master_bytes)
+                self.assertEqual(fixture.plan_path.read_bytes(), plan_before)
+                self.assertEqual(fixture.worker_path.read_bytes(), fixture.worker_bytes)
+
+    def test_unrelated_expiry_does_not_block_cancellation_but_target_expiry_does(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan, specs = contracts.make_graph_bundle(
+                root, {"a": {"status": "CANCELLED"}, "b": {"status": "PUBLISHED"}},
+            )
+            authorization = contracts.make_allowed_authorization_v2("external_call")
+            authorization["expires_at"] = "2000-01-01T00:00:00Z"
+            authorization["envelope_digest"] = contracts.object_digest(authorization, "envelope_digest")
+            specs["b"]["authorization"] = authorization
+            specs["b"]["task_spec_digest"] = contracts.object_digest(specs["b"], "task_spec_digest")
+            for entry in plan["tasks"]:
+                spec = specs[entry["task_id"]]
+                Path(spec["worktree"]).mkdir(parents=True)
+                write_json(Path(spec["task_spec_path"]), spec)
+                entry["task_spec_digest"] = spec["task_spec_digest"]
+                entry["authorization_envelope_digest"] = spec["authorization"]["envelope_digest"]
+            plan["plan_digest"] = contracts.object_digest(plan, "plan_digest")
+            plan_path, master_path = root / "dispatch-plan.json", root / "master-card.json"
+            master = contracts.make_active_master_card(plan, str(plan_path))
+            master["frozen_baseline_sha"] = specs["a"]["expected_head"]
+            write_json(plan_path, plan)
+            write_json(master_path, master)
+            paths = {key: Path(spec["worktree"]) / worker_card_sidecar.SIDECAR_NAME
+                     for key, spec in specs.items()}
+            write_json(paths["a"], active_card_for(specs["a"]))
+            write_json(paths["b"], contracts.make_idle_worker_card())
+            before_b = paths["b"].read_bytes()
+            idle = contracts.make_idle_worker_card()
+            idle.update(record_revision=3, updated_at="2026-01-01T00:20:00Z")
+            idle["last_task"].update(
+                task_id="a", task_spec_revision=specs["a"]["task_spec_revision"],
+                task_spec_digest=specs["a"]["task_spec_digest"], outcome="CANCELLED",
+            )
+            # Skipping wall-clock expiry must not skip integrity of unrelated specs.
+            malformed = copy.deepcopy(specs["b"])
+            malformed["objective"] = "tampered without recomputing digest"
+            write_json(Path(malformed["task_spec_path"]), malformed)
+            before_a = paths["a"].read_bytes()
+            with self.assertRaises(worker_card_sidecar.SidecarError):
+                worker_card_sidecar.transition_worker_card(
+                    repo_root=REPO_ROOT, plan_path=plan_path, master_card_path=master_path,
+                    task_id="a", card=idle,
+                )
+            self.assertEqual(paths["a"].read_bytes(), before_a)
+            write_json(Path(specs["b"]["task_spec_path"]), specs["b"])
+            schema = contracts.load_json(REPO_ROOT / "references/contracts.schema.json")
+            with self.assertRaisesRegex(contracts.ContractError, "expired"):
+                contracts.load_persisted_plan_specs(plan, schema)
+            result = worker_card_sidecar.transition_worker_card(
+                repo_root=REPO_ROOT, plan_path=plan_path, master_card_path=master_path,
+                task_id="a", card=idle,
+            )
+            self.assertEqual(result["state"], "IDLE")
+            self.assertEqual(paths["b"].read_bytes(), before_b)
+            with self.assertRaisesRegex(worker_card_sidecar.SidecarError, "expired"):
+                worker_card_sidecar.transition_worker_card(
+                    repo_root=REPO_ROOT, plan_path=plan_path, master_card_path=master_path,
+                    task_id="b", card=active_card_for(specs["b"]),
+                )
+            self.assertEqual(paths["b"].read_bytes(), before_b)
+
     def test_explicit_task_id_mismatch_preserves_both_real_cards(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
