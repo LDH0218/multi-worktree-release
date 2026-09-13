@@ -2985,6 +2985,19 @@ def child_mapping_keys(block: str, parent: str, parent_indent: int) -> set[str]:
 
 
 def validate_documented_contracts(repo_root: Path, schema: dict[str, Any]) -> None:
+    # The entrypoint routes to maintained contracts; it need not repeat their text.
+    entrypoint = (repo_root / "SKILL.md").read_text(encoding="utf-8")
+    entry_links = set(re.findall(r"\]\(([^\s)]+)\)", entrypoint))
+    required_references = (
+        "methodology.md", "templates.md", "contracts.schema.json", "operator-execution-map.md",
+        "task-lifecycle-sop.md", "release-sop.md", "exception-recovery-sop.md",
+        "conversation-rotation-sop.md", "sop-compliance-audit-sop.md",
+        "project-adoption-sop.md", "sop-change-governance-sop.md", "retention-retirement-sop.md",
+    )
+    for name in required_references:
+        relative = f"references/{name}"
+        if relative not in entry_links or not (repo_root / relative).is_file():
+            raise ContractError(f"Skill required reference missing or broken: {relative}")
     methodology = (repo_root / "references" / "methodology.md").read_text(encoding="utf-8")
     templates = (repo_root / "references" / "templates.md").read_text(encoding="utf-8")
     canonical = extract_code_block(methodology, "## Canonical authorization envelope")
@@ -3073,7 +3086,7 @@ def validate_documented_contracts(repo_root: Path, schema: dict[str, Any]) -> No
         raise ContractError("historical result metadata drifted from validator")
     if tuple(historical.get("diagnostic_ids", [])) != HISTORICAL_DIAGNOSTIC_IDS:
         raise ContractError("historical diagnostic metadata drifted from validator")
-    for relative in ("SKILL.md", "references/methodology.md", "references/templates.md"):
+    for relative in ("references/methodology.md", "references/templates.md"):
         contents = (repo_root / relative).read_text(encoding="utf-8")
         if default_path not in contents:
             raise ContractError(f"default dispatch path missing from {relative}")

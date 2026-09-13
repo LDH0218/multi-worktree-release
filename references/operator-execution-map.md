@@ -7,6 +7,11 @@ Master Card, Git state, Schema/validator, and the eight SOPs remain authoritativ
 persisted record disagree, the record is not silently changed: stop and route the mismatch through the
 [Exception and Recovery SOP](exception-recovery-sop.md).
 
+This map is a command/order lookup, not a required extra reading step for every task. Choose the
+applicable procedure from the Skill entrypoint and read selected instructions completely. References
+to other routes apply only when that operation is in scope; they do not require loading all eight SOPs.
+All applicable entry checks and safety ordering below remain mandatory even when this lookup is not needed.
+
 The fixed order is:
 
 ```text

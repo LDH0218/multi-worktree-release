@@ -23,9 +23,10 @@ scope, Task/Plan revision, compatibility decision, integration, and release-batc
 may edit only its assigned paths; a reviewer reports evidence and does not grant document or release
 authority.
 
-**Required inputs.** Read the current eight-SOP map, core SOP boundaries, `SKILL.md`, repository
-instructions, methodology, templates, Schema, validator, relevant Plan/Task/Card/handoff and release
-evidence, the exact source/baseline and complete diff, the proposed old and new rules, affected
+**Required inputs.** Read `SKILL.md`, repository instructions and the SOPs whose rules or boundaries
+the change affects. Use methodology for protocol meaning, templates/Schema for record projections,
+and validator implementation for changed checks. Inspect relevant Plan/Task/Card/handoff and release
+evidence when assessing batch impact. Collect the exact source/baseline and complete diff, proposed old and new rules, affected
 triggers/owners/evidence/stops, compatibility and rollback path, reviewer, and any authorization or
 release impact. A contract, runtime, v2, FAST, or release implementation request is out of scope for
 this SOP.
@@ -67,8 +68,8 @@ allowed paths of its current assignment; a handoff or message never grants docum
 
 ## 1. Propose and inspect the change
 
-Before touching a file, read the current eight-SOP map, `SKILL.md`, README, AGENTS, methodology,
-templates, Schema, validator, relevant Plans/Task Specs/Cards, and current release evidence. Record in
+Before touching a file, read the applicable inputs above completely; use the entrypoint's eight-SOP
+map to identify affected boundaries rather than loading unrelated procedures. Record in
 existing task or review evidence:
 
 - the exact current source commit, document paths, owner, scope, and intended outcome;

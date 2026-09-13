@@ -1,7 +1,9 @@
 # Multi-Conversation, Multi-Worktree Release Method
 
-Use this reference to design, adopt, or review the collaboration model. Repository-owned governance takes precedence over
-these reusable defaults.
+Use this reference to design, adopt, or review the collaboration model, or when the applicable SOP and
+repository protocol do not settle a decision. It is not a prerequisite for every FAST edit. Read selected
+instructions completely; links below identify conditional operations, not a requirement to load all resources.
+Repository-owned governance takes precedence over these reusable defaults.
 
 ## Identity model
 
@@ -50,6 +52,11 @@ new role has durable contract ownership, an independent change cadence, and litt
 Executable messages follow a star topology. Workers may exchange discovery evidence but route all executable cross-layer
 instructions, baselines, synchronization, and rework through Master.
 
+Use available coordination tools to inspect and message existing tasks. Create, fork, move or archive
+a conversation only when the user requests that lifecycle action; absent tools, provide a copyable
+message. Message transport never enlarges authorization. Match the project's role names and the user's
+language rather than imposing platform/domain labels.
+
 ## FAST and STRICT selection
 
 Classify FAST before creating a Dispatch Plan or starting the heavier Master/Worker workflow. FAST is eligible only when one
@@ -84,7 +91,7 @@ boundaries. These four governance runbooks are human routing documents over the 
 role registry, authoritative record, Schema field, validator behavior, or runtime/v2/release implementation. Missing or
 ambiguous evidence remains `NOT_PROVEN` and follows the existing recovery procedure.
 
-Use the [Operator Execution Map](operator-execution-map.md) as the single human entry for the fixed order of validation before
+Consult the [Operator Execution Map](operator-execution-map.md) when command selection or order needs clarification: validation before
 mutation, FAST/STRICT selection, integrated-tree validation before Candidate, separate Candidate approval and publication,
 closeout before rollover, and immediate `STOP_AND_PRESERVE`. It only routes to the existing commands, records, and SOPs; it
 does not add a command wrapper, machine state, authority, or record.

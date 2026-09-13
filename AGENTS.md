@@ -1,17 +1,26 @@
 # Repository workflow
 
-This repository dogfoods the `multi-worktree-release` Skill.
+This repository dogfoods [multi-worktree-release](SKILL.md). Read its entrypoint, then only the
+procedure needed for the current task; fully read selected instructions before acting.
 
-- Use the main worktree and its Codex task as Master. Master owns planning, task publication, handoff review, integration, release-candidate gates, and publication decisions.
-- Changes that affect contract schemas, state transitions, authorization, dispatch semantics, persistence, recovery, message identity, candidate evidence, or the validator require the Skill's Master/Worker workflow.
-- Give each independent responsibility an isolated Codex task and Git worktree with a frozen full-SHA baseline, persisted Task Spec, default-deny authorization, explicit acceptance checks, and a structured handoff.
-- Within the project context, name persistent Codex tasks `<responsibility-role>-<conversation-generation>`, for example `Master-1.0` or `协议基础设施-1.1`. The project or Skill name, including the `MWR` abbreviation, belongs in project context and persisted records rather than the title. In a global or unscoped view, do not invent a project prefix unless the user explicitly requests a special naming convention. Keep long-lived roles, start each role at `1.0`, increment the suffix on conversation rotation, and omit status, branch, worktree, task ID, model profile, and authorization because the title is only a UI label.
-- Persistent conversation lifecycle follows [references/conversation-rotation-sop.md](references/conversation-rotation-sop.md). Master is the sole owner of every role binding and conversation create, rotate, or archive decision. Use the default blank-successor plus structured-handoff sequence; a fork is permitted only when predecessor history is genuinely short and forking is demonstrably necessary, with Master recording the reason. Rotate only for context too long, an explicit user request, or persistent risk; task completion, convenience, and an ordinary pause are not triggers. Keep the predecessor visible until the successor completes read-only verification and gives explicit confirmation. Workers may report rotation needs but may not create, bind, or archive conversations. Rotation preserves Task/Plan and Git identities, never copies uncommitted files or deletes history, and stops safely on wrong HEAD, wrong worktree, duplicate visible conversation, missing confirmation, or Worker self-archive.
-- Use [references/task-lifecycle-sop.md](references/task-lifecycle-sop.md) for FAST/STRICT task delivery, [references/release-sop.md](references/release-sop.md) for integrated-tree candidate, publication, push, closeout, and rollover, and [references/exception-recovery-sop.md](references/exception-recovery-sop.md) for stop-and-preserve recovery. Use [references/sop-compliance-audit-sop.md](references/sop-compliance-audit-sop.md) for actual execution audits, [references/project-adoption-sop.md](references/project-adoption-sop.md) for MWR self-maintenance or project adoption, [references/sop-change-governance-sop.md](references/sop-change-governance-sop.md) for SOP change classification and release-batch freeze, and [references/retention-retirement-sop.md](references/retention-retirement-sop.md) for retention, archive, retirement, and deletion-boundary review. These eight SOPs route to existing contracts and state transitions; they do not add machine states, role registries, authoritative records, or new authority. Conversation lifecycle remains solely governed by the Conversation Rotation SOP.
-- Use [references/operator-execution-map.md](references/operator-execution-map.md) as the single human entry order: validation before mutation; FAST or STRICT selection; integration before Candidate; separate Candidate approval and publication; closeout before rollover; and immediate `STOP_AND_PRESERVE` on mismatch. It maps existing commands only and grants no external, deletion, cleanup, synchronization, or scope-expansion authority.
-- Persist the normative Dispatch Plan under `.codex/multi-worktree-release/` in the Master worktree. Keep this live coordination state local and ignored by Git.
-- Workers must not merge, rebase, reset, synchronize from Master, push, publish, or widen scope unless their current Task Spec explicitly authorizes that exact action.
-- Master independently reviews and validates every handoff before integration. Production publication remains a separate explicit authorization.
-- Trivial prose-only or repository-metadata edits may remain single-task when they do not alter executable governance or contract meaning.
+- The main worktree/task is Master, owning planning, dispatch, independent handoff review, integration,
+  candidate gates and publication decisions.
+- Schema, state, authorization, dispatch, persistence, recovery, message identity, candidate or validator
+  changes require Master/Worker delivery. Isolate independent responsibilities with frozen full SHAs,
+  persisted Task Specs, default-deny grants, acceptance checks and structured handoffs. Trivial prose or
+  metadata may remain single-task only when executable governance and contract meaning do not change.
+- Keep live coordination under `.codex/multi-worktree-release/` local and ignored. Preserve user changes.
+- Workers cannot merge, rebase, reset, synchronize, push, publish or widen scope unless their current
+  Task Spec explicitly authorizes that exact action. Production publication needs separate explicit authority.
+- Use `<responsibility-role>-<conversation-generation>` titles, without project prefixes by default.
+  Master owns all durable role bindings; completion retains the current conversation/worktree.
+  Creation, rotation and archive follow [Conversation Rotation](references/conversation-rotation-sop.md).
+- Use [Task Lifecycle](references/task-lifecycle-sop.md) for STRICT delivery,
+  [Release](references/release-sop.md) for certification/closeout/rollover, and
+  [Exception and Recovery](references/exception-recovery-sop.md) for mismatches. Never bypass recovery stops.
+  Other governance routes are selected in the Skill entrypoint, not loaded for every edit.
+- [Operator Execution Map](references/operator-execution-map.md) is the command/order lookup:
+  validate before mutation, integrate before Candidate, separate publication authorization, closeout
+  before rollover. It grants no synchronization, cleanup, deletion or external authority.
 
-Repository-owned instructions take precedence over reusable defaults only when they explicitly replace a rule and preserve its safety properties.
+Repository rules replace reusable defaults only explicitly and while preserving their safety properties.

@@ -14,7 +14,7 @@ Governance routes are [sop-compliance-audit-sop.md](sop-compliance-audit-sop.md)
 [retention-retirement-sop.md](retention-retirement-sop.md). Use them for audit, adoption, SOP change, and retention
 decisions; they are reference-only links and do not duplicate machine contracts or core SOP rules.
 
-Use the [Operator Execution Map](operator-execution-map.md) as the single human routing entry before selecting a template. It
+Consult the [Operator Execution Map](operator-execution-map.md) when operation order or command selection is unclear. It
 orders validation before mutation, FAST/STRICT selection, integration before Candidate, separate publication authorization,
 closeout before rollover, and `STOP_AND_PRESERVE` on missing or conflicting evidence. It is a projection only and introduces no
 template record, command wrapper, or authority.
@@ -839,7 +839,7 @@ Authorization
 - Execution/job creation: not inherited.
 - Publication, deletion, scope expansion, and synchronization: not inherited.
 
-Read all repository governance and the state card. Verify path, branch, HEAD, status, the one-to-one role binding, and this
+Read repository instructions, the state card, and the applicable conversation/recovery procedure completely. Verify path, branch, HEAD, status, the one-to-one role binding, and this
 handoff without modification. Keep the predecessor visible until this successor bootstrap and explicit confirmation pass; only
 Master may then archive the predecessor. On mismatch, report and stop. On agreement, update current facts and wait; do not resume work or external
 authority yourself.

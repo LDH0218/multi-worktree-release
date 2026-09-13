@@ -82,7 +82,11 @@ flowchart LR
 这些 SOP 只是现有 Plan、Task Spec、Card、Schema、授权和状态规则的操作入口；持久对话的创建、轮换、确认和归档仍只由
 [Conversation Rotation SOP](references/conversation-rotation-sop.md) 规定。
 
-统一操作入口见 [Operator Execution Map](references/operator-execution-map.md)：先做只读身份与契约校验，再分流到 FAST、STRICT、
+从 [SKILL.md](SKILL.md) 判断任务并选择相关说明，选中的说明须完整阅读；不要求每次修改通读八个 SOP。
+符合条件的 FAST 使用入口中的最短流程；STRICT 派工、发布、异常和对话交接分别读取对应 SOP。
+methodology 用于详细协议，templates 用于生成或校验记录示例；链接不是全量阅读清单。
+
+需要查询命令或顺序时，见 [Operator Execution Map](references/operator-execution-map.md)：先做只读身份与契约校验，再分流到 FAST、STRICT、
 治理/轮换或异常保留路径；严格流程固定为集成树验收 → Candidate → 独立发布决定 → closeout → rollover。该入口图只复用现有命令和证据，
 不新增状态、记录、授权或外部变更包装。
 

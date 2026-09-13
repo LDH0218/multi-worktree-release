@@ -1,387 +1,114 @@
 ---
 name: multi-worktree-release
-description: Audit, design, adopt, or operate a Master/Worker collaboration model across persistent Codex tasks and Git worktrees, including task state cards, handoffs, integration gates, conversation rotation, and default-deny external authorization; route eligible bounded low-risk delivery through FAST before strict coordination. Use for delivery governance, not unrelated generic coding.
+description: Govern persistent Master/Worker tasks across Git worktrees, including handoffs, recovery, and release gates. Use for collaboration governance, not unrelated coding; classify eligible delivery as FAST first.
 ---
 
 # Multi-Worktree Release
 
-Coordinate long-lived Codex tasks and Git worktrees without confusing conversation context, code identity, runtime identity,
-or authorization.
+Coordinate persistent roles without confusing conversation context, Git identity, runtime execution,
+or authorization. Map roles to actual ownership boundaries, not a desired agent count. Audit and review
+requests are read-only unless implementation is requested.
 
-## Select the operating mode
+## Choose the smallest applicable path
 
-For ordinary delivery, classify **FAST** before creating a Dispatch Plan or starting heavy
-Master/Worker setup. **FAST** requires all of these conditions:
+Classify **FAST** before creating a Dispatch Plan or starting Master/Worker setup. All conditions must hold:
 
-- One current Codex task and work directory can complete the change, with no independent
-  parallel responsibility or extra worktree.
-- The relevant Card for the current worktree must be absent or `IDLE`, and that
-  worktree/role must have no active Dispatch assignment or competing durable role
-  binding. Any non-`IDLE` Card, active Dispatch assignment, or competing durable
-  role binding makes FAST ineligible; enter `STRICT` or stop.
-- Every path FAST would modify must be clearly owned by the current role. A Master
-  in the Master worktree must not modify Worker-owned business paths; unknown or
-  ambiguous ownership requires `STRICT`.
-- The change has no governance, protocol, Schema, state-machine, authorization,
-  security-boundary, persistence, release-semantics, irreversible migration, complex
-  production, or long-recovery impact.
-- Verification is clear and bounded locally, and every external write has separate explicit
-  authorization.
+- One current task and work directory can complete the change, without an independent parallel
+  responsibility or extra worktree.
+- The relevant Card is absent or `IDLE`; there is no active Dispatch assignment or competing durable
+  role binding for the current worktree/role. Any non-IDLE Card makes FAST ineligible.
+- Every modified path is clearly owned by the current role. Master must not edit Worker-owned business
+  paths from its worktree. Unknown or ambiguous ownership requires STRICT.
+- No governance, protocol, Schema, state-machine, authorization, security, persistence, release,
+  irreversible migration, production or long-recovery impact.
+- Verification is clear and bounded locally; every external write has separate explicit authorization.
 
-Escalate to the existing **ISOLATED / STRICT** workflow before risky action for any parallel
-responsibility; governance, security, persistence, or release change; long-lived recovery;
-production or irreversible action; material scope expansion; more than one local correction
-after failed acceptance; or uncertain classification.
+FAST stays in the current task/worktree: preserve user material, inspect the baseline, make the scoped
+change, run proportional local checks, review the diff, commit when repository policy calls for it,
+and report. Create no Plan, Task Spec, Worker/Master Card, extra task/worktree, cycle fence, adoption
+record or Operation Receipt. These instructions suffice for eligible FAST work; do not load STRICT or
+release material merely to perform it.
 
-FAST executes entirely in the current task and work directory: preserve user material, inspect
-the actual baseline, make the scoped change, run proportional local checks, review the diff,
-create one scoped commit when repository workflow calls for it, and report. It creates no
-Dispatch Plan, Task Spec, Worker/Master Card, extra task or worktree, cycle fence, repository
-adoption, or Operation Receipt.
+Enter existing **ISOLATED / STRICT** before risky action for parallel work, any excluded impact,
+material scope expansion, more than one local correction after failed acceptance, or uncertainty.
+Do not create records as a workaround for failed FAST eligibility; follow STRICT or stop.
 
-FAST never grants push, publication, external-call, execution/job, destructive, synchronization,
-or scope-expansion authority. Request the exact external mutation immediately before it unless
-already explicitly authorized; local tests are not `create_execution` authority. v1 remains
-authoritative. Protocol v2 adoption/binding prototypes are experimental and unrouted.
-Authorization envelope v2 and Candidate evidence schema v2 are formal components of the current
-v1-authoritative STRICT release flow. This distinction is human-readable terminology only; it
-does not change machine field names, v1 state transitions, or prototype routing. FAST adds no
-v2 CLI, cycle fence, Schema, validator, runtime state, migration, or compatibility behavior, and
-is not a generic coding mode.
+## Read only the applicable procedure
 
-- **Audit:** inspect the current repository, worktrees, branches, responsibilities, task state, and release process. Make no
-  changes unless the user also requests implementation.
-- **Adopt:** establish or revise role boundaries, governance files, task cards, handoff protocol, and release gates.
-- **Operate:** publish a task, perform Worker work, integrate a handoff, request rework, cancel/supersede work, or rotate a
-  conversation generation.
-- **Review:** evaluate an existing method for ambiguity, missing recovery paths, authorization leaks, or unverifiable claims.
+Select the relevant references below, then read each selected instruction completely before acting.
+Follow references required by that procedure when applicable; do not load every linked document.
+Progressive loading changes reading cost, not prerequisites, validation or stop conditions.
 
-Read [references/methodology.md](references/methodology.md) for every Adopt or Review request, and for an Operate request
-whose current repository protocol does not already settle the decision. Read [references/templates.md](references/templates.md)
-only when producing or validating task cards, dependency and dispatch plans, cross-task messages, exception reports, handoffs,
-integration confirmations, or rotation prompts.
+| Current operation | Required procedure |
+| --- | --- |
+| STRICT publication, execution, handoff, integration or Worker return to IDLE | [Task Lifecycle](references/task-lifecycle-sop.md) |
+| Candidate/Gate certification, publication, closeout or rollover | [Release](references/release-sop.md) |
+| Assignment mismatch, blocker, rework, cancellation or supersession | [Exception and Recovery](references/exception-recovery-sop.md) |
+| Create, rotate, recover or archive a persistent conversation | [Conversation Rotation](references/conversation-rotation-sop.md), sole conversation lifecycle authority |
+| Audit actual execution evidence | [SOP Compliance Audit](references/sop-compliance-audit-sop.md), plus the procedure being audited |
+| Adopt MWR or revise project ownership topology | [Project Adoption](references/project-adoption-sop.md) |
+| Classify, review or change SOP meaning and batch compatibility | [SOP Change Governance](references/sop-change-governance-sop.md) |
+| Retain, retire or consider deleting worktrees, conversations or records | [Retention and Retirement](references/retention-retirement-sop.md) |
 
-Read [references/contracts.schema.json](references/contracts.schema.json) when producing or validating persisted machine
-records. After changing this Skill's contracts, or before relying on newly created plan/task/card records, run
-`python3 scripts/validate_contracts.py` and resolve every failed invariant.
+- Read [methodology](references/methodology.md) for protocol design/review, adoption, or an operation
+  not settled by repository protocol and its applicable SOP. It retains detailed identity, dispatch,
+  authorization, model-policy, state-transition, candidate and recovery rules.
+- Read [templates](references/templates.md) when producing or validating assignment messages, Plans,
+  Cards, handoffs, exceptions, integration confirmations or rotation prompts.
+- Read [contracts.schema.json](references/contracts.schema.json) when producing or validating persisted
+  machine records. Schema and persisted records remain machine authority; prose cannot replace evidence.
+- Use [Operator Execution Map](references/operator-execution-map.md) to resolve commands or operation
+  order. It is a lookup, not an additional requirement to read all eight SOPs.
 
-The validator's `--repo-root` option identifies the Skill source repository root used to load
-`references/contracts.schema.json` and other validator resources; it does not identify the project being audited. Preserve
-the option and its existing behavior. From a project root, run Python unit tests with
-`PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py'` so imports resolve reliably.
+## Keep the safety boundaries
 
-The three local state writers keep this distinction explicit: their `--repo-root` is the business Master
-repository whose Git state is checked, while optional `--skill-root` selects the installed Skill resources
-and defaults to the Skill root, parent of the installed scripts directory. Each writer reads the Plan's canonical
-`state_root` before acquiring the persistent `<state_root>/.mwr-state.lock`; cooperating writers hold that
-exclusive lock through validation, writes, and readback, wait no longer than five seconds, and fail without
-business-state writes on conflict. The carrier is outside release archives, remains present after release,
-and is never deleted. Rollover remains receipt-backed forward recovery only; it never rolls back a partial batch.
+- Establish relevant absolute worktree, branch, full HEAD, status, preserved material, ownership and
+  record identities before mutation. Investigate ancestry and patch-equivalent integrations; branch-ahead
+  counts and chat claims alone do not prove integration. Preserve dirty/untracked user material.
+- External calls, executions/jobs, publication/push, destructive actions, synchronization and scope
+  expansion are default-deny. Verify the exact current grant immediately before use; local tests grant
+  no external execution authority. Never store secrets in messages or records. Model profiles are not grants.
+- Master owns planning, assignment publication, independent handoff review, integration and release
+  decisions. Workers change only assigned paths and their Card; no independent merge, rebase, reset,
+  synchronization, push, publication or widened scope. Worker-to-Worker messages share evidence, not execution.
+- Persist complete Task Specs and the Plan atomically, verify digests, then dispatch. The default Plan
+  is `<MASTER_WORKTREE>/.codex/multi-worktree-release/dispatch-plan.json`, with sibling `tasks/` specs.
+  Preserve repository tracking/ignore policy. Canonical `WORKTREE_TASK.json` is Worker machine evidence;
+  `WORKTREE_TASK.md` is only a human projection.
+- Freeze assignments to full SHAs. Message identity is `task_id + task_spec_revision + source_thread_id`;
+  duplicates must also match `task_spec_digest`. In-scope executable changes require a higher task
+  revision; objective, owner, worktree, baseline or authority changes require a superseding task.
+- One persistent role has one current conversation and one retained worktree/branch pair. Master alone
+  owns binding and lifecycle decisions. Use available task tools to inspect/message existing tasks;
+  create, fork, move or archive only when the user requests that lifecycle action. Without coordination
+  tools provide a copyable message; transport never grants authority.
+- Name conversations `<responsibility-role>-<conversation-generation>` (for example `Master-1.0`),
+  without a project prefix by default. Rotation preserves task and Git identity; require successor
+  verification and explicit confirmation before predecessor archive. Task completion does not retire
+  conversations/worktrees. Deletion always needs separate explicit authority.
+- Handed-off commits are immutable; rework uses successor commits. Master reviews the full patch and
+  records Worker-to-integrated SHA mappings. Regenerate final evidence from the integrated tree;
+  semantic conflicts return to their owner. Only Master declares a release candidate.
+- Preserve `integration → fresh Candidate/Gates → separate publication decision → closeout → rollover`.
+  Changed integrated HEAD invalidates Gate evidence; tests or closeout never grant publication.
+  Use existing writers and the state-root lock for cooperative writes, including Master Plan/Card
+  updates. Never bypass checks or replace receipt-backed forward recovery with rollback.
+- Mismatches stop the affected path and preserve evidence. Missing proof is `NOT_PROVEN`, not success.
+  A non-IDLE Worker locks its own worktree, not unrelated work; accepted integration may return that
+  Worker to IDLE while another responsibility blocks the release.
 
-## Establish repository truth first
+v1 remains authoritative. Authorization envelope v2 and Candidate evidence schema v2 are formal parts
+of current STRICT behavior; protocol v2 adoption/binding prototypes remain experimental and unrouted.
+This entrypoint changes neither protocol nor model configuration.
 
-1. Read repository-owned agent instructions and the governance files they route to. If present, inspect architecture indexes,
-   worktree scope files, task state cards, branch policy, CI, release scripts, and document authority maps.
-2. Confirm each relevant absolute worktree path, branch, full HEAD SHA, status, preserved untracked material, and commit graph.
-3. Distinguish unintegrated code from patch-equivalent cherry-picks or merges. Do not infer integration from branch-ahead counts.
-4. Treat existing dirty or untracked files as user-owned. Do not clean, reset, rebase, merge, or switch branches unless the
-   current request and repository rules authorize the exact action.
-5. If the actual baseline or task state differs from the handoff, report the difference and stop that execution path.
+## Validation and delivery
 
-## Preserve identity and authority boundaries
+Run `python3 scripts/validate_contracts.py` after contract changes and before relying on newly created
+Plan/Task/Card records. Its `--repo-root` means Skill source root, not audited project root.
+Writer `--repo-root` means business Master root; optional `--skill-root` defaults to the installed
+scripts directory's parent. Commands and historical pairs remain in applicable references.
 
-Keep these identities separate: responsibility role, conversation generation, worktree, branch, frozen commit baseline,
-product workflow/module, runtime execution, and external authorization. A conversation label is never a Git ref, runtime ID,
-contract revision, release credential, or permission.
-
-External calls, new executions/jobs, production publication, destructive actions, cross-worktree synchronization, and scope
-expansion are default-deny. Use the canonical authorization envelope in [references/methodology.md](references/methodology.md)
-to bind four independent v2 grants to capability-specific structured targets, controlled input and digest, local/remote
-route/provider rules, capability-local call and cost limits, execution-only fresh/resume semantics, and expiry. Keep every
-required field even when denied by recording `false`, `null`, or `0`; omission never grants authority, and one grant cannot
-lend target or budget fields to another. Persisted v1 flat envelopes remain valid only under their original contract. The
-read-only adapter converts only canonical v1 default-deny to a newly hashed v2 default-deny envelope; allowed or ambiguous v1
-authority requires a superseding task. Never store secrets in prompts, task cards, or handoff reports. Any authority-boundary
-change requires Master to publish a superseding Task Spec and recompute all dependent digests.
-
-## Name persistent conversations
-
-Within the project context, name each persistent Master or Worker conversation
-`<responsibility-role>-<conversation-generation>`.
-For example: `Master-1.0` or `协议基础设施-1.1`.
-
-- Keep the long-lived responsibility role stable. The project or Skill name, including the project abbreviation `MWR`, belongs
-  in project context and persisted records rather than the title. Use a specific role rather than a temporary task description,
-  and omit the generic `Worker` label when the role is already clear.
-- Start the first conversation for a role at `1.0`. When rotating that role to a new conversation, increment the generation
-  suffix to `1.1`, `1.2`, and so on while reusing the role's worktree and branch.
-- Do not invent a project prefix in a global or unscoped view unless the user explicitly requests a special naming convention.
-- Do not encode mutable status, branch, worktree, task ID, model profile, or authorization in the title.
-- Treat the title as a human-readable UI projection only. The persisted Dispatch Plan, Task Spec, and state card remain
-  authoritative for identity, state, scope, and authorization.
-
-Read the single normative lifecycle procedure for persistent conversations at
-[references/conversation-rotation-sop.md](references/conversation-rotation-sop.md) when creating, rotating, recovering, or
-archiving a persistent conversation. It is a human procedure over the existing Plan, Task Specs, Cards, handoffs, and
-Git/worktree evidence; it adds no role registry, machine state, or authority.
-
-Use the operator runbooks for normal delivery and recovery: [task lifecycle](references/task-lifecycle-sop.md) covers
-FAST/STRICT classification through Worker `IDLE`; [release](references/release-sop.md) covers integrated-tree candidate
-evidence, publication, push, closeout, and rollover; and [exception recovery](references/exception-recovery-sop.md) covers
-stop-and-preserve decisions. These are human routing documents over the existing contracts; they add no machine state or role
-registry, and the conversation SOP remains the sole conversation lifecycle authority.
-
-For governance operations, route to [SOP Compliance Audit](references/sop-compliance-audit-sop.md) for evidence-based
-execution audits, [Project Adoption](references/project-adoption-sop.md) for MWR self-maintenance or another project's
-adoption, [SOP Change Governance](references/sop-change-governance-sop.md) for editorial/normative SOP changes, and
-[Retention and Retirement](references/retention-retirement-sop.md) for archive, retirement, and deletion-boundary review.
-These four documents are human governance runbooks over the same records and four core SOPs; they add no machine state,
-role registry, authoritative record, Schema field, validator behavior, or runtime/v2/release implementation. Missing or
-ambiguous evidence remains `NOT_PROVEN` and routes to exception recovery.
-
-Use [Operator Execution Map](references/operator-execution-map.md) as the single human entry for the ordered universal gate,
-FAST/STRICT split, integrated-tree validation, candidate/publication separation, closeout/rollover order, and immediate
-`STOP_AND_PRESERVE` routing. It maps only existing commands and evidence sources; it adds no authority or wrapper command.
-
-## Durable role bindings
-
-A durable role binding is one tuple: `responsibility role → current visible conversation → retained worktree → branch`. One
-role has exactly one current visible conversation and one retained worktree/branch pair; one retained pair is not concurrently
-owned by another role or conversation. This is a governance invariant derived from the existing task list, Dispatch Plan,
-Task Specs, Worker/Master Cards, and read-only Git/worktree inventory. Do not add a role registry or another machine record in
-v1.
-
-Master is the sole lifecycle owner for persistent role bindings and conversation create, rotate, and archive decisions. Workers
-may report that rotation is needed and provide read-only evidence, but may not create, bind, or archive conversations.
-
-- **Create:** Master first inventories roles, visible conversations, worktrees, branches, cards, plans, dirty/untracked
-  material, and baselines. It may bind a new role only after the target worktree and branch are unambiguously available and
-  the binding evidence records the role, generation, conversation, absolute worktree, branch, full HEAD, status, and relevant
-  Plan/Task/Card identities. Worktree or branch creation follows its own explicit repository authority.
-- **Rotate:** Master creates the successor conversation with the same role, retained worktree, and branch, then waits for its
-  read-only bootstrap to verify the exact path, branch, HEAD/status, Plan/Task/Card identities, and preserved material. The
-  successor is blank by default and receives no copied chat context; only when the predecessor history is genuinely short and
-  forking is demonstrably necessary may Master use a fork, recording that reason. Either path requires the predecessor's
-  structured handoff and explicit successor confirmation before archiving only the predecessor. Keep the predecessor visible
-  until that confirmation succeeds. Rotation is triggered only by context becoming too long, an explicit user request, or a
-  persistent risk; task completion, convenience, or an ordinary pause alone are not triggers. Archiving conversation history is
-  not worktree or branch retirement, and rotation never copies uncommitted files or deletes either ref. Rotation preserves Task
-  ID, Task Spec revision/digest, Plan identity, and Git worktree/branch/HEAD; a fork does not inherit authority.
-- **Duplicate:** If two visible conversations claim one role or retained worktree, stop dispatch for the affected binding
-  immediately. Master may archive an unassigned duplicate only after proving it has no Task Spec, Worker/Master Card, changes
-  or untracked material, and no live binding. Mark its worktree as awaiting an explicit cleanup decision; never delete it
-  automatically.
-- **Retire:** Retire a binding only for a documented topology adjustment, role retirement, or major migration after Master
-  reconciles active tasks, handoffs, cards, baselines, and preserved material. Record the decision and evidence in the existing
-  task/Plan/Card/handoff projections. Binding retirement does not authorize worktree or branch deletion; that is a separate,
-  explicit destructive authorization.
-- **Complete:** A completed task returns its Worker Card to `IDLE`; the current conversation, retained worktree, and branch stay
-  available for the role. Do not archive the current conversation or clean up the binding merely because a task completed.
-
-## Coordinate through the Master
-
-- Use a star topology for executable instructions: Master publishes to Workers; Workers hand off to Master. Worker-to-Worker
-  communication may share read-only findings, but may not assign changes, synchronization, or runs.
-- When task/thread coordination tools are available, use them to inspect and message existing tasks. Create, fork, move, or
-  archive a task only when the user requests that lifecycle action. If no coordination tool exists, return a copyable message.
-  Transporting a message never enlarges its authorization.
-- Bind each long-lived role to one explicit worktree and branch. A conversation rotation reuses that worktree and branch.
-- Freeze every task to a full SHA. Workers do not independently merge, rebase, reset, or synchronize from Master.
-- Treat a non-IDLE task card as a lock on that worktree only, not as a global release lock. Identify messages with
-  `task_id + task_spec_revision + source_thread_id`; require the same `task_spec_digest` for duplicate delivery. Treat
-  `plan_revision` as a fencing token, not part of message identity. Changed executable content for an affected task requires a
-  higher task revision. A changed objective, owner, worktree, frozen baseline, or authority boundary requires a superseding
-  task rather than an in-place revision.
-- Keep `WORKTREE_TASK.md` compact and local when repository policy allows: it is a durable state card, not a copy of the full
-  cross-task message. Follow repository policy if the file is tracked or uses another name.
-
-## Dispatch policy
-
-Before publishing implementation work, Master creates a versioned Task Dependency and Dispatch Plan. The plan is a semantic
-model, not a required visual diagram; it may be represented as structured text, YAML, a table, or a diagram. Read the detailed
-plan validation and state-transition rules in [references/methodology.md](references/methodology.md).
-
-Persist the normative machine record before dispatch. Unless repository governance names another location, use
-`<MASTER_WORKTREE>/.codex/multi-worktree-release/dispatch-plan.json` and store complete task specifications under the sibling
-`tasks/` directory. Each plan entry carries its absolute `task_spec_path`. Conversation text, tables, and diagrams are
-projections, not the recovery source. Write task specs and the plan atomically, verify their digests, and only then publish an
-executable message.
-
-- The plan records task IDs, absolute worktrees, `dispatch_status`, `dispatch_wave`, `blocked_by`, and `parallel_with`.
-- Treat Task Spec `dependencies.blocked_by` as the canonical static direct graph and Plan `blocked_by` as the exact unresolved
-  direct projection. Reject duplicate, self, unknown, cyclic, redundant-transitive, stale, or omitted edges. Derive every wave
-  as `1` for a root or `1 + max(parent wave)`, and recompute `blocked_tasks` plus the minimum active `READY`/`PUBLISHED`
-  `ready_wave` frontier on every Plan write.
-- Require `parallel_with` to be canonical, symmetric, same-wave, transitively incomparable, and free of active-worktree or
-  semantic ownership overlap. Never infer parallel eligibility merely from equal waves.
-- Treat every Task Spec `allowed_paths` and `forbidden_paths` entry as a repository-relative POSIX path. Reject absolute paths,
-  backslashes, empty segments, `.`/`..` segments, and repository escapes; normalize one permitted trailing directory slash
-  before component-aware equality or ancestor overlap checks. Invalid aliases never reach parallel ownership comparison.
-- Apply standalone Schema-first runtime shape validation to every Dispatch Plan, Worker Card, and Master Card before semantic
-  validation. Check every top-level and nested primitive, nullable branch, object, array, and duplicate-sensitive collection
-  without truthiness or coercion; booleans never satisfy integer fields, and malformed records fail as contract errors.
-- Every plan entry records `task_spec_revision` and `task_spec_digest`. An affected changed assignment increments its task
-  revision; an unchanged active assignment may continue only through an explicit grandfather record in the new plan revision.
-- Treat `supersedes_task_id` as validated lineage, not descriptive text. A strict successor points to one distinct known older
-  assignment whose Dispatch status is terminal `SUPERSEDED`; reject self/unknown/future links, cycles, duplicate live
-  successors, publisher spoofing, or Plan/Task-Spec authorization-digest mismatch. Each `NEW` or `REVISE` Task Spec binds its
-  `source_thread_id` to its own publishing Plan's `issued_by`. A `GRANDFATHER` record preserves the earlier publisher, and a
-  predecessor and successor may have different sources after Master conversation rotation. A plan transition that replaces
-  an immutable assignment records exactly one new linked successor. The schema migration fence preserves older terminal
-  records and historical validation rejects unproved in-place source changes or forged lineage.
-- A grandfathered entry preserves its persisted task spec and records that spec's original `task_spec_plan_revision`; it does
-  not rewrite the task merely to copy the newer global fence.
-- Persist `model_policy` with an `enforced_from_plan_revision` migration fence before requiring profiles. At or after the fence,
-  every `NEW` or `REVISE` Task Spec and matching Plan entry uses one identical exact `model_profile`; older digest-preserved
-  records below the fence may omit it. Changing a profile requires a higher Task Spec revision/digest. Stop dispatch if the
-  launcher cannot honor the persisted profile.
-- Use these built-in owner defaults: Master `gpt-5.6-sol`/`high`/`default` with `owner-default:master`; ordinary Worker
-  `gpt-5.6-luna`/`max`/`priority` with `owner-default:ordinary-worker`; complex Worker
-  `gpt-5.6-luna`/`max`/`priority` with `owner-default:complex-worker`. A project may declare a different supported active profile
-  in `model_policy.owner_defaults`: Master may select either the built-in Sol profile or `gpt-5.6-luna`/`max`/`priority`, while
-  Workers use the Luna profile. The `selection_reason` must still identify the owning role, and the prior complex-worker Sol
-  profile is compatibility-only for digest-preserved terminal or `GRANDFATHER` records; every `NEW` or `REVISE` assignment uses
-  the project-declared profile. The persisted model `service_tier` is the requested scheduler profile, not a claim about the
-  unobservable effective tier; dispatch stops when the launcher can prove it cannot honor priority. It is never authorization
-  `route`/`provider`, and grants no external call, execution, publication, destructive action, synchronization, or scope expansion.
-- Keep semantic `plan_revision` separate from `record_revision`, which increments on every persisted state update. Preserve the
-  state directory as user-owned material whether repository policy tracks it or keeps it local.
-- Use the schema's strict timezone-bearing RFC 3339 grammar for every timestamp: literal `T`, seconds, and `Z` or a colonized
-  numeric offset are required, and calendar-invalid values are rejected consistently by documents, Schema, and Python.
-- Validate unique task IDs, known dependency references, acyclic dependencies, available worktrees, and no semantic file or
-  contract overlap before publishing a batch.
-- If tasks have no unresolved dependency and no semantic file or contract overlap, publish them in the same parallel batch.
-- `parallel_with` records validated same-wave concurrency claims.
-- Task Spec `blocked_by` determines dependency order; Plan `blocked_by` records only currently unresolved direct dependencies.
-- A non-IDLE task card locks only its own worktree; it does not block unrelated worktrees.
-- If a target worktree is `ACTIVE`, `AWAITING_INTEGRATION`, or `BLOCKED`, do not reuse it until Master resolves, cancels,
-  supersedes, or explicitly takes over the prior task.
-- Follow the authoritative Dispatch, Worker, and Master transition tables in [references/methodology.md](references/methodology.md).
-  Status-only updates increment persisted `record_revision`, not semantic task or plan revisions. On return to `IDLE`, clear
-  active lock fields and preserve the completed identity and outcome under `last_task`.
-- If an upstream contract is not frozen, downstream Workers may perform discovery only; implementation remains gated.
-- Worktree numbering never determines task order. Dependency edges determine task order.
-- A pre-dispatch mismatch removes that task from the current batch; it does not delay independent tasks.
-
-### Validate persisted history
-
-Use previous/current validation when retained snapshots must prove a state change. Pair `--previous-plan` with `--plan`,
-`--previous-worker-card` with `--worker-card-json`, and `--previous-master-card` with `--master-card-json`. Previous Worker
-input is a complete JSON Worker Card, never an implicit parse of `WORKTREE_TASK.md`. Each supplied snapshot is validated
-independently before its transition, and historical Plan validation requires the exact Task Specs referenced by that Plan.
-
-Run cross-record checks separately for the previous set and current set. Current Plan/Worker/Master consistency runs whenever
-at least two current records are supplied, even without a previous option. A relationship missing either record is `NOT_RUN`,
-not `PASS`; complete history requires all three pairs. Reports distinguish `PASS`, `FAIL`, and `NOT_RUN` and include canonical
-snapshot digests. Omitting every previous option preserves single-record output behavior, while `--skip-self-test` never skips
-requested snapshot, transition, or cross-record checks. See [references/methodology.md](references/methodology.md) for
-monotonic revisions, terminal states, immutable identity/evidence, and diagnostic rules.
-
-### v1 release closeout
-
-Release closeout is a local Master-owned recovery step, separate from FAST, candidate approval, Git push, and production
-publication. It may archive only a validated terminal Plan, an ACTIVE Master snapshot, and fresh schema-v2 `PASSED` candidate
-evidence for the exact final HEAD, with every bound Worker Card already `IDLE`. The archive layout is exactly
-`state_root/history/releases/<release_task_id>/{dispatch-plan.json,master-card.active.json,closeout.json}`; no index, pointer,
-alias, manifest, fourth record, cleanup, or v2 adoption behavior is permitted. Preserve exact source bytes and the complete
-ordered `worker_handoffs` array. Validate all inputs before the first archive write, install the three files with same-directory
-no-overwrite atomic writes, and clear only the live Master lock after readback verification. Equal bytes are idempotent;
-conflicts, changed inputs, unsafe paths, incomplete history, or interruption fail closed. Closeout grants no push, tag, release,
-deploy, execution, external call, destructive operation, synchronization, or production-publication authority.
-
-Closeout acquires the canonical state-root lock before rereading Plan, Master, and every canonical Worker sidecar and holds it
-through the three archive writes, live-Master replacement, and readback. A competing writer fails within the five-second bound
-without changing Plan, Card, archive, or receipt business state; the persistent lock carrier is not part of the three-file archive.
-
-### v1 release rollover
-
-After a successful closeout, use `scripts/rollover_release.py`—not an ordinary Plan transition—to open the next independent
-STRICT release. It verifies the immutable prior archive and the exact live `IDLE` projection, then writes one immutable receipt
-at `state_root/history/rollovers/<next-release-task-id>.json` before compare-and-swap replacement of the live Plan and Master
-Card. The receipt binds old closeout, source bytes, and target bytes; it is outside the three-file release archive and does not
-alter it. The new Plan starts a new release root at Plan and record revision `1`, contains only new Task Specs, and the new
-Master starts `ACTIVE` with an empty handoff list and canonical `NONE` candidate. Its frozen baseline and every initial task
-baseline must equal the current clean Master Git HEAD. Old Worker directories or sidecars are never rediscovered during
-rollover: the verified closeout is the authority for the closed release. Any byte conflict, incomplete/forged archive,
-dirty/unreachable Git state, inherited handoff or candidate, incorrect target baseline, or interrupted state outside the exact
-source/target bytes fails closed; a receipt-backed Plan-only interruption may only resume forward, never roll back or dispatch.
-
-Rollover uses the same canonical state-root lock for receipt installation and both live-record replacements. The receipt and exact
-staged target bytes remain the only recovery evidence after a Plan-only interruption; no rollback or mixed-batch repair is inferred.
-
-The canonical local Worker Card evidence is the schema-valid full card at the fixed ignored path
-`<WORKTREE>/WORKTREE_TASK.json`; `WORKTREE_TASK.md` is only a human projection and is never implicitly parsed as JSON. Every
-Worker state transition writes the complete JSON card atomically at that fixed path. A Master-only bootstrap may create one
-missing IDLE sidecar only from a terminal current Plan and its matching INTEGRATED Master handoff, using exact-byte
-no-overwrite installation and equal-byte retry idempotence. A Worker-owned transition operation accepts a complete JSON card,
-checks the Plan/Task identity, legal prior/current transition, revision, and relevant Master evidence, then replaces only the
-unchanged fixed sidecar; a missing prior is valid only for initial ACTIVE activation. Closeout discovers that fixed sidecar
-once per distinct Plan worktree when explicit inputs are omitted; explicit inputs must reconcile to the same worktree set.
-Missing, extra, duplicate, symlinked, invalid, non-IDLE, stale, or cross-worktree records fail before archive writes. Bootstrap
-and Worker transitions change no Markdown evidence, Plan, Master Card, Git state, or other worktree, and grant no external or
-Master authority.
-
-## Exceptions and recovery
-
-- If a Worker discovers an unexpected dependency, wrong assignment, wrong scope, wrong worktree, ownership ambiguity, or baseline
-  mismatch, it stops implementation, preserves the current state, records `BLOCKED`, and reports to Master.
-- Master revises the plan and gates only affected tasks. An in-scope correction uses a higher `task_spec_revision`; a changed
-  objective, owner, worktree, frozen baseline, or authority boundary creates a superseding task.
-- Do not silently reset, discard, amend, force-push, or reuse an affected worktree. Cancellation and takeover require Master to
-  record the evidence and outcome. Read [references/methodology.md](references/methodology.md) for the recovery procedure.
-
-## Execute and integrate
-
-- A Worker changes only owned/allowed paths, runs layer tests plus affected shared-contract tests when available, reviews the
-  diff, creates an atomic commit, records `AWAITING_INTEGRATION`, and does not rewrite the handed-off commit.
-- Rework creates a successor commit. Do not amend or force-push an immutable handoff.
-- `commit_message: null` is valid only for an `independent-read-only` report task. Such a revision may be `BLOCKED` or
-  `CANCELLED`, but cannot be integrated successfully. A successful re-review uses a higher Task Spec revision with a non-empty
-  attestation commit message; that exact contract permits a metadata-only empty commit and an explicit tree-equivalence
-  Worker-to-Master mapping. It never relaxes the commit requirement for an implementation task.
-- Master reviews ownership and the complete patch, records `worker_commit_sha → integrated_as_sha`, and resolves only
-  mechanical shared-projection conflicts. Semantic conflicts return to the owning Worker.
-- Recompute generated projections, hashes, baselines, indexes, lock files, and cross-layer evidence from the integrated Master
-  tree. Never promote a Worker-local derived value as final evidence without that recomputation.
-- Run targeted, affected shared, base-relative, and release gates in proportion to the change. Only Master may declare a
-  release candidate. Production release remains a separate authorized action.
-- Execution order and integration order are independent. Independent Workers may execute in parallel. Master may integrate
-  accepted handoffs in any suitable order, but must recheck conflicts and recompute derived outputs after integration.
-- Candidate evidence v2 binds effective identity exactly to `release_task_id + release_head_sha`, uses stable explicit Gate and
-  check revisions, and recomputes bounded source, input, result, provenance, artifact, and aggregate digests from the integrated
-  tree. Plan and registry digests remain audit context, not authority or candidate-key members.
-- A mapped `STALE`/`NONE` Gate accepts only a Schema-enumerated `invalidation_reason`. Check `execution_ref` is nullable only
-  when the registered runner policy does not set `execution_ref_required: true`; all other result provenance remains required.
-  Two canonical empty v2 `NONE` records compare as `NONE`, while any mixed v1/v2 comparison remains whole-candidate `ALL`.
-- Any change to the integrated Master tree changes `release_head_sha` and makes every Gate stale; patch or tree equivalence does
-  not permit reuse. A Worker-only rework that has not been integrated does not change the candidate. For the same head, a
-  dependency-plan, authorization, acceptance, toolchain, Gate-registry, or derived-output change invalidates only Gates whose
-  declared semantic inputs changed when the registry and source map are complete. Status-only Plan writes do not invalidate
-  unrelated Gates. Missing membership, ambiguous mapping, unverifiable digests/provenance, mixed fences, or partial writes use
-  the whole-candidate `STALE` fallback. `STALE` precedes `FAILED`; only all current required Gates passing yields `PASSED`.
-- Preserve aggregate-only v1 evidence under the v2 `legacy` audit field with its original digest. Evidence-bearing legacy
-  records migrate to `STALE`, empty legacy `NONE` remains `NONE`, and migration never invents Gate identity or promotes an old
-  aggregate result. Standalone and historical readers may validate the old syntax, but a current Master Card rejects v1
-  `PASSED` or `FAILED`; even byte-identical evidence-bearing v1 comparison returns whole-candidate `ALL`. A current legacy v1
-  `STALE` remains readable for deliberate recovery. Comparison returns `NONE` only when both operands are empty v1 `NONE`;
-  every mixed v1/v2 comparison returns whole-candidate `ALL`. Master reruns required Gates and
-  recomputes final evidence from the integrated tree.
-- A preserved legacy-only v2 record may advance through historical H25 validation to a fresh per-Gate rerun only for the same
-  non-null release task and a non-regressing Master plan fence. The rerun may use a different `release_head_sha` after the old
-  head has invalidated all legacy material, but every current Gate, including every optional Gate, must independently bind its
-  sole `integrated-tree` source, inputs, results, provenance, and evidence to that exact new head with `legacy: null`.
-  Require zero opaque digest reuse. A `STALE`, `NONE`, checkless, missing-evidence, or head-mismatched Gate cannot retire the
-  legacy audit waypoint even when that Gate is excluded from aggregate required status. Legacy rewrites, release-task or
-  authority drift, promotion without a complete rerun, mismatched head provenance, or invalid registry/digests remain H25
-  failures.
-- An accepted Worker handoff may return to `IDLE` even if the global candidate is blocked by another responsibility layer.
-
-## Deliver evidence, not ceremony
-
-For an audit or design, report the verified topology, responsibility map, current risks, proposed state model, adoption order,
-and decisions needing user authority. For an operated task, report exact paths, branches, SHAs, changed files, checks and
-results, integration mapping, remaining blockers, and which external authorities were or were not used.
-
-Do not impose Master/Platform/Workflow names when a project has better domain terms. Preserve the method's identity,
-ownership, handoff, integration, and authorization properties while mapping names to the repository's architecture. Match the
-user's language; reference templates preserve semantics and may be translated.
+Honor Task Spec acceptance and release gates; run proportional checks for ordinary delivery. Repository
+unit tests use `PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py'`.
+Report paths, SHAs, verification, preserved material, unresolved blockers and actual authority used.
+For audits report evidence and decisions needed, not invented completion or permission.
