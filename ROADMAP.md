@@ -1,4 +1,4 @@
-# Roadmap：八项审查缺陷已本地修复；尚未发布；完整 v2 继续冻结
+# Roadmap：入口已减重；本地验收完成；尚未发布；完整 v2 继续冻结
 
 > 状态：非规范路线图。本文描述后续产品方向和执行顺序，不改变当前 `SKILL.md`、Schema、校验器或既有 v1 行为。
 
@@ -21,6 +21,60 @@
 - 当前文档入口共有八个 SOP：[Task Lifecycle](references/task-lifecycle-sop.md)、[Release](references/release-sop.md)、[Exception and Recovery](references/exception-recovery-sop.md)、[Conversation Rotation](references/conversation-rotation-sop.md) 四个核心执行/恢复流程，以及 [SOP Compliance Audit](references/sop-compliance-audit-sop.md)、[Project Adoption](references/project-adoption-sop.md)、[SOP Change Governance](references/sop-change-governance-sop.md)、[Retention and Retirement](references/retention-retirement-sop.md) 四个治理流程。后四个只是人工审计、接入、变更和保留的路由，不新增机器状态、角色注册表、权威记录、Schema 字段或运行时权限；Conversation Rotation 仍是唯一对话生命周期权威。
 - 统一人类操作入口为 [Operator Execution Map](references/operator-execution-map.md)：先验证再变更，按 FAST/STRICT 分流，集成后才能生成 Candidate，Candidate 批准与发布分离，closeout 后才能 rollover；任一证据缺失或冲突立即 `STOP_AND_PRESERVE`。入口图不新增命令、状态、记录或权限。
 - 完整 v2 迁移保持冻结；cycle fence、v2 CLI、Schema 迁移和正式 adoption 不进入当前范围。
+
+## 2026-09-13：入口减重与兼容性验收
+
+交付状态：**入口已减重，原协议兼容，本地验收完成，尚未发布。**
+依用户本轮明确授权，直接在 Master 修改，未派工、创建对话或工作树；未修改真实 Plan、Task Spec、Card 或历史归档，
+未 push、Tag、Release 或 closeout。实现提交为 `91b2248`；本节作为第二次独立文档提交记录结果。
+
+### 入口预算与规范迁移核对
+
+以修改前 `fa3f964` 为基线，按空白分词（不是模型 token，也不是中文词数）统计：
+
+| 文件 | 修改前 | 修改后 | 缩减 | 目标 |
+| --- | ---: | ---: | ---: | ---: |
+| SKILL.md | 4,652 | 1,113 | 76.07% | 至少 60% |
+| AGENTS.md | 538 | 236 | 56.13% | 至少 40% |
+
+入口保留判路和必要安全边界，移除的详细重复说明仍可在以下规范位置找到；参考文档未删除。
+
+| 原入口详细规则 | 保留的规范来源 |
+| --- | --- |
+| FAST 准入、角色所有权、重试升级 | [methodology：FAST and STRICT selection](references/methodology.md#fast-and-strict-selection)、[Task Lifecycle](references/task-lifecycle-sop.md)；入口仍保留完整准入条件 |
+| 派工、消息身份、revision/digest、依赖图、模型策略 | [methodology](references/methodology.md) 的 Identity、Task dependency、Model routing、Task publication 各节；[模板](references/templates.md) 保留记录字段 |
+| 默认拒绝、授权上下文和边界 | [methodology：Canonical authorization envelope](references/methodology.md#canonical-authorization-envelope)、[Task Lifecycle](references/task-lifecycle-sop.md)；入口保留默认拒绝和使用前检查 |
+| Card、历史快照、返工与不可变 handoff | [methodology](references/methodology.md) 的 Durable state cards 和 previous/current 校验说明、[Exception](references/exception-recovery-sop.md) |
+| Candidate、逐 Gate 新鲜度、关闭与 rollover | [Release](references/release-sop.md)、[methodology](references/methodology.md) 的 candidate、closeout、rollover 详细协议 |
+| 命名、绑定、交接确认、保留与删除边界 | [Conversation Rotation](references/conversation-rotation-sop.md)、[Retention](references/retention-retirement-sop.md)；入口和仓库指令保留职责及禁止自动归档/删除边界 |
+| 工具不可用时提供可复制消息，传输不授予权限 | [methodology](references/methodology.md) 的协作拓扑段落补充保留；入口继续提示 |
+| 命令选择、操作顺序、模板字段和 Schema 对齐 | [Operator Execution Map](references/operator-execution-map.md)、[模板](references/templates.md)、[Schema](references/contracts.schema.json) |
+
+### 六种静态阅读路径
+
+下表是入口、目标文档及约束可达性的静态检查，不是模型实际运行或真实任务 E2E。
+每次必须完整阅读选中的适用说明；记录生成/校验时再读取模板与 Schema，详细协议判断时读取 methodology。
+
+| 情景 | 默认阅读路径 | 必要约束检查 |
+| --- | --- | --- |
+| 低风险修改 | 仓库指令 → SKILL 的 FAST 条件与最短步骤 | PASS：不创建 STRICT 记录；非 IDLE、活动绑定、Worker-owned 路径等仍排除；失败升级阈值不变 |
+| STRICT 派工 | SKILL → Task Lifecycle → 适用模板、Schema/协议 | PASS：冻结 HEAD、身份/digest、授权、模型配置、handoff 与集成检查可达 |
+| 只读审查 | SKILL → SOP Compliance Audit + 被审查的对应流程 | PASS：只读、证据判定与 NOT_PROVEN；不因审查而自动派工或发布 |
+| 正式发布 | SKILL → Release → 适用证据规范/命令查询 | PASS：最终 HEAD 新证据、单独发布授权、closeout 后 rollover |
+| 异常恢复 | SKILL → Exception → 涉及的模板/记录规范 | PASS：停止保留、REVISE/SUPERSEDE 边界、不可改写 handoff |
+| 对话轮换 | SKILL → Conversation Rotation → 交接模板与当前记录 | PASS：Master 负责、只读核对、明确确认后才归档前任，保留工作树 |
+
+### 本地检查与限制
+
+- 契约测试：91/91 PASS；全部单元测试：89/89 PASS（原 85 项 + 新增 4 项文档回归）。
+- Candidate 聚焦测试：36/36 PASS；使用当前实际测试数量，不沿用历史 34 项。
+- 新回归覆盖：入口不重复细节仍通过；必需链接遗漏、错误目标或目标文件缺失时失败；规范来源/约束缺失和模板字段漂移仍失败。
+- 运行时兼容检查：相对 `fa3f964` 的 Python AST，除 `validate_documented_contracts()` 外完全一致；Schema、写入器、模型配置和状态机未改动。
+- Python 语法编译、Schema JSON 解析、修改文档的 77 个本地链接文件目标检查、`git diff --check`：PASS。
+- 其他五个真实工作树检查为 clean；主工作树只包含本轮预期变更。
+- Skill Creator 快速验证：`NOT_PROVEN`，本地 Python 缺少 PyYAML；未安装依赖。
+- 未进行 Astra/Luna 独立行为测试：模型遵循效果、实际加载量和耗时改善均为 `NOT_PROVEN`，字数缩减不能代替这些证据。
+- 不改变 FAST/STRICT 准入、授权、持久记录或发布流程；不新增 SOP、不启用实验性 v2。
 
 ## 2026-09-05：八项审查缺陷本地修复
 
