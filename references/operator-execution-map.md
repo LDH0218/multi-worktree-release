@@ -304,6 +304,11 @@ Workers and auditors collect/report evidence only. Conversation lifecycle remain
 **Ordered route selection.** After the universal gate and validation, use exactly the applicable existing
 runbook:
 
+For conversation setup, use the [binding procedure](conversation-rotation-sop.md#conversation-creation-and-worktree-binding):
+select `local` versus a newly created `worktree`, wait for a real thread ID, and verify default cwd/Git
+identity before executable dispatch. A missing list entry is not permission to create a duplicate;
+blank rotation into a retained worktree requires a supported exact-directory capability, not a new checkout.
+
 | Condition | Existing route | Continue evidence | Stop condition |
 | --- | --- | --- | --- |
 | Audit of an actual FAST, STRICT, release, recovery, adoption, change, retention, or rotation operation | [SOP Compliance Audit](sop-compliance-audit-sop.md) | Current owner, identity, evidence, authorization, and applicable SOP checks are independently proven | Missing, stale, ambiguous, or contradictory evidence is `NOT_PROVEN`; stop the affected decision. |

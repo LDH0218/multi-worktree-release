@@ -85,6 +85,8 @@ Progressive loading changes reading cost, not prerequisites, validation or stop 
   owns binding and lifecycle decisions. Use available task tools to inspect/message existing tasks;
   create, fork, move or archive only when the user requests that lifecycle action. Without coordination
   tools provide a copyable message; transport never grants authority.
+  Creation must verify the actual default execution directory before dispatch. New-worktree creation
+  does not prove retained-worktree reuse; follow the Conversation Rotation binding and pending-ID checks.
 - Name conversations `<responsibility-role>-<conversation-generation>` (for example `Master-1.0`),
   without a project prefix by default. Rotation preserves task and Git identity; require successor
   verification and explicit confirmation before predecessor archive. Task completion does not retire

@@ -21,8 +21,8 @@ profile, or authorization.
 The default rotation approach is **blank successor plus structured handoff**:
 
 - “Blank successor” means a new conversation with no copied transcript or inherited chat context. It does not mean an empty
-  filesystem: the successor reuses the retained physical worktree and sees its existing files, commits, and preserved
-  untracked material in place.
+  filesystem: the successor must reuse the retained physical worktree and see its existing files, commits, and preserved
+  untracked material in place. This is a required outcome, not a claim that every creation interface supports it.
 - A blank successor is mandatory by default. Master may use a fork only when the predecessor history is genuinely short and
   forking is demonstrably necessary; Master records that reason in the rotation handoff or decision. A fork is the narrow
   exception to the blank-successor default and still uses the same role, retained worktree and branch, incremented generation,
@@ -41,6 +41,55 @@ Rotation is triggered only when the context has become too long to continue reli
 persistent risk to continuity, availability, or recovery requires it. Task completion, convenience, or an ordinary pause alone
 are not rotation triggers and do not authorize archiving either conversation.
 
+## Conversation creation and worktree binding
+
+First distinguish a new role/worktree from a successor of an existing role. Inspect current tool capabilities
+and obtain the user's requested lifecycle scope; never create a substitute simply because reuse is unavailable.
+
+| Intended operation | Supported path and limitation |
+| --- | --- |
+| New conversation in the selected project's checkout | `create_thread` with that project's ID and `environment.type=local`; it uses the project's saved directory, not a path written in the prompt. |
+| New independent worktree conversation under the same project | With explicit worktree-creation authority, use that project ID and `environment.type=worktree`. Select only an authorized starting branch/ref. The tool creates a new worktree; selecting an existing branch does not reuse its existing directory. |
+| Blank successor in a retained worktree | Proceed only through a capability that can target that exact existing directory. If the directory is already a separately registered project, its `local` mode can be considered after verification. The current `create_thread` interface has no arbitrary existing-worktree-path parameter; registering/converting a retained directory is not assumed supported or authorized. Otherwise stop with `NOT_PROVEN` and retain the predecessor. |
+| Same-directory fork | `fork_thread` with `environment.type=same-directory` preserves the source directory but inherits history. It is only the documented short-history/necessary fork exception, not a blank successor. |
+
+Different worktree conversations may belong to the same project. Project grouping, titles, attachment
+lists and prompt paths do not prove the execution directory. `attach_worktree` attaches to the calling
+chat under its ownership restrictions; it is not a general way to relocate another new conversation.
+Handoff may move Git state and is not an arbitrary-directory binding shortcut.
+
+Create with a read-only bootstrap prompt, not an implementation request. In the new conversation's
+default execution directory, before any `cd`, command `workdir` override or mutation, collect:
+
+```bash
+pwd
+git rev-parse --show-toplevel
+git rev-parse --git-common-dir
+git rev-parse HEAD
+git symbolic-ref -q --short HEAD
+git status --short
+```
+
+Check the returned conversation metadata `cwd` against this evidence and independently verify the Git
+worktree inventory. For new worktrees, record the generated path before publishing a Task Spec; never
+publish an assumed path. A detached HEAD is normal at new-worktree creation, but does not satisfy a
+Task Spec requiring a named branch; branch setup needs its own authority. For rotation, require the
+exact retained path/branch/HEAD. Record requested and verified model settings separately using the
+[model-profile check](task-lifecycle-sop.md#model-profile). Only then allow executable dispatch.
+
+### Pending creation or missing conversation listing
+
+- Save the creation result and correlate it to the intended role/project/baseline. A returned
+  `clientThreadId` means pending setup, not a usable `threadId`; never pass it to read/wait/message tools.
+- Use documented status/listing capabilities with bounded, spaced checks. If a real ID is absent from
+  the list, use an already-known real ID, or narrowly scoped read-only creation diagnostics that link
+  the request to a real ID, then verify its initial prompt and `cwd` with `read_thread` before trusting it.
+- Once the real ID is verified, use `wait_threads` for completion. Missing list entries, an empty
+  attachment list or silence do not prove deletion, failed creation or failed directory binding.
+- If identity or binding remains unverifiable, stop with `NOT_PROVEN`, retain the pending result and
+  any generated worktree, and report. Do not retry creation, invent IDs, edit application storage,
+  dispatch implementation or archive a predecessor to resolve the uncertainty.
+
 ## Default rotation sequence
 
 Master follows this sequence in order. A mismatch at any step is a failure stop; do not skip ahead to archive.
@@ -51,7 +100,9 @@ Master follows this sequence in order. A mismatch at any step is a failure stop;
    Card states and revisions, blockers, unfinished work, and latest gates. Prove that exactly one visible conversation claims the
    role and retained worktree/branch pair. A wrong HEAD, wrong worktree, digest mismatch, dirty-state surprise, or duplicate
    binding stops the procedure while leaving the predecessor visible and the worktree untouched.
-2. **Create the default blank successor.** Master creates a blank successor conversation with the same long-lived responsibility
+2. **Create the default blank successor.** First prove that the selected creation capability can reuse the exact retained
+   directory using the binding procedure above. If not, stop with `NOT_PROVEN`; do not create a new worktree as a substitute.
+   Master creates a blank successor conversation with the same long-lived responsibility
    role, the same retained worktree and branch, and the next conversation generation. Only when the predecessor history is
    genuinely short and forking is demonstrably necessary may Master create a fork instead, and Master records that reason. In
    either case, the successor does not create a Task Spec, change a Plan, rewrite a Card, copy files, or synchronize the
@@ -76,7 +127,9 @@ Master follows this sequence in order. A mismatch at any step is a failure stop;
    check passed. Silence, partial reading, a missing confirmation, or any mismatch is not confirmation. Keep the predecessor
    visible and do not archive it until this explicit confirmation is received and reconciled by Master.
 6. **Archive only the predecessor conversation.** After confirmation, and only after Master independently reconciles the
-   evidence, Master may archive the predecessor. The successor becomes the current visible conversation for the same role.
+   evidence, Master may archive the predecessor only when the selected archive operation is verified not to retire or
+   auto-clean the retained worktree. Otherwise stop and retain both conversations; do not alter cleanup settings implicitly.
+   The successor becomes the current visible conversation for the same role.
    Archive no successor, worktree, branch, Task Spec, Card, commit, or other history as part of this rotation.
 7. **Continue under the successor binding.** The successor reuses the retained worktree and branch and continues from persisted
    facts. Rotation alone does not change Task ID, Task Spec revision or digest, Plan identity, Worker/Master Card state, or Git
@@ -111,6 +164,8 @@ failure must stop safely, preserve the predecessor and retained worktree, and le
 | --- | --- | --- |
 | Wrong HEAD | Successor or inventory HEAD differs from the handoff's verified full SHA | Stop; keep predecessor visible; do not archive, reset, checkout, rebase, synchronize, or copy files |
 | Wrong worktree | Successor path differs from the retained absolute path, or the path/branch binding is unavailable | Stop; preserve the predecessor and both path/branch facts; do not create a replacement binding or delete anything |
+| Unsupported retained-directory creation | Tool can only create a new worktree or use the main checkout | `NOT_PROVEN`; retain predecessor; do not treat a new-worktree test as rotation proof |
+| Pending or missing listing | Only a client ID is available, or the known conversation is omitted from listing | Resolve and verify the real ID read-only; otherwise stop without duplicate creation |
 | Duplicate visible conversation | More than one visible conversation claims the role or retained worktree/branch pair | Stop dispatch for that binding; reconcile ownership through Master; archive only a proven unassigned duplicate, never automatically |
 | Successor not confirmed | Successor has not supplied the complete read-only confirmation, or any check is missing/mismatched | Stop before archive; keep predecessor visible and retain the worktree, records, and evidence unchanged |
 | Worker self-archive | A Worker attempts or requests the archive operation as its own lifecycle decision | Reject the operation; Worker may report evidence only; Master retains predecessor visibility and lifecycle ownership |
@@ -131,6 +186,7 @@ Role: <ROLE>
 Predecessor conversation: <TASK/TITLE/OLD_GENERATION>
 Successor conversation: <TASK/TITLE/NEW_GENERATION_OR_TARGET>
 Retained worktree: <ABSOLUTE_PATH>
+Creation capability and actual conversation cwd: <CAPABILITY / VERIFIED_PATH / NOT_PROVEN>
 Branch: <BRANCH>
 HEAD and status: <FULL_SHA / CLEAN_OR_PRESERVED_DETAILS>
 Requested model / effort / tier: <PROJECT_PROFILE>
@@ -171,6 +227,7 @@ Predecessor remains visible: <PASS/FAIL>
 Successor mode and documented fork exception if any: <PASS/FAIL / DETAILS>
 Blank successor with no inherited chat context (required for BLANK_DEFAULT): <PASS/FAIL / NOT_APPLICABLE>
 Absolute worktree and branch: <PATH / BRANCH>
+Default execution cwd, Git top-level and shared Git directory: <VALUES / EVIDENCE>
 HEAD and status: <FULL_SHA / CLEAN_OR_PRESERVED_DETAILS>
 One-to-one role/worktree binding: <PASS/FAIL>
 Dispatch Plan and Task Spec identities/digests: <PASS/FAIL / DETAILS>

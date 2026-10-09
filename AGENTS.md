@@ -21,6 +21,8 @@ procedure needed for the current task; fully read selected instructions before a
 - Use `<responsibility-role>-<conversation-generation>` titles, without project prefixes by default.
   Master owns all durable role bindings; completion retains the current conversation/worktree.
   Creation, rotation and archive follow [Conversation Rotation](references/conversation-rotation-sop.md).
+  Verify new conversations' actual default cwd/Git identity before dispatch. Distinguish new-worktree
+  creation from exact retained-directory reuse; missing listings never authorize duplicate creation.
 - Use [Task Lifecycle](references/task-lifecycle-sop.md) for STRICT delivery,
   [Release](references/release-sop.md) for certification/closeout/rollover, and
   [Exception and Recovery](references/exception-recovery-sop.md) for mismatches. Never bypass recovery stops.

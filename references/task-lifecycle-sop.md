@@ -51,6 +51,10 @@ Master completes these checks before publishing implementation work:
 2. Verify the exact absolute worktree, branch, full `HEAD`, status, preserved material, role/generation
    binding, and ownership. A wrong path, branch, baseline, role, duplicate binding, or unexpected dirty
    path stops that assignment.
+   For a newly created conversation, first complete the
+   [conversation/worktree binding check](conversation-rotation-sop.md#conversation-creation-and-worktree-binding).
+   A read-only bootstrap may establish its actual directory before assignment; publish no executable
+   Task Spec or message based only on a title, prompt path, pending client ID or assumed worktree location.
 3. Build the dependency and ownership view. Reject unknown, cyclic, redundant, stale, or asymmetric
    edges; semantic file/contract overlap; unavailable worktrees; and assignments whose current Card or
    baseline does not match. Independent, non-overlapping ready tasks may share a wave.
