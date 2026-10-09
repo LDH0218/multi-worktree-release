@@ -39,6 +39,33 @@ def advance(fixture, state, sha=None, task_id=None):
 
 
 class DeliveryPathsTests(unittest.TestCase):
+    def test_handoff_retry_revalidates_git_without_changing_card(self):
+        cases = {
+            "head": "handoff SHA differs from current Worker HEAD",
+            "branch": "Worker branch differs from the Task Spec",
+            "dirty": "requires a clean Worker worktree",
+        }
+        for change, error in cases.items():
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
+                f = git_fixture(Path(directory))
+                result = advance(f, "ACTIVE")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                run(["git", "commit", "--allow-empty", "-qm", "handoff"], f.worktree)
+                sha = run(["git", "rev-parse", "HEAD"], f.worktree)
+                result = advance(f, "AWAITING_INTEGRATION", sha)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                before = f.worker_path.read_bytes()
+                if change == "head":
+                    run(["git", "commit", "--allow-empty", "-qm", "later commit"], f.worktree)
+                elif change == "branch":
+                    run(["git", "switch", "-c", "different-branch"], f.worktree)
+                else:
+                    (f.worktree / "draft.txt").write_text("preserve draft\n")
+                result = advance(f, "AWAITING_INTEGRATION", sha)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(error, result.stderr)
+                self.assertEqual(f.worker_path.read_bytes(), before)
+
     def test_generated_cards_complete_actual_git_lifecycle_and_retry(self):
         with tempfile.TemporaryDirectory() as directory:
             f = git_fixture(Path(directory))

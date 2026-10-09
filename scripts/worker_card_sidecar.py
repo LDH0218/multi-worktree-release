@@ -934,6 +934,26 @@ def advance_worker_card(*, repo_root: Path, plan_path: Path, master_card_path: P
             spec = specs.get(task_id)
             if spec is None:
                 raise SidecarError(f"task is absent from the current Plan: {task_id}")
+
+            def validate_execution_git() -> None:
+                def git(*args: str) -> str:
+                    result = subprocess.run(["git", "-C", spec["worktree"], *args],
+                                            capture_output=True, text=True, timeout=10)
+                    if result.returncode:
+                        raise SidecarError(f"Worker Git check failed: {result.stderr.strip()}")
+                    return result.stdout.strip()
+                if git("branch", "--show-current") != spec["branch"]:
+                    raise SidecarError("Worker branch differs from the Task Spec")
+                if git("status", "--porcelain"):
+                    raise SidecarError("automatic execution transition requires a clean Worker worktree")
+                head = git("rev-parse", "HEAD")
+                if state == "ACTIVE" and (previous is None or previous["state"] == "IDLE"):
+                    if head != spec["expected_head"]:
+                        raise SidecarError("Worker HEAD differs from frozen baseline before activation")
+                elif state == "AWAITING_INTEGRATION" and head != worker_commit:
+                    raise SidecarError("handoff SHA differs from current Worker HEAD")
+                git("merge-base", "--is-ancestor", spec["expected_head"], head)
+
             target = _expected_sidecar(spec)
             previous = None
             if os.path.lexists(target):
@@ -945,6 +965,8 @@ def advance_worker_card(*, repo_root: Path, plan_path: Path, master_card_path: P
                 if identity == task_id and revision == spec["task_spec_revision"]:
                     if state == "AWAITING_INTEGRATION" and worker_commit != previous["worker_commit_sha"]:
                         raise SidecarError("idempotent handoff commit differs from preserved Worker SHA")
+                    if state == "AWAITING_INTEGRATION":
+                        validate_execution_git()
                     return _transition_worker_card_locked(
                         repo_root=repo_root, skill_root=selected_skill_root, plan_path=resolved_plan,
                         master_card_path=master_card_path, card=previous, task_id=task_id,
@@ -992,23 +1014,7 @@ def advance_worker_card(*, repo_root: Path, plan_path: Path, master_card_path: P
             card["record_revision"] = previous["record_revision"] + 1 if previous else 1
             card["updated_at"] = stamp
             if state in {"ACTIVE", "AWAITING_INTEGRATION"}:
-                def git(*args: str) -> str:
-                    result = subprocess.run(["git", "-C", spec["worktree"], *args],
-                                            capture_output=True, text=True, timeout=10)
-                    if result.returncode:
-                        raise SidecarError(f"Worker Git check failed: {result.stderr.strip()}")
-                    return result.stdout.strip()
-                if git("branch", "--show-current") != spec["branch"]:
-                    raise SidecarError("Worker branch differs from the Task Spec")
-                if git("status", "--porcelain"):
-                    raise SidecarError("automatic execution transition requires a clean Worker worktree")
-                head = git("rev-parse", "HEAD")
-                if state == "ACTIVE" and (previous is None or previous["state"] == "IDLE"):
-                    if head != spec["expected_head"]:
-                        raise SidecarError("Worker HEAD differs from frozen baseline before activation")
-                elif state == "AWAITING_INTEGRATION" and head != worker_commit:
-                    raise SidecarError("handoff SHA differs from current Worker HEAD")
-                git("merge-base", "--is-ancestor", spec["expected_head"], head)
+                validate_execution_git()
             return _transition_worker_card_locked(
                 repo_root=repo_root, skill_root=selected_skill_root, plan_path=resolved_plan,
                 master_card_path=master_card_path, card=card, task_id=task_id,
