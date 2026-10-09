@@ -11,6 +11,11 @@ procedure needed for the current task; fully read selected instructions before a
   formal release certification or complex recovery. Freeze strict assignments to full SHAs and retain
   Task Specs, grants, acceptance and handoff evidence.
 - Keep live coordination under `.codex/multi-worktree-release/` local and ignored. Preserve user changes.
+- New Master and Worker tasks/conversations default to `gpt-6.1-sol`. Keep the existing role effort/tier
+  choices unless explicitly changed: Master `high/default`, Workers `max/priority`. Pass model and effort
+  explicitly at creation or authorized follow-up; verify requested runtime settings before dispatch.
+  Historical assignments retain their profiles/digests; apply the new default through normal versioned
+  publication, not by rewriting old evidence. An unavailable tier control is not proof of acceleration.
 - Workers cannot merge, rebase, reset, synchronize, push, publish or widen scope unless their current
   Task Spec explicitly authorizes that exact action. Production publication needs separate explicit authority.
 - Use `<responsibility-role>-<conversation-generation>` titles, without project prefixes by default.

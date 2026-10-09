@@ -55,7 +55,13 @@ Master follows this sequence in order. A mismatch at any step is a failure stop;
    role, the same retained worktree and branch, and the next conversation generation. Only when the predecessor history is
    genuinely short and forking is demonstrably necessary may Master create a fork instead, and Master records that reason. In
    either case, the successor does not create a Task Spec, change a Plan, rewrite a Card, copy files, or synchronize the
-   worktree. The predecessor remains visible.
+   worktree. Resolve the current project model profile and explicitly pass model/effort to the creation
+   tool, following the [Task Lifecycle model-profile check](task-lifecycle-sop.md#model-profile).
+   All roles default to `gpt-6.1-sol` only when no explicit user/project choice exists; an active assignment
+   retains its recorded profile. Do not silently inherit application settings. Record requested settings
+   separately from observed model/effort/tier; missing verification is `NOT_PROVEN` and blocks executable
+   dispatch and successful successor confirmation, not permission to invent a tier parameter.
+   The predecessor remains visible.
 3. **Complete the predecessor's final structured handoff.** Master records or sends the full rotation handoff before asking the
    successor to confirm. It includes the role and generations, exact paths and Git facts, Plan/Task/Card identities and digests,
    every active or terminal task and Worker/Master handoff, preserved material, blockers, unfinished work, latest gates, and
@@ -63,7 +69,8 @@ Master follows this sequence in order. A mismatch at any step is a failure stop;
 4. **Run the successor's read-only bootstrap.** The successor reads the governance and state-card instructions, then recovers
    facts from the persisted Plan, complete Task Specs, Cards, handoffs, and Git/worktree inventory. It verifies the same role,
    incremented generation, exact worktree and branch, HEAD/status and preserved material, one-to-one binding, Plan/Task/Card
-   identities and revisions, and all relevant digests. It must report any mismatch and stop; it must not resume implementation
+   identities and revisions, all relevant digests, and launcher/settings evidence for the selected
+   model/effort/tier. It must report any mismatch and stop; it must not resume implementation
    or perform lifecycle actions while verification is incomplete.
 5. **Require explicit successor confirmation.** Master waits for a structured, read-only confirmation that every bootstrap
    check passed. Silence, partial reading, a missing confirmation, or any mismatch is not confirmation. Keep the predecessor
@@ -126,6 +133,8 @@ Successor conversation: <TASK/TITLE/NEW_GENERATION_OR_TARGET>
 Retained worktree: <ABSOLUTE_PATH>
 Branch: <BRANCH>
 HEAD and status: <FULL_SHA / CLEAN_OR_PRESERVED_DETAILS>
+Requested model / effort / tier: <PROJECT_PROFILE>
+Observed launcher/settings evidence: <VALUES / EVIDENCE / NOT_PROVEN>
 
 Persisted coordination
 - Dispatch Plan: <PATH / RELEASE_TASK_ID / PLAN_REVISION / RECORD_REVISION / PLAN_DIGEST>
@@ -166,6 +175,7 @@ HEAD and status: <FULL_SHA / CLEAN_OR_PRESERVED_DETAILS>
 One-to-one role/worktree binding: <PASS/FAIL>
 Dispatch Plan and Task Spec identities/digests: <PASS/FAIL / DETAILS>
 Worker/Master Card states and revisions: <PASS/FAIL / DETAILS>
+Model/effort/tier settings verified against applicable profile: <PASS/FAIL/NOT_PROVEN / EVIDENCE>
 Preserved dirty or untracked material: <PATHS_OR_NONE>
 No copied files, synchronization, reset, archive, or scope expansion performed: <PASS/FAIL>
 

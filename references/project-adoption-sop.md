@@ -102,6 +102,12 @@ Before a pilot, prove for every selected role:
 - the owner, current Plan/Task/Card identity, model profile, and complete default-deny authorization are
   recoverable after a conversation restart.
 
+Choose the project's model policy before creating pilot conversations. With no explicit user/project
+choice, new roles default to `gpt-6.1-sol`; effort/tier remain project choices. Follow the
+[Task Lifecycle model-profile check](task-lifecycle-sop.md#model-profile): explicitly pass model/effort,
+verify observable settings, and report unverified required tier configuration as `NOT_PROVEN` before
+executable dispatch. Do not mistake a persisted profile for applied runtime settings.
+
 ## 3. Choose FAST or STRICT
 
 Apply the existing FAST gate to each concrete task, not to adoption as a whole:

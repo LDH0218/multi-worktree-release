@@ -80,6 +80,26 @@ The Skill imposes no model whitelist. Plan/Task profiles must equal project `mod
 and the launcher must support the requested values. `service_tier` grants no external authority.
 Existing assignments retain their recorded profiles until legally revised.
 
+For new tasks/conversations without an explicit user/project model choice, all roles default to
+`gpt-6.1-sol`. A default is not a whitelist and does not rewrite historical profiles. If an existing
+Plan policy differs from a newly approved project default, Master must publish the normal versioned
+policy/task update before new executable dispatch; never change old digests in place.
+
+Before creating or resuming a conversation for executable work:
+
+1. Resolve model, effort and service tier from the applicable project policy. Pass the model and effort
+   explicitly through supported launcher parameters (for Codex task tools, `model` and `thinking`), not
+   just in the prompt. Do not rely on application defaults or silently substitute unsupported values.
+2. Before dispatch, verify model/effort from launcher acknowledgement or observable conversation settings.
+   A Task Spec, requested argument, title or Worker self-report alone is not proof of runtime settings.
+3. Set/verify the requested tier through a supported control or observable runtime setting. If the tool
+   has no tier parameter, do not invent one or claim `priority` was applied. Unverified required settings
+   are `NOT_PROVEN`: stop executable dispatch for that binding and report the missing control/evidence.
+   This checks requested settings, not an unobservable backend effective scheduling tier.
+
+Reuse existing conversations only after the same configuration check. Do not create replacements,
+archive conversations or alter worktree bindings merely to correct model settings without lifecycle authority.
+
 ### Authorization gate
 
 Every executable Task Spec and non-`IDLE` Worker Card carries the complete schema-version-2 envelope

@@ -237,6 +237,12 @@ Skill 中的授权字段是协作治理契约，不替代 GitHub、云平台或�
 Plan 和 Task Spec 的配置必须一致，调度器必须能够满足该配置。旧任务保留已记录的配置和摘要。
 `selection_reason` 仍与角色匹配，模型策略不授予外部操作权限。
 
+未明确覆盖时，新任务和新对话的所有角色默认使用 `gpt-6.1-sol`，不是模型白名单。
+本仓库保留 Master `high/default`、Worker `max/priority` 的强度和路由选择。
+创建对话必须显式传入模型和强度，并在派工前核对实际设置；加速没有可用控制或验证证据时记录
+`NOT_PROVEN`，不宣称已开启、不继续执行派工。详见
+[模型配置核对](references/task-lifecycle-sop.md#model-profile)。旧任务记录不追溯改写。
+
 普通推送：修改 → 测试 → 差异审查 → 提交 → 明确授权后正常推送；无需 Candidate 或 closeout。
 正式发布认证继续使用最终 HEAD 的 Candidate/Gate 与关闭流程。已存在的活动严格派工仍须先合法协调。
 

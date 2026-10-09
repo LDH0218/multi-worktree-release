@@ -106,8 +106,12 @@ Progressive loading changes reading cost, not prerequisites, validation or stop 
 
 v1 remains authoritative. Authorization envelope v2 and Candidate evidence schema v2 are formal parts
 of current STRICT behavior; protocol v2 adoption/binding prototypes remain experimental and unrouted.
-Model, effort and service tier are project choices. When a project persists a model policy, validate
-assignment equality and launcher support; this Skill does not prescribe model names.
+For new tasks and conversations, default every role to `gpt-6.1-sol` unless the user or project explicitly
+selects another model. This is a default, not a whitelist; preserve existing assignment profiles and
+digests until legally revised. Effort and service tier remain project choices. When a project persists
+a model policy, validate assignment equality and launcher support. Creation must explicitly pass the
+selected model and effort rather than silently inherit application defaults; follow the model-profile
+check in [Task Lifecycle](references/task-lifecycle-sop.md#model-profile) before executable dispatch.
 
 ## Validation and delivery
 
