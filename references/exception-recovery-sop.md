@@ -52,8 +52,11 @@ When an exception is observed:
 
 ## State and revision rules
 
-Master takeover uses the existing cancellation/supersession path: stop the old Worker and confirm it
-has stopped, inspect its HEAD/status and immutable handoff, preserve dirty material, and reconcile its
+Master takeover uses the existing cancellation/supersession path: stop the old Worker and confirm its
+current execution has ended using task status plus its acknowledgement, or verified local process exit
+when work is local. Silence, elapsed time, or an IDLE Card alone does not prove a writer has stopped.
+If execution status is unavailable, preserve the worktree and do not start a competing writer. Inspect
+its HEAD/status and immutable handoff, preserve dirty material, and reconcile its
 active Plan/Card to a legal terminal state. Record the new owner and scope in existing task evidence.
 An active strict assignment with changed owner requires a superseding task; a bounded task with no
 active strict assignment can be taken over directly. Do not invent a new Card state, silently rewrite

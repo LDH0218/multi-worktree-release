@@ -152,6 +152,11 @@ for the detailed FAST/STRICT boundary.
 
 ## STRICT task route — complete delivery path
 
+Normal Worker Card transitions can use `worker_card_sidecar.py --advance ACTIVE`,
+`--advance AWAITING_INTEGRATION --worker-commit <SHA>`, and `--advance IDLE` with existing
+repository/Plan/Master/task arguments. The tool derives fields and calls the same validation and atomic
+writer. Exceptional evidence still uses `--transition --card-json`; no new record is introduced.
+
 **Enter when.** FAST is ineligible, or the work is governed by a Plan, Task Spec, Card, persistent
 recovery, parallel responsibility, contract, security, release, or other strict boundary.
 

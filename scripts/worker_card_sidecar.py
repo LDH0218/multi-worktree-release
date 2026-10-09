@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import datetime as dt
 import json
 import os
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -913,6 +916,108 @@ def transition_worker_card(*, repo_root: Path, plan_path: Path, master_card_path
         raise SidecarError(str(error)) from error
 
 
+def advance_worker_card(*, repo_root: Path, plan_path: Path, master_card_path: Path,
+                        task_id: str, state: str, worker_commit: str | None = None,
+                        skill_root: Path | None = None) -> dict[str, Any]:
+    """Derive normal lifecycle fields; retain the existing validation/write authority."""
+    if state not in {"ACTIVE", "AWAITING_INTEGRATION", "IDLE"}:
+        raise SidecarError("automatic advance supports ACTIVE, AWAITING_INTEGRATION or IDLE")
+    if state != "AWAITING_INTEGRATION" and worker_commit is not None:
+        raise SidecarError("worker commit is only valid for AWAITING_INTEGRATION")
+    selected_skill_root = (skill_root or SCRIPT_DIR.parent).resolve()
+    try:
+        root = plan_state_root(plan_path)
+        with exclusive_state_lock(root):
+            plan, specs, master, schema, resolved_plan = _load_context(
+                repo_root, selected_skill_root, plan_path, master_card_path, root,
+            )
+            spec = specs.get(task_id)
+            if spec is None:
+                raise SidecarError(f"task is absent from the current Plan: {task_id}")
+            target = _expected_sidecar(spec)
+            previous = None
+            if os.path.lexists(target):
+                # Historical grants may expire without blocking terminal closeout.
+                _, previous = _read_canonical_card(target, schema, enforce_authorization_expiry=False)
+            if previous is not None and previous["state"] == state:
+                identity = (previous["task_id"] or previous["last_task"]["task_id"])
+                revision = previous["task_spec_revision"] or previous["last_task"]["task_spec_revision"]
+                if identity == task_id and revision == spec["task_spec_revision"]:
+                    if state == "AWAITING_INTEGRATION" and worker_commit != previous["worker_commit_sha"]:
+                        raise SidecarError("idempotent handoff commit differs from preserved Worker SHA")
+                    return _transition_worker_card_locked(
+                        repo_root=repo_root, skill_root=selected_skill_root, plan_path=resolved_plan,
+                        master_card_path=master_card_path, card=previous, task_id=task_id,
+                        worker_card_path=target, locked_state_root=root,
+                    )
+            timestamp = dt.datetime.now(dt.timezone.utc)
+            if previous is not None:
+                old_time = dt.datetime.fromisoformat(previous["updated_at"].replace("Z", "+00:00"))
+                timestamp = max(timestamp, old_time + dt.timedelta(microseconds=1))
+            stamp = timestamp.isoformat().replace("+00:00", "Z")
+            blank = {key: None for key in (
+                "task_id", "task_spec_revision", "task_spec_digest", "outcome",
+                "worker_commit_sha", "integrated_as_sha",
+            )}
+            if state == "ACTIVE":
+                if previous is not None and previous["state"] not in {"IDLE", "BLOCKED", "AWAITING_INTEGRATION"}:
+                    raise SidecarError("activation requires an idle or explicitly recoverable prior Card")
+                card = _idle_card(stamp, blank)
+                card["last_task"] = copy.deepcopy(previous["last_task"] if previous else blank)
+                for field in (
+                    "task_id", "task_spec_revision", "task_spec_digest", "task_spec_path",
+                    "plan_revision", "dispatch_wave", "source_thread_id", "issued_at", "supersedes_task_id",
+                    "allowed_paths", "forbidden_paths", "authorization",
+                ):
+                    card[field] = copy.deepcopy(spec[field])
+                card.update(state=state, worker_generation=spec["generation"],
+                            frozen_baseline_sha=spec["expected_head"], acceptance_commands=copy.deepcopy(spec["acceptance"]))
+            elif state == "AWAITING_INTEGRATION":
+                if previous is None or previous["state"] != "ACTIVE" or worker_commit is None:
+                    raise SidecarError("handoff requires an ACTIVE Card and an exact Worker commit")
+                card = copy.deepcopy(previous)
+                card.update(state=state, worker_commit_sha=worker_commit)
+            else:
+                if previous is None or previous["state"] == "IDLE":
+                    raise SidecarError("IDLE closeout requires a prior assigned Card")
+                entry = next(t for t in plan["tasks"] if t["task_id"] == task_id)
+                if entry["dispatch_status"] == "INTEGRATED":
+                    _, handoff = _matching_handoff(plan, specs, master, task_id)
+                    card = _idle_card(stamp, handoff)
+                elif entry["dispatch_status"] in {"CANCELLED", "SUPERSEDED"}:
+                    card = _idle_card(stamp, previous)
+                    card["last_task"]["outcome"] = entry["dispatch_status"]
+                else:
+                    raise SidecarError("IDLE closeout requires terminal Master evidence")
+            card["record_revision"] = previous["record_revision"] + 1 if previous else 1
+            card["updated_at"] = stamp
+            if state in {"ACTIVE", "AWAITING_INTEGRATION"}:
+                def git(*args: str) -> str:
+                    result = subprocess.run(["git", "-C", spec["worktree"], *args],
+                                            capture_output=True, text=True, timeout=10)
+                    if result.returncode:
+                        raise SidecarError(f"Worker Git check failed: {result.stderr.strip()}")
+                    return result.stdout.strip()
+                if git("branch", "--show-current") != spec["branch"]:
+                    raise SidecarError("Worker branch differs from the Task Spec")
+                if git("status", "--porcelain"):
+                    raise SidecarError("automatic execution transition requires a clean Worker worktree")
+                head = git("rev-parse", "HEAD")
+                if state == "ACTIVE" and (previous is None or previous["state"] == "IDLE"):
+                    if head != spec["expected_head"]:
+                        raise SidecarError("Worker HEAD differs from frozen baseline before activation")
+                elif state == "AWAITING_INTEGRATION" and head != worker_commit:
+                    raise SidecarError("handoff SHA differs from current Worker HEAD")
+                git("merge-base", "--is-ancestor", spec["expected_head"], head)
+            return _transition_worker_card_locked(
+                repo_root=repo_root, skill_root=selected_skill_root, plan_path=resolved_plan,
+                master_card_path=master_card_path, card=card, task_id=task_id,
+                worker_card_path=target, locked_state_root=root,
+            )
+    except (StateLockError, subprocess.TimeoutExpired) as error:
+        raise SidecarError(str(error)) from error
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -929,13 +1034,26 @@ def main() -> int:
     parser.add_argument("--worker-card-json", "--worker-card-path", dest="worker_card_json", type=Path)
     parser.add_argument("--transition", action="store_true")
     parser.add_argument("--card-json", "--transition-card-json", dest="transition_card_json", type=Path)
+    parser.add_argument("--advance", choices=("ACTIVE", "AWAITING_INTEGRATION", "IDLE"),
+                        help="derive a normal lifecycle Card from persisted Task Spec and prior evidence")
+    parser.add_argument("--worker-commit", help="exact committed Worker HEAD for --advance AWAITING_INTEGRATION")
     args = parser.parse_args()
     repo_root = args.repo_root.resolve()
     skill_root = args.skill_root.resolve()
     plan_path = args.plan or repo_root / ".codex" / "multi-worktree-release" / "dispatch-plan.json"
     master_card_path = args.master_card_json or repo_root / ".codex" / "multi-worktree-release" / "master-card.json"
     try:
-        if args.transition:
+        if args.advance:
+            if args.transition or args.transition_card_json is not None or args.worker_card_json is not None:
+                raise SidecarError("--advance derives its canonical Card; do not combine explicit Card inputs")
+            card = advance_worker_card(
+                repo_root=repo_root, skill_root=skill_root, plan_path=plan_path,
+                master_card_path=master_card_path, task_id=args.task_id,
+                state=args.advance, worker_commit=args.worker_commit,
+            )
+        elif args.worker_commit is not None:
+            raise SidecarError("--worker-commit requires --advance AWAITING_INTEGRATION")
+        elif args.transition:
             if args.transition_card_json is None:
                 raise SidecarError("--transition requires --card-json")
             _, card = _read_json(

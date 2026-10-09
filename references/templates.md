@@ -371,6 +371,20 @@ digest, or monotonic-record failures remain H25.
 
 ## Durable v1 release closeout
 
+For normal Worker lifecycle, derive Cards instead of copying the assignment fields manually:
+
+```bash
+python3 scripts/worker_card_sidecar.py --repo-root <MASTER_WORKTREE> --task-id <TASK_ID> --advance ACTIVE
+python3 scripts/worker_card_sidecar.py --repo-root <MASTER_WORKTREE> --task-id <TASK_ID> --advance AWAITING_INTEGRATION --worker-commit <FULL_WORKER_SHA>
+python3 scripts/worker_card_sidecar.py --repo-root <MASTER_WORKTREE> --task-id <TASK_ID> --advance IDLE
+```
+
+Pass explicit `--plan` / `--master-card-json` for non-default local paths. The generated fields come
+from persisted Task Spec, prior Card and accepted Master evidence, not chat claims. Activation and
+handoff require clean real Worker Git state; IDLE requires terminal Master evidence and preserves
+cancelled/superseded dirty material. These commands neither stop a Worker nor grant task/release authority.
+Use the original full-JSON input for exceptional blocker/recovery evidence.
+
 Use this record only for a local Master-owned closeout after all current Dispatch entries and Master handoffs are terminal, all
 bound Worker Cards are `IDLE`, and fresh schema-v2 candidate evidence is `PASSED` for the exact final Git HEAD:
 

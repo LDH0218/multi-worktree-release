@@ -103,16 +103,19 @@ The bound Worker performs a read-only bootstrap before changing files:
    model profile, and authorization envelope.
 2. Confirm that the current Card is the expected record and that its state/record revision maps to the
    current Dispatch entry. A mismatch is a stop, not a request to synchronize from Master.
-3. For a valid initial assignment, atomically move the complete Worker Card from `IDLE` to `ACTIVE`
-   through the fixed `WORKTREE_TASK.json` sidecar. The sidecar is the machine record; the Markdown card
-   is only a human projection.
+3. For a valid initial assignment, use `worker_card_sidecar.py --advance ACTIVE` with the Plan,
+   Master Card and task ID. The tool derives the complete Card from Task Spec and prior history,
+   checks the actual branch/HEAD/clean state, and uses the existing atomic sidecar transition.
+   No manually assembled Card is required for normal activation. The JSON sidecar is the machine record.
 4. Change only allowed paths. Run the owned-layer checks and affected shared-contract checks named by
    the Task Spec. Preserve unrelated user changes and untracked material.
 5. Review the complete diff and create one scoped commit. The commit must use the Task Spec's non-empty
    message for an implementation task; a handed-off commit is immutable. Rework creates a successor
    commit and never amends or force-pushes the original.
-6. Atomically move the Card from `ACTIVE` to `AWAITING_INTEGRATION` and send the structured handoff to
-   Master. Do not claim integration or return the Card to `IDLE` yourself.
+6. Use `--advance AWAITING_INTEGRATION --worker-commit <FULL_SHA>` after checks and commit.
+   The tool verifies the current committed HEAD, derives assignment fields and preserves history.
+   Include those identities with actual check results in the structured handoff; the tool does not
+   invent acceptance results or grant integration authority.
 
 The minimum Worker evidence is:
 
@@ -138,8 +141,8 @@ Master independently reviews every handoff:
    mapping `worker_commit_sha → integrated_as_sha` and recompute affected derived evidence from the
    integrated tree.
 4. After accepted integration, Master records the handoff as `INTEGRATED` and sends the exact mapping
-   and release-head context to the Worker. The Worker uses the sidecar to move
-   `AWAITING_INTEGRATION → IDLE`, preserving `task_id`, Task Spec revision/digest, outcome, Worker SHA,
+   and release-head context to the Worker. The Worker uses `--advance IDLE` to derive the accepted
+   terminal Card from Master evidence, preserving `task_id`, Task Spec revision/digest, outcome, Worker SHA,
    and integrated SHA under `last_task`, while clearing active identity, scope, authorization, blocker,
    and lock fields. If another layer blocks the release candidate, an accepted Worker may still return
    to `IDLE`.
@@ -148,6 +151,11 @@ The relevant state ownership is fixed: only Master changes Dispatch status; only
 its Card except a recorded Master takeover; `ACTIVE` and `AWAITING_INTEGRATION` map to Dispatch
 `PUBLISHED`; `BLOCKED` maps to `BLOCKED`; and `IDLE` maps to no current task or a terminal Dispatch
 entry. Any mismatch blocks further execution until Master reconciles it.
+
+Generated normal transitions use the same state-root lock, identity/digest validation and atomic
+write as explicit `--transition --card-json`. Repeated identical transitions are idempotent.
+Blocker details and exceptional recovery still use the complete explicit Card; Plan/Task publication
+and Master review remain separate. An automatic Card command does not stop a running conversation.
 
 ## Stop-and-preserve checklist
 
@@ -162,8 +170,9 @@ report to Master for any of the following:
 - unexpected dependency, ownership ambiguity, semantic overlap, or scope expansion;
 - unsupported model profile or any attempted external, execution, publication, destructive, synchronization,
   or push action without a current explicit grant; or
-- a second rework request, need to modify a forbidden contract/implementation path, or any check that is
-  `NOT_PROVEN`.
+- a change in risk, scope, dependencies or authorization that the current assignment does not cover,
+  need to modify a forbidden path, or missing required evidence. Rework count alone is not a stop condition;
+  an explicitly agreed task budget or stopping condition still applies.
 
 The [Exception and Recovery SOP](exception-recovery-sop.md) defines the decision after the stop. Never
 turn a failed check into a new machine state or silently resolve it from conversation memory.

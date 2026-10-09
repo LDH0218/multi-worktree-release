@@ -94,8 +94,8 @@ Record the candidate status and exact candidate evidence before moving to public
 
 ## 3. Separate publication authorization from candidate approval
 
-Before any push or production/release-system mutation, verify all of the following in a fresh read-only
-check:
+Before a push performed as part of formal release publication, or a production/release-system mutation,
+verify all of the following in a fresh read-only check. Ordinary code pushes use the separate route above:
 
 - the candidate still names the exact current integrated `release_task_id + release_head_sha`;
 - the target repository, ref/path scope, route/provider, and any other target fields are the exact

@@ -24,6 +24,31 @@
 - 统一人类操作入口为 [Operator Execution Map](references/operator-execution-map.md)：先验证再变更，按 FAST/STRICT 分流，集成后才能生成 Candidate，Candidate 批准与发布分离，closeout 后才能 rollover；任一证据缺失或冲突立即 `STOP_AND_PRESERVE`。入口图不新增命令、状态、记录或权限。
 - 完整 v2 迁移保持冻结；cycle fence、v2 CLI、Schema 迁移和正式 adoption 不进入当前范围。
 
+## 2026-10-09：清理残留条件与减少严格模式手填
+
+现行 Release SOP 的 Candidate 要求只约束正式发布推送；普通代码推送按自身授权和检查执行。
+移除 Task Lifecycle 中“第二次返工停止”和路线图中的旧文件类别/修正次数升级条件。
+下方历史测试保留当时结果，已不作为现行任务目标。
+
+扩展现有 `worker_card_sidecar.py`，正常转换使用 `--advance ACTIVE`、
+`--advance AWAITING_INTEGRATION --worker-commit <SHA>`、`--advance IDLE`。
+工具从 Task Spec、既有 Card 和 Master 终态证据生成完整字段，沿用原锁、校验和原子写入；
+无需手工复制 27 个 Card 顶层字段。不增加状态或权威记录，不生成虚构验收结果。
+异常 blocker 仍用显式完整 Card；任务发布和 Master 审查保持原边界。
+
+新增 [交付路径测试](scripts/test_delivery_paths.py)，在测试自己创建的临时 Git 仓库、真实 worktree
+和本地 bare 远端执行：正常 Card 生命周期与同内容重试；错误任务、HEAD、提交 SHA、脏工作树和
+未集成 IDLE 写入拒绝；旧本地进程退出后取消任务、保留草稿和基线提交、拒绝旧任务重新激活；
+连续两次局部验收失败后修正并普通推送，全程无需 Candidate 或协调记录。
+
+这是本地工具和 Git 执行回归，不能证明模型会正确判路，也不能证明真实 Codex 对话停机或减少等待。
+真实接管要求执行状态和停止确认；读取不到执行状态时保留现场，不启动竞争写入者。
+独立模型行为测试与真实任务耗时对比继续为 `NOT_PROVEN`。本轮未操作真实 Plan/Card、归档或对话。
+
+本地验收：91/91 契约测试（含 36 项 Candidate 回归）、96/96 单元测试通过；新增 4 项交付路径测试。
+修改文件语法、Markdown 文件目标和 `git diff --check` 通过。Skill 快速验证仍受缺少 PyYAML 限制，
+沿用 `NOT_PROVEN`，未安装依赖。本节记录本地验收，提交与推送状态以 Git 提交和远端记录为准。
+
 ## 2026-10-09：移除过重的日常交付规则
 
 按用户明确要求直接在 Master 修改现行规则，未修改真实 Plan、Task Spec、Card 或历史归档。
@@ -211,8 +236,8 @@ Skill Creator 快速验证因缺少 PyYAML 记为 `NOT_PROVEN`，未安装依赖
 
 - 可由一个 Codex 任务在当前工作目录完成；
 - 不需要并行 Worker 或独立 worktree；
-- 不修改协议、Schema、状态机、授权模型、发布语义或安全边界；
-- 不涉及数据库迁移、不可逆数据修改或复杂生产操作；
+- 修改的实际影响可在本地验证；文件类别（如 Schema、持久化、治理）不单独决定路线；
+- 不涉及权限边界变化、不可逆迁移、正式发布认证、生产操作或复杂恢复；
 - 不依赖跨对话恢复才能安全完成；
 - 验收命令明确且可在本地完成；
 - 外部写操作仍能在执行前单独请求明确授权。
@@ -222,11 +247,11 @@ Skill Creator 快速验证因缺少 PyYAML 记为 `NOT_PROVEN`，未安装依赖
 出现任一情况就升级为 ISOLATED 或 STRICT：
 
 - 多个独立责任需要并行交付；
-- 修改治理契约、权限、安全、持久状态或发布机制；
-- 任务需要长期恢复、跨对话接管或跨机器迁移；
+- 改变权限边界，或需要正式发布认证、复杂恢复或跨机器迁移；
+- 出现未解决的并发所有权；接管必须先停止原写入者并协调活动派工；
 - 涉及生产发布、不可逆操作或高影响外部写入；
 - 工作范围在执行中明显扩大；
-- FAST 验收失败后无法通过一次局部修正解决；
+- 调试引起风险、范围、依赖或授权边界变化；局部修正次数不触发升级；
 - 无法确定任务是否仍属于低风险范围。
 
 ### 完成标准
@@ -327,7 +352,8 @@ FAST 已正式采用。一次性临时 Git 仓库和临时 JSON fixture 已完�
 
 - [x] 在一次性临时 Git 仓库中完成单文件任务；第一次验收按设计失败，恰好一次局部修正后通过。
 - [x] 证明 FAST 没有创建 Dispatch Plan、Task Spec、Card、额外 worktree、Operation Receipt 或 adoption receipt。
-- [x] 越界路径在交付前被拒绝；错误 baseline 在 `ACTIVE` 前停止；连续第二次验收失败时决定升级 STRICT。
+- [x] 历史模拟：越界路径被拒绝、错误 baseline 在 `ACTIVE` 前停止；旧版曾按第二次失败升级。
+  次数升级规则已取消，现行回归允许多次局部修正，风险/范围变化时重新判路。
 - [x] 模拟全过程没有 external call、execution、publication 或 destructive action。
 
 ### Test Phase B：即时 STRICT 模拟（临时 fixture + 真实 E2E 已通过）
@@ -389,7 +415,7 @@ FAST 已正式采用。一次性临时 Git 仓库和临时 JSON fixture 已完�
 
 建议目标为：
 
-> 在不启动正式 v2、不修改 live `.codex`、不制造真实交付任务的前提下，立即使用一次性临时 Git 仓库和临时 JSON fixture 执行 ROADMAP.md 的 Test Phase A→E。验证 FAST 一次修正与第二次失败升级、STRICT 状态与返工、默认拒绝授权、SUPERSEDE 边界、Candidate HEAD 失效和旧 Master 取消模拟；运行 88 项主契约和 34 项 Gate 聚焦测试。开始与结束都核对真实状态哈希和工作树洁净度，缺少证据写 `NOT_PROVEN`。只更新本路线图并提交；已有正常 push 授权可以用于 `origin/main`，但 force-push、Tag、GitHub Release、生产发布、破坏性操作和其他外部系统写入仍需单独授权。
+旧目标提示词已退役；该轮历史测试已完成。新验证使用现行判路和交付回归，不再执行“第二次失败升级”等旧条件。
 
 上述即时 fixture 与真实多工作树 E2E 均已于 2026-08-31 完成。后续仅在新的真实发布批次中复用现有 Worker 工作树和对话；先以 FAST 处理合格低风险任务，只有契约、恢复、并行协作或高影响发布需求才重新进入 STRICT。
 
