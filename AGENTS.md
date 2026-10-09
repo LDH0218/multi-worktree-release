@@ -5,10 +5,11 @@ procedure needed for the current task; fully read selected instructions before a
 
 - The main worktree/task is Master, owning planning, dispatch, independent handoff review, integration,
   candidate gates and publication decisions.
-- Schema, state, authorization, dispatch, persistence, recovery, message identity, candidate or validator
-  changes require Master/Worker delivery. Isolate independent responsibilities with frozen full SHAs,
-  persisted Task Specs, default-deny grants, acceptance checks and structured handoffs. Trivial prose or
-  metadata may remain single-task only when executable governance and contract meaning do not change.
+- Choose delivery by actual risk and coordination needs. Bounded single-owner work may be done directly
+  by Master, including locally verifiable Schema, persistence or validator fixes. Use Master/Worker
+  delivery for concurrent responsibilities, permission-boundary changes, irreversible migration,
+  formal release certification or complex recovery. Freeze strict assignments to full SHAs and retain
+  Task Specs, grants, acceptance and handoff evidence.
 - Keep live coordination under `.codex/multi-worktree-release/` local and ignored. Preserve user changes.
 - Workers cannot merge, rebase, reset, synchronize, push, publish or widen scope unless their current
   Task Spec explicitly authorizes that exact action. Production publication needs separate explicit authority.

@@ -1,4 +1,4 @@
-# Roadmap：入口已减重；本地验收完成；尚未发布；完整 v2 继续冻结
+# Roadmap：日常交付按风险分流；严格协作与正式发布按需启用
 
 > 状态：非规范路线图。本文描述后续产品方向和执行顺序，不改变当前 `SKILL.md`、Schema、校验器或既有 v1 行为。
 
@@ -15,12 +15,36 @@
 
 ## 当前基线
 
+本节以下历史里程碑按当时规则记录；当前判路、接管、模型策略与普通推送以 2026-10-09 更新及现行 Skill 为准。
+
 - v1 仍是正式协议和唯一规范行为。
 - repository adoption 存储原型已经完成，但尚未正式启用。
 - 轻量 FAST 路由已经在 Skill 中生效；FAST request / receipt 身份绑定仍是实验原型，不参与当前路由。
 - 当前文档入口共有八个 SOP：[Task Lifecycle](references/task-lifecycle-sop.md)、[Release](references/release-sop.md)、[Exception and Recovery](references/exception-recovery-sop.md)、[Conversation Rotation](references/conversation-rotation-sop.md) 四个核心执行/恢复流程，以及 [SOP Compliance Audit](references/sop-compliance-audit-sop.md)、[Project Adoption](references/project-adoption-sop.md)、[SOP Change Governance](references/sop-change-governance-sop.md)、[Retention and Retirement](references/retention-retirement-sop.md) 四个治理流程。后四个只是人工审计、接入、变更和保留的路由，不新增机器状态、角色注册表、权威记录、Schema 字段或运行时权限；Conversation Rotation 仍是唯一对话生命周期权威。
 - 统一人类操作入口为 [Operator Execution Map](references/operator-execution-map.md)：先验证再变更，按 FAST/STRICT 分流，集成后才能生成 Candidate，Candidate 批准与发布分离，closeout 后才能 rollover；任一证据缺失或冲突立即 `STOP_AND_PRESERVE`。入口图不新增命令、状态、记录或权限。
 - 完整 v2 迁移保持冻结；cycle fence、v2 CLI、Schema 迁移和正式 adoption 不进入当前范围。
+
+## 2026-10-09：移除过重的日常交付规则
+
+按用户明确要求直接在 Master 修改现行规则，未修改真实 Plan、Task Spec、Card 或历史归档。
+
+- 按实际风险选择 FAST/STRICT：Schema、持久化、校验器或治理文档的文件类别不再自动要求严格流程。
+  并行协调、权限边界变化、不可逆迁移、生产操作、正式发布认证和复杂恢复继续使用 STRICT。
+- 删除“多于一次局部修正即升级”；范围、风险、依赖或并发所有权变化才重新判路。
+- Master 可明确接管：停止原 Worker、核对 HEAD 与未提交材料、保留 handoff，并转交所有权。
+  已活动的严格派工仍通过现有取消或 supersession 路径协调，不改写历史身份。
+- 普通代码推送在测试、差异审查和明确目标/ref 授权后直接进行，不要求 Candidate、release envelope 或 closeout。
+  正式发布认证保留 Candidate/Gate；集成 HEAD 改变时原正式证据仍须刷新。
+- 模型、推理强度和路由交给项目选择；Schema 允许非空项目配置，校验器继续核对角色、Plan/Task 与项目策略一致。
+  测试样例中的旧模型名称仅用于历史兼容，不再作为运行时白名单。
+- 同步入口、README、操作图、任务/发布/异常/接入/治理 SOP 及 methodology/templates，移除冲突的旧表述。
+
+本地验证：91 项契约测试（含 36 项 Candidate 回归）、92 项单元测试（新增 3 项项目模型策略回归）通过；
+新增回归验证自选模型可经公开 CLI 接受，配置偏离、角色错配和空字段仍拒绝。
+Python 语法、Schema JSON 解析、链接目标和 `git diff --check` 检查通过。
+Skill Creator 快速验证因缺少 PyYAML 记为 `NOT_PROVEN`，未安装依赖。
+任务判路、普通推送与接管规则已做文档一致性检查；尚未运行真实接管或模型效率实验。
+本机安装链接指向本仓库；其他独立安装仍需更新。此次未推送、打 Tag 或创建 Release。
 
 ## 2026-09-13：入口减重与兼容性验收
 

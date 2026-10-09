@@ -37,17 +37,17 @@ all checks pass:
 ```text
 FAST preflight
 - One current task/worktree, no independent parallel responsibility or extra worktree: <PASS/FAIL>
-- Relevant Card in the current worktree is absent or IDLE: <PASS/FAIL>
-- Non-IDLE Card, active Dispatch assignment, or competing durable role binding in the current scope: <NONE/PRESENT>
+- Relevant Worker Card in the current worktree is absent or IDLE: <PASS/FAIL>
+- Non-IDLE Worker Card, active Dispatch assignment, or competing writer in the current scope: <NONE/PRESENT>
 - Every intended change is owned by the current role: <PASS/FAIL>
-- Master does not modify Worker-owned business paths: <PASS/FAIL/NOT_APPLICABLE>
+- One current writer; any Master takeover has stopped/reconciled the prior Worker: <PASS/FAIL/NOT_APPLICABLE>
 - Risk and verification remain bounded and local: <PASS/FAIL>
 Decision: FAST | STRICT | STOP
 ```
 
-Any non-IDLE Card, active Dispatch assignment, or competing durable role binding makes FAST ineligible; choose `STRICT` or
-stop. FAST may modify only current-role-owned paths. Unknown or ambiguous ownership, including a Master request to change
-Worker-owned business paths from the Master worktree, requires `STRICT`.
+Any non-IDLE Worker Card, active Dispatch assignment, or competing writer requires reconciliation before FAST; choose `STRICT` or
+stop. FAST requires clear current ownership. Master may take over after stopping the Worker and preserving its work;
+active strict assignments must be cancelled or superseded before ownership changes. Unresolved concurrent writers stop work.
 
 Terminology boundary: Protocol v2 adoption/binding prototypes are experimental and unrouted. Authorization envelope v2 and
 Candidate evidence schema v2 are formal components of the current v1-authoritative STRICT release flow. This is human-readable
@@ -179,19 +179,19 @@ model_policy:
   enforced_from_plan_revision: <positive-integer>
   owner_defaults:
     master:
-      model: gpt-5.6-sol
-      reasoning_effort: high
-      service_tier: default
+      model: <PROJECT_MASTER_MODEL>
+      reasoning_effort: <PROJECT_EFFORT>
+      service_tier: <PROJECT_TIER>
       selection_reason: owner-default:master
     ordinary_worker:
-      model: gpt-5.6-luna
-      reasoning_effort: max
-      service_tier: priority
+      model: <PROJECT_WORKER_MODEL>
+      reasoning_effort: <PROJECT_EFFORT>
+      service_tier: <PROJECT_TIER>
       selection_reason: owner-default:ordinary-worker
     complex_worker:
-      model: gpt-5.6-luna
-      reasoning_effort: max
-      service_tier: priority
+      model: <PROJECT_WORKER_MODEL>
+      reasoning_effort: <PROJECT_EFFORT>
+      service_tier: <PROJECT_TIER>
       selection_reason: owner-default:complex-worker
 tasks:
   - task_id: <id>
@@ -211,9 +211,9 @@ tasks:
     blocked_by: [<task-id>]
     parallel_with: [<task-id>]
     model_profile:
-      model: <gpt-5.6-sol-or-gpt-5.6-luna>
-      reasoning_effort: <high-or-max>
-      service_tier: <default-or-priority>
+      model: <PROJECT_MODEL>
+      reasoning_effort: <PROJECT_EFFORT>
+      service_tier: <PROJECT_TIER>
       selection_reason: <owner-default:master-or-owner-default:ordinary-worker-or-owner-default:complex-worker>
 validation:
   unique_task_ids: <PASS/FAIL>
@@ -250,16 +250,10 @@ ownership comparison, so `src/x` and `src/x/` conflict rather than becoming alia
 
 `model_policy` and `model_profile` may be omitted only for legacy records. After `enforced_from_plan_revision`, every `NEW` or
 `REVISE` task must persist the same exact profile in its Task Spec and Plan entry. Older digest-preserved records below the
-fence remain untouched. The built-in defaults are Master `gpt-5.6-sol`/`high`/`default`
-(`owner-default:master`), ordinary Worker `gpt-5.6-luna`/`max`/`priority`
-(`owner-default:ordinary-worker`), and complex Worker `gpt-5.6-luna`/`max`/`priority`
-(`owner-default:complex-worker`). A project may explicitly declare another supported active profile in
-`model_policy.owner_defaults`: Master may use either the built-in Sol profile or the Luna/max/priority profile, while Workers
-use the Luna profile; the `selection_reason` remains bound to the owning role. The prior complex-worker profile is
-compatibility-only for digest-preserved terminal or `GRANDFATHER` records; every `NEW` or `REVISE` assignment uses the
-project-declared profile. A launcher that cannot honor the profile must stop dispatch. The persisted model `service_tier` is the
-requested scheduler profile, not a claim about the unobservable effective tier; dispatch stops when the launcher can prove it cannot honor priority
-(if the launcher can prove it cannot honor priority, dispatch stops). It is not an authorization route/provider and grants no external call, run, publication, destructive operation,
+fence remain untouched. Projects choose `model_policy.owner_defaults`; this Skill prescribes no model names or routing combinations.
+Plan/Task profiles must match project policy and role `selection_reason`. Existing profiles remain valid
+historical evidence. The persisted model `service_tier` is the
+requested scheduler profile, not a claim about the unobservable effective tier; dispatch stops when the launcher can prove it cannot honor the requested profile. It is not an authorization route/provider and grants no external call, run, publication, destructive operation,
 synchronization, or scope.
 
 A `GRANDFATHER` entry preserves the existing task spec, digest, and its original `task_spec_plan_revision`; do not rewrite the
@@ -525,9 +519,9 @@ Inputs and dependencies
 - <PATH / REVISION / DIGEST / UPSTREAM COMMIT>
 
 Model routing profile
-- Model: <gpt-5.6-sol-or-gpt-5.6-luna>
-- Reasoning effort: <high-or-max>
-- Service tier: <default-or-priority>
+- Model: <PROJECT_MODEL>
+- Reasoning effort: <PROJECT_EFFORT>
+- Service tier: <PROJECT_TIER>
 - Selection reason: <owner-default:master-or-owner-default:ordinary-worker-or-owner-default:complex-worker>
 - If the launcher cannot honor this exact profile, stop and report; do not substitute it.
 - This profile grants no authority and is separate from authorization route/provider.

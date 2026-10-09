@@ -61,14 +61,16 @@ language rather than imposing platform/domain labels.
 
 Classify FAST before creating a Dispatch Plan or starting the heavier Master/Worker workflow. FAST is eligible only when one
 current task and worktree can complete a bounded, low-risk change with clear local verification and no independent parallel
-responsibility or extra worktree. The current worktree's relevant Card must be absent or `IDLE`, and that worktree/role must
-have no active Dispatch assignment or competing durable role binding. Any non-`IDLE` Card, active Dispatch assignment, or
-competing durable role binding makes FAST ineligible; enter `STRICT` or stop.
+responsibility or extra worktree. The current worktree's relevant Worker Card must be absent or `IDLE`, and that worktree/role must
+have no active Dispatch assignment or competing durable role binding. Any non-`IDLE` Worker Card, active Dispatch assignment, or
+competing writer requires reconciliation before FAST; enter `STRICT` or stop.
 
-FAST may modify only paths clearly owned by the current role. A Master working in the Master worktree must not modify
-Worker-owned business paths. Unknown or ambiguous ownership requires `STRICT`; ownership must not be guessed from a convenient
-file location or conversation label. Governance, protocol, Schema, state-machine, authorization, persistence, release, security,
-irreversible, production, long-recovery, or otherwise uncertain work also enters `STRICT` before implementation.
+FAST requires one current writer for each changed path. Master may take over after stopping the prior Worker,
+checking HEAD, uncommitted material and handed-off commits, and explicitly transferring ownership. An active strict
+assignment must first be cancelled or superseded legally; preserve all evidence. Unknown concurrent ownership stops work.
+Use STRICT for parallel coordination, irreversible migration, changes to permission boundaries, production operations,
+formal release certification or complex recovery. Schema, persistence and governance changes with bounded effects and
+local verification may use FAST. Debugging iterations alone never force escalation; reassess changed scope, risk or dependencies.
 
 FAST never creates or changes a Dispatch Plan, Task Spec, Card, extra worktree, cycle fence, repository adoption record, or
 Operation Receipt, and it never grants external, execution, publication, destructive, synchronization, or scope-expansion
@@ -190,19 +192,19 @@ model_policy:
   enforced_from_plan_revision: <positive-integer>
   owner_defaults:
     master:
-      model: gpt-5.6-sol
-      reasoning_effort: high
-      service_tier: default
+      model: <PROJECT_MASTER_MODEL>
+      reasoning_effort: <PROJECT_EFFORT>
+      service_tier: <PROJECT_TIER>
       selection_reason: owner-default:master
     ordinary_worker:
-      model: gpt-5.6-luna
-      reasoning_effort: max
-      service_tier: priority
+      model: <PROJECT_WORKER_MODEL>
+      reasoning_effort: <PROJECT_EFFORT>
+      service_tier: <PROJECT_TIER>
       selection_reason: owner-default:ordinary-worker
     complex_worker:
-      model: gpt-5.6-luna
-      reasoning_effort: max
-      service_tier: priority
+      model: <PROJECT_WORKER_MODEL>
+      reasoning_effort: <PROJECT_EFFORT>
+      service_tier: <PROJECT_TIER>
       selection_reason: owner-default:complex-worker
 tasks:
   - task_id: <id>
@@ -222,9 +224,9 @@ tasks:
     blocked_by: [<task-id>]
     parallel_with: [<task-id>]
     model_profile:
-      model: <gpt-5.6-sol-or-gpt-5.6-luna>
-      reasoning_effort: <high-or-max>
-      service_tier: <default-or-priority>
+      model: <PROJECT_MODEL>
+      reasoning_effort: <PROJECT_EFFORT>
+      service_tier: <PROJECT_TIER>
       selection_reason: <owner-default:master-or-owner-default:ordinary-worker-or-owner-default:complex-worker>
 validation:
   unique_task_ids: <PASS/FAIL>
@@ -274,17 +276,13 @@ Adding the policy or changing a profile is executable semantic content: incremen
 requires a higher `task_spec_revision` and a new digest. Unsupported model/reasoning/tier combinations or a Plan/Task Spec
 profile mismatch stop dispatch.
 
-Built-in owner defaults are exact: Master uses `gpt-5.6-sol` / `high` / `default` with `owner-default:master`; an ordinary Worker uses
-`gpt-5.6-luna` / `max` / `priority` with `owner-default:ordinary-worker`; a complex Worker also uses `gpt-5.6-luna` / `max` /
-`priority` with `owner-default:complex-worker`. A project may explicitly declare another supported active profile in
-`model_policy.owner_defaults`: Master may use either the built-in Sol profile or `gpt-5.6-luna` / `max` / `priority`, while Workers
-use the Luna profile; each `selection_reason` remains bound to its owning role. Master classifies each Worker task as ordinary or
-complex before publication. The prior complex-worker profile is compatibility-only for digest-preserved terminal or `GRANDFATHER`
-records; every `NEW` or `REVISE` assignment uses the project-declared profile. The launcher must honor all three persisted routing
-fields exactly; if it cannot, dispatch stops instead of substituting a model, effort, or tier.
+Projects choose model, reasoning effort and service tier in `model_policy.owner_defaults`.
+The Skill has no model whitelist. Each `selection_reason` remains bound to its owning role, and
+Plan/Task profiles must match project policy. Validate launcher support at dispatch time; do not
+substitute profiles silently. Existing assignments preserve their profiles and digests until legally revised.
 
 The persisted model `service_tier` is the requested scheduler profile, not a claim about the unobservable effective tier. Dispatch stops
-when the launcher can prove it cannot honor priority. It is never authorization `route` or `provider`, and it grants no external
+when the launcher can prove it cannot honor the requested profile. It is never authorization `route` or `provider`, and it grants no external
 call, execution creation, publication, destructive operation, synchronization, or scope expansion. Those capabilities remain
 governed solely by the complete default-deny authorization envelope and its independent digest.
 
@@ -385,7 +383,7 @@ Read-only bootstrap
 
 Explicit branches:
 
-- Worker-owned defect: publish a rework revision; preserve the original handoff commit.
+- Worker-owned defect: publish a rework revision or reconcile a Master takeover; preserve the original handoff commit.
 - Stale baseline or changed scope: publish a synchronization task or a replacement with `supersedes_task_id`.
 - Mechanical generated-output conflict: Master integrates sources and regenerates the derived output.
 - Ambiguous ownership or correct value: mark `BLOCKED`, preserve evidence, and request a decision.
@@ -523,9 +521,9 @@ dependencies:
   parallel_with: [<task-id>]
   blocked_by: [<task-id>]
 model_profile:
-  model: <gpt-5.6-sol-or-gpt-5.6-luna>
-  reasoning_effort: <high-or-max>
-  service_tier: <default-or-priority>
+  model: <PROJECT_MODEL>
+  reasoning_effort: <PROJECT_EFFORT>
+  service_tier: <PROJECT_TIER>
   selection_reason: <owner-default:master-or-owner-default:ordinary-worker-or-owner-default:complex-worker>
 authorization:
   schema_version: 2
@@ -1013,7 +1011,7 @@ writes do not invalidate Gates. Any ambiguity uses the whole-candidate `STALE` f
 recomputes the compatibility `gate_input_digest` from the integrated tree before candidate approval.
 
 Master may resolve mechanical conflicts in generated indexes, hashes, manifests, or projections by regeneration. Semantic
-conflicts in Worker-owned inputs, compilers, or business rules return to that Worker. Unknown ownership remains blocked.
+conflicts in Worker-owned inputs, compilers, or business rules return to that Worker or a verified Master takeover. Unknown ownership remains blocked.
 
 An accepted Worker handoff releases its state lock even if another layer blocks the global release candidate. A failure caused
 by that Worker requires an explicit rework revision.

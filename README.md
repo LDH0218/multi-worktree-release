@@ -23,10 +23,10 @@
 ## 选择路径
 
 简单、低风险、可在当前任务和工作目录完成的改动走 **FAST**：分类 → 修改 → 本地验收 → 提交 → 已有明确授权则推送，否则先请求授权。
-需要并行协作、额外工作目录、协议或权限变更、持久状态、发布或生产操作、不可逆修改、长期恢复，或分类不确定时，升级到现有严格流程。
+多人并行、不可逆迁移、权限边界改变、生产操作、正式发布认证或复杂恢复才进入严格流程。Schema、持久化或治理文档的常见修复按实际影响判断；局部调试次数不触发升级。
 FAST 不改变外部操作权限，也不会让用户承担内部协调记录；普通无关的单分支编码请求不会因此触发本 Skill。
 
-FAST 入口还要通过工作树锁和所有权预检：当前工作树的相关 Card 必须不存在或为 `IDLE`；任何非 `IDLE` Card、活动 Dispatch assignment 或竞争性 durable role binding 都使 FAST 失效，必须进入 `STRICT` 或停止。FAST 只能修改当前角色拥有的路径；Master 在 Master 工作树不得修改 Worker-owned business paths；所有权未知或有歧义时必须进入 `STRICT`。
+FAST 入口还要通过工作树锁和所有权预检：当前工作树的相关 Worker Card 必须不存在或为 `IDLE`；活动 Worker 派工或竞争写入者必须先协调。Master 的 ACTIVE 发布锁本身不阻止无冲突的日常任务。每条路径只能有一个当前写入者；Master 可在停止 Worker、核对并保留现场、合法取消或 supersede 活动派工后明确接管。未解决的并发所有权冲突必须停止。
 
 术语边界：Protocol v2 adoption/binding prototypes 是实验性且未路由的原型（experimental and unrouted）；Authorization envelope v2 与 Candidate evidence schema v2 是当前 v1-authoritative STRICT 发布流程的正式组件（formal components of the current v1-authoritative STRICT release flow）。这里的“正式”只描述当前流程契约位置，不改变机器字段名、v1 状态转换或原型路由。
 
@@ -233,9 +233,12 @@ Skill 中的授权字段是协作治理契约，不替代 GitHub、云平台或�
 
 ### 模型策略
 
-Skill 提供受支持的模型组合，但项目可以在自己的 `model_policy.owner_defaults` 中声明角色默认值。当前内置默认值是 Master
-使用 `gpt-5.6-sol` / `high` / `default`，Worker 使用 `gpt-5.6-luna` / `max` / `priority`；项目也可以为 Master 声明受支持的
-Luna/max/priority 组合。`selection_reason` 必须与角色匹配，模型 profile 与授权 envelope 的 route/provider 完全独立。
+模型、推理强度和路由由项目自行选择；Skill 不维护模型白名单。使用 `model_policy.owner_defaults` 时，
+Plan 和 Task Spec 的配置必须一致，调度器必须能够满足该配置。旧任务保留已记录的配置和摘要。
+`selection_reason` 仍与角色匹配，模型策略不授予外部操作权限。
+
+普通推送：修改 → 测试 → 差异审查 → 提交 → 明确授权后正常推送；无需 Candidate 或 closeout。
+正式发布认证继续使用最终 HEAD 的 Candidate/Gate 与关闭流程。已存在的活动严格派工仍须先合法协调。
 
 ## 仓库结构
 

@@ -52,15 +52,14 @@ delete/clean up, synchronize, or use production authority without a separate aut
 
 | Scope | Owner | Safe default |
 | --- | --- | --- |
-| MWR self-maintenance | MWR Master and the assigned Worker role | Treat governance, contract, recovery, release, or authorization changes as STRICT; preserve v1 behavior and existing four core SOP boundaries. |
+| MWR self-maintenance | MWR Master and the assigned Worker role | Classify by actual risk and concurrent ownership; use STRICT for permission-boundary changes, irreversible migration, formal release certification or complex recovery. Preserve existing assignment identities. |
 | Other project discovery | That project's owner or Master | Read-only inventory first; do not write project state, create worktrees, or alter routing until ownership and authority are explicit. |
 | Other project pilot | The adopting project's Master/owner | Use one bounded, non-production task with default-deny external authority and a pinned MWR source. |
 | Ongoing operation | The adopting project's existing Master/Workers | Reuse the project's accepted terms and records; do not create a second role registry or replace product permissions with MWR documents. |
 
-Adoption itself is a governance and recovery decision, so it uses STRICT unless the project owner has
-explicitly classified a purely editorial, local note as FAST. A later task may use FAST only when it
-passes all FAST conditions; any parallel work, extra worktree, persistent state, contract, security,
-release, production, irreversible, or uncertain scope enters STRICT.
+A read-only adoption inventory or bounded single-owner pilot can proceed directly. Parallel coordination,
+permission-boundary changes, production operations, irreversible migration, formal release certification
+or complex recovery require STRICT. A later task is classified by its own effects.
 
 ## 1. Inventory before adoption
 
@@ -109,11 +108,11 @@ Apply the existing FAST gate to each concrete task, not to adoption as a whole:
 
 | Route | Conditions | Adoption consequence |
 | --- | --- | --- |
-| FAST | One task/worktree, Card absent or `IDLE`, no active competing binding, clear ownership, bounded local verification, and no governance/protocol/state/auth/persistence/release/security/production/irreversible impact. | Work in the current project task/worktree; create no Plan, Task Spec, Card, adoption record, extra worktree, or Operation Receipt. External and destructive authority remains separate. |
-| STRICT | Any FAST condition is false or uncertain, or adoption/pilot touches roles, persistent state, recovery, contracts, release, security, or parallel work. | Master publishes a versioned Task Spec and Plan, freezes a full baseline, activates the canonical Card, and uses the full handoff/integration gates. |
+| FAST | One task/worktree, Card absent or `IDLE`, no active competing binding, clear ownership, bounded local verification, and no permission-boundary change, production operation, formal release certification, irreversible migration or complex recovery. File category alone does not decide the route. | Work in the current project task/worktree; create no Plan, Task Spec, Card, adoption record, extra worktree, or Operation Receipt. External and destructive authority remains separate. |
+| STRICT | Parallel coordination, permission-boundary change, production operation, irreversible migration, formal release certification or complex recovery. | Master publishes a versioned Task Spec and Plan, freezes a full baseline, activates the canonical Card, and uses the full handoff/integration gates. |
 
-Adoption documentation, routing, state-root setup, version changes, and rollback are STRICT governance
-work. Do not make them look FAST merely because no application code changes.
+Assess adoption documentation, routing, state-root setup, version changes and rollback by their effects.
+Bounded local changes can proceed directly; apply STRICT for the risk and coordination conditions above.
 
 ## 4. Establish the existing state root
 

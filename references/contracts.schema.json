@@ -86,11 +86,25 @@
     "model_profile": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["model", "reasoning_effort", "service_tier", "selection_reason"],
+      "required": [
+        "model",
+        "reasoning_effort",
+        "service_tier",
+        "selection_reason"
+      ],
       "properties": {
-        "model": {"enum": ["gpt-5.6-sol", "gpt-5.6-luna"]},
-        "reasoning_effort": {"enum": ["high", "max"]},
-        "service_tier": {"enum": ["default", "priority"]},
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reasoning_effort": {
+          "type": "string",
+          "minLength": 1
+        },
+        "service_tier": {
+          "type": "string",
+          "minLength": 1
+        },
         "selection_reason": {
           "enum": [
             "owner-default:master",
@@ -98,52 +112,7 @@
             "owner-default:complex-worker"
           ]
         }
-      },
-      "oneOf": [
-        {
-          "properties": {
-            "model": {"const": "gpt-5.6-sol"},
-            "reasoning_effort": {"const": "high"},
-            "service_tier": {"const": "default"},
-            "selection_reason": {"const": "owner-default:master"}
-          }
-        },
-        {
-          "description": "A project may explicitly select the supported Luna profile for its Master role.",
-          "properties": {
-            "model": {"const": "gpt-5.6-luna"},
-            "reasoning_effort": {"const": "max"},
-            "service_tier": {"const": "priority"},
-            "selection_reason": {"const": "owner-default:master"}
-          }
-        },
-        {
-          "properties": {
-            "model": {"const": "gpt-5.6-luna"},
-            "reasoning_effort": {"const": "max"},
-            "service_tier": {"const": "priority"},
-            "selection_reason": {"const": "owner-default:ordinary-worker"}
-          }
-        },
-        {
-          "properties": {
-            "model": {"const": "gpt-5.6-luna"},
-            "reasoning_effort": {"const": "max"},
-            "service_tier": {"const": "priority"},
-            "selection_reason": {"const": "owner-default:complex-worker"}
-          }
-        },
-        {
-          "description": "Legacy complex-worker profile retained only for digest-preserved terminal or GRANDFATHER records.",
-          "x-legacy": true,
-          "properties": {
-            "model": {"const": "gpt-5.6-sol"},
-            "reasoning_effort": {"const": "high"},
-            "service_tier": {"const": "default"},
-            "selection_reason": {"const": "owner-default:complex-worker"}
-          }
-        }
-      ]
+      }
     },
     "model_owner_defaults": {
       "type": "object",

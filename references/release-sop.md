@@ -9,6 +9,16 @@ The [Task Lifecycle SOP](task-lifecycle-sop.md) governs task delivery; the
 rotation, successor confirmation, and archive decisions remain solely in the
 [Conversation Rotation SOP](conversation-rotation-sop.md).
 
+## Ordinary code push
+
+An ordinary source-code push is separate from formal release certification. After local checks and
+full diff review, explicit user authorization for the target repository/ref permits a normal push.
+Verify clean Git state, remote ancestry and the resulting remote SHA. Candidate/Gate certification,
+a structured release authorization envelope and closeout are not prerequisites for that operation.
+An ACTIVE Master release lock alone does not block it; reconcile any active Worker assignment first.
+A changed integrated HEAD invalidates existing formal release evidence, which must be refreshed before
+formal publication or closeout. Existing assignments and historical records are preserved.
+
 ## The release boundary
 
 Keep these outcomes separate:

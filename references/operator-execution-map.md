@@ -51,7 +51,8 @@ only within its assignment.
 
    Inspect preserved dirty/untracked material, the current Plan/Task Spec/Card/Master Card and handoffs,
    visible bindings, dependencies, model profile, authorization envelope, and applicable SOP.
-3. Validate every available current record before changing any record, file, ref, or external target:
+3. For an operation governed by strict records, validate the applicable current records before mutation.
+   Ordinary code push uses its separate route below and does not create or require release records:
 
    ```bash
    python3 scripts/validate_contracts.py \
@@ -69,8 +70,8 @@ only within its assignment.
 4. Confirm the requested paths, dependency/ownership edges, frozen full SHA, plan/task/card identity,
    model profile, and complete authorization are exactly the persisted values. A denied capability is
    explicit `false`/`null`/`0`; it is never inferred from a test, model, message, or service tier.
-5. Select exactly one route. A governance, protocol, Schema, state, authorization, persistence,
-   release, security, production, irreversible, long-recovery, or uncertain request is not FAST.
+5. Select exactly one route. Assess actual effects: parallel coordination, permission-boundary changes, formal release certification,
+   production operations, irreversible migration or complex recovery require STRICT.
 
 **Continue condition.** Every applicable identity, ownership, baseline, status, scope, dependency,
 authorization, and validation check is `PASS` or an explicitly inapplicable `NONE`; the operator can
@@ -115,10 +116,10 @@ arbitrary bypass writers are outside this protection. Rollover recovery is recei
 ## FAST route — short path only
 
 **Enter when.** The universal gate proves one current task and worktree, no independent parallel
-responsibility or extra worktree, a relevant Card absent or `IDLE`, no active Dispatch assignment or
+responsibility or extra worktree, a relevant Worker Card absent or `IDLE`, no active Dispatch assignment or
 competing durable role binding, clear current-role ownership, bounded local verification, and no
-governance/protocol/Schema/state/authorization/persistence/release/security/production/irreversible or
-long-recovery impact. Any uncertainty enters STRICT or stops.
+permission-boundary change, formal release certification, production operation, irreversible migration or
+complex recovery. File category alone does not decide the route. Any uncertainty enters STRICT or stops.
 
 **Owner.** The current task/role owns the local change. No Master/Worker coordination records are
 created for the FAST operation.
@@ -131,18 +132,18 @@ created for the FAST operation.
    or v2 behavior.
 3. Run bounded local validation and tests, then `git diff --check` and a complete diff review.
 4. If all checks pass, use the existing local `git add` and `git commit`; record the resulting SHA and
-   status. If a check fails, make at most the permitted local correction; further uncertainty or scope
-   growth exits FAST.
+   status. If a check fails, debug within the bounded scope; increased risk, new dependencies or scope
+   growth requires reassessment.
 5. Report the result and retained evidence. A requested push or other external action is a separate
    decision and authorization after the local result; FAST never grants it.
 
 **Continue condition.** The bounded change, local checks, complete diff, and commit all remain within
 the original owned scope, with no new record or authority required.
 
-**Stop or upgrade condition.** Stop immediately for a failed/ambiguous gate, a second unresolved local
-correction, ownership or scope drift, a non-IDLE Card/active assignment/competing binding, or any
-request for coordination, persistence, release, production, external, destructive, synchronization,
-or v2 behavior. Route the affected work to STRICT or exception recovery; do not create STRICT records
+**Stop or upgrade condition.** Stop immediately for a failed/ambiguous gate, increased risk, unresolved concurrent
+ownership or scope drift, a non-IDLE Worker Card/active assignment/competing writer, or any
+request for parallel coordination, formal release certification, production mutation, irreversible
+migration or complex recovery. A separately authorized ordinary push does not require this release route. Route the affected work to STRICT or exception recovery; do not create STRICT records
 from the FAST path as a workaround.
 
 **Minimum evidence.** Pre/post Git truth, owned changed paths, commit SHA/subject, local check results,
@@ -190,6 +191,13 @@ never make a Worker resolve it by reset, rebase, merge, synchronization, or scop
 result SHAs, dependency/ownership checks, complete changed paths, test and diff results, handoff,
 integration mapping, Card state, and any unresolved finding. Use the [Task Lifecycle SOP](task-lifecycle-sop.md)
 for the authoritative state transitions.
+
+## Ordinary code push
+
+For reviewed commits under explicit user authorization, verify clean Git state, intended target/ref,
+required local checks and remote ancestry; perform a normal push and verify the resulting remote SHA.
+No Candidate, release envelope record or closeout is required for an ordinary code push. Preserve
+active strict assignments and invalidate formal release evidence when its integrated HEAD changes.
 
 ## Conditional release route — integrated tree first
 
@@ -282,8 +290,7 @@ none), and Master decision. Use the [Exception and Recovery SOP](exception-recov
 
 **Enter when.** The operation audits execution, adopts MWR, changes an SOP, retains/retires evidence, or
 creates/rotates/archives a persistent conversation. Governance routes are human routing only and do not
-override contracts or create a registry. A governance document change normally follows the STRICT task
-route for its commit and integration.
+override contracts or create a registry. A governance document change is classified by its actual risk and coordination needs.
 
 **Owner.** Master or the existing project owner makes governance and persistent conversation decisions.
 Workers and auditors collect/report evidence only. Conversation lifecycle remains solely governed by the
@@ -300,15 +307,15 @@ runbook:
 | Retention, archive, retirement, or deletion-boundary review | [Retention and Retirement](retention-retirement-sop.md) | Exact target, references, preserved bytes, obligations, owner, and any independent destructive scope are proven | Archive is not deletion; missing exact destructive authority stops and preserves, with no automatic cleanup. |
 | Conversation creation, successor confirmation, rotation, or predecessor archive | [Conversation Rotation](conversation-rotation-sop.md) | Master verifies the same role/worktree/branch, blank successor by default, read-only bootstrap, explicit confirmation, and predecessor visibility | Wrong HEAD/worktree, duplicate visible conversation, missing confirmation, or Worker self-archive is immediate `STOP_AND_PRESERVE`. |
 
-For a governance or rotation change, continue through the STRICT integration and release routes when the
-operation changes tracked documentation or release inputs. Do not modify an existing SOP body from this
+For a governance or rotation change, select STRICT only for the actual coordination or risk conditions;
+formal release certification uses the release route when requested. Do not modify an existing SOP body from this
 map when the current Task Spec forbids it. Adoption, FAST binding, v2, deletion, publication, and
 conversation archive decisions never inherit one another's authority.
 
 ## Final operator rule
 
 Validation comes before every mutation. Integration comes before candidate generation or approval.
-Candidate approval and publication authorization are separate. Closeout follows the publication decision
+For formal release certification, Candidate approval and publication authorization are separate. Closeout follows the publication decision
 and its required verification. Rollover follows verified closeout. Any missing or ambiguous evidence is
 `NOT_PROVEN`; any contradiction or unsafe interruption is `STOP_AND_PRESERVE` until Master or the
 existing owner records the next legal decision.

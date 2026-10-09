@@ -28,13 +28,18 @@ Classify FAST before creating a Dispatch Plan or entering heavy coordination.
 
 | Path | Use when | Required result |
 | --- | --- | --- |
-| FAST | One current task and work directory are sufficient; the relevant Card is absent or `IDLE`; there is no active Dispatch assignment or competing durable role binding; ownership is clear; the change is bounded, low-risk, locally verifiable, and has no governance, protocol, Schema, state-machine, authorization, persistence, release, security, irreversible, production, or long-recovery impact. | Work in the current directory, preserve user material, run bounded checks, review the diff, and commit when repository workflow calls for it. Create no Plan, Task Spec, Card, extra worktree, cycle fence, adoption record, or Operation Receipt. |
-| STRICT | Any FAST condition is false, or the work has parallel responsibility, an extra worktree, governance/protocol impact, persistent state, release semantics, production or irreversible impact, more than one local correction after failed acceptance, or uncertain ownership/classification. | Master performs the read-only discovery gate, publishes a versioned Task Spec/Plan, and uses the lifecycle below. |
+| FAST | One current task and work directory are sufficient; the relevant Worker Card is absent or `IDLE`; there is no active Dispatch assignment or competing durable role binding; ownership is clear; the change is bounded, low-risk, locally verifiable, and has no irreversible migration, permission-boundary change, production operation, formal release certification or complex recovery. File category alone does not force STRICT. | Work in the current directory, preserve user material, run bounded checks, review the diff, and commit when repository workflow calls for it. Create no Plan, Task Spec, Card, extra worktree, cycle fence, adoption record, or Operation Receipt. |
+| STRICT | Any FAST condition is false, or the work has parallel responsibility, an extra worktree, permission-boundary change, formal release certification, production operation, irreversible migration or complex recovery. Repeated bounded corrections alone do not require STRICT. | Master performs the read-only discovery gate, publishes a versioned Task Spec/Plan, and uses the lifecycle below. |
 
 FAST never grants external-call, execution, publication, destructive, synchronization, or scope-expansion
 authority. A separate explicit authorization is required immediately before any such external mutation;
-local tests do not grant `create_execution`. A non-`IDLE` Card, active assignment, or competing binding
-always removes FAST eligibility even if the requested change appears small.
+local tests do not grant `create_execution`. A non-`IDLE` Worker Card, active assignment, or competing writer
+requires reconciliation before FAST even if the requested change appears small.
+
+Master takeover: stop the prior Worker, inspect HEAD/status, preserve dirty material and immutable handoffs,
+and transfer ownership explicitly. Reconcile active strict assignments through cancellation or supersession;
+never run two writers against the same paths. Multiple local debugging corrections are allowed while risk
+and scope remain bounded.
 
 ## 2. STRICT preflight and publication
 
@@ -70,18 +75,10 @@ The minimum strict assignment evidence is:
 
 ### Model profile
 
-Use the persisted profile exactly. The built-in current defaults are:
-
-| Owner | Model / effort / service tier | Selection reason |
-| --- | --- | --- |
-| Master | `gpt-5.6-sol` / `high` / `default` | `owner-default:master` |
-| Ordinary Worker | `gpt-5.6-luna` / `max` / `priority` | `owner-default:ordinary-worker` |
-| Complex Worker | `gpt-5.6-luna` / `max` / `priority` | `owner-default:complex-worker` |
-
-A project may declare another supported active profile under its model policy, but the Task Spec and
-Plan entry must match exactly and the launcher must honor all persisted routing fields. `service_tier`
-is a scheduler profile, never authorization `route` or `provider`; it grants no external action. If the
-launcher cannot honor the profile, stop dispatch instead of substituting a model, effort, or tier.
+Projects choose model, effort and service tier; use the persisted profile exactly when a policy exists.
+The Skill imposes no model whitelist. Plan/Task profiles must equal project `model_policy.owner_defaults`,
+and the launcher must support the requested values. `service_tier` grants no external authority.
+Existing assignments retain their recorded profiles until legally revised.
 
 ### Authorization gate
 
@@ -137,7 +134,7 @@ Master independently reviews every handoff:
    rewritten, scope/ownership is wrong, the baseline is stale, or a required check/provenance item is
    missing. Preserve the original handoff and issue a higher Task Spec revision for in-scope rework.
 3. Integrate only the intended Worker change into the Master tree. Master may regenerate mechanical
-   projections from their sources, but semantic conflicts return to the owning Worker. Record the
+   projections from their sources, but semantic conflicts return to the owning Worker or a verified Master takeover. Record the
    mapping `worker_commit_sha → integrated_as_sha` and recompute affected derived evidence from the
    integrated tree.
 4. After accepted integration, Master records the handoff as `INTEGRATED` and sends the exact mapping

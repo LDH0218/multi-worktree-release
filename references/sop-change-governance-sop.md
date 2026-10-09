@@ -39,7 +39,7 @@ silently rewrite a persisted record.
 
 **Results.** `PASS` means the class, authority boundary, compatibility, evidence, and review are all
 proven and the owner may take only the next already authorized step. `FAIL` means the proposal
-contradicts a contract/SOP, changes meaning without the required STRICT revision, or a forbidden action
+contradicts a contract/SOP, changes an active strict assignment without its required revision, or a forbidden action
 occurred; stop and preserve. `NOT_PROVEN` means a required source, owner, reviewer, compatibility fact,
 authorization, or provenance item is missing, ambiguous, stale, or unverifiable; do not infer approval.
 These labels are human review results, not machine states or permissions.
@@ -58,7 +58,7 @@ Classify before editing. If the class is uncertain, use STRICT and stop until th
 | Class | Examples | Route and review |
 | --- | --- | --- |
 | Editorial | Typo, grammar, translation, formatting, link repair, or clarification that preserves every trigger, owner, evidence requirement, authority boundary, state meaning, and decision. | A bounded local edit may use FAST only when all FAST conditions hold; otherwise use STRICT. Run link and contradiction checks. |
-| Normative governance | New/changed trigger, owner, evidence, stop condition, recovery rule, retention obligation, model/auth boundary, adoption rule, compatibility promise, release boundary, or deprecation meaning. | STRICT. Master owns the task/Plan, independent review, integration, and release impact decision. |
+| Normative governance | New/changed trigger, owner, evidence, stop condition, recovery rule, retention obligation, model/auth boundary, adoption rule, compatibility promise, release boundary, or deprecation meaning. | Classify actual risk and coordination needs. Master may directly implement bounded single-owner changes; active strict assignments still require legal revision or supersession. |
 | Contract or implementation | Schema, validator, state transition, authorization semantics, FAST implementation, v2 routing, release script, or runtime behavior. | Outside this SOP. Stop and request a separately scoped Master task; never smuggle it into a document change. |
 
 The document owner proposes the change and supplies its rationale. Master decides whether it is editorial
@@ -111,7 +111,7 @@ operation. Do not silently apply a new meaning halfway through the batch.
 
 - A purely editorial correction that demonstrably changes no decision meaning may be reviewed and
   integrated under the existing task boundary, with the complete diff and checks recorded.
-- A normative change requires a new STRICT task/Plan revision or a superseding task when objective,
+- For an active strict assignment, a normative change requires a new task/Plan revision or a superseding task when objective,
   owner, worktree, frozen baseline, authority, or release identity changes. Preserve the predecessor
   evidence and use successor commits; never amend a handed-off commit.
 - Master decides whether affected work continues under the old frozen SOP, is gated, is reworked, or is
@@ -133,7 +133,7 @@ Deprecation is a documented routing decision, not deletion:
 
 1. Identify the replacement SOP or existing core authority and the exact boundary being retired.
 2. Prove that current records, links, templates, and in-flight releases have a compatible route.
-3. Mark or route the old document through a reviewed STRICT change, preserving it until the retention
+3. Mark or route the old document through a reviewed change, preserving it until the retention
    policy and any explicit deletion decision are satisfied.
 4. Keep the Conversation Rotation SOP unchanged as the sole conversation-lifecycle authority unless a
    separately authorized governance change explicitly addresses that authority.

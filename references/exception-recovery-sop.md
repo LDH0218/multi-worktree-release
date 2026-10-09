@@ -52,6 +52,14 @@ When an exception is observed:
 
 ## State and revision rules
 
+Master takeover uses the existing cancellation/supersession path: stop the old Worker and confirm it
+has stopped, inspect its HEAD/status and immutable handoff, preserve dirty material, and reconcile its
+active Plan/Card to a legal terminal state. Record the new owner and scope in existing task evidence.
+An active strict assignment with changed owner requires a superseding task; a bounded task with no
+active strict assignment can be taken over directly. Do not invent a new Card state, silently rewrite
+ownership or discard the prior Worker work. User authorization for a repair covers the scoped takeover;
+no additional approval is needed solely because the original role was Worker.
+
 Only Master changes Dispatch status. The legal recovery shape is:
 
 - `PUBLISHED → BLOCKED` on a Worker exception or Master-verified blocker;

@@ -70,7 +70,8 @@ WORKER_ASSIGNMENT_FIELDS = (
     "allowed_paths", "forbidden_paths", "authorization", "acceptance_commands",
 )
 HANDOFF_IDENTITY_FIELDS = ("task_id", "task_spec_revision", "task_spec_digest", "source_thread_id")
-MODEL_OWNER_DEFAULTS = {
+# Test fixture choices, never production defaults or an allowed-model list.
+EXAMPLE_MODEL_OWNER_DEFAULTS = {
     "master": {
         "model": "gpt-5.6-sol",
         "reasoning_effort": "high",
@@ -109,27 +110,6 @@ LEGACY_MODEL_POLICY_OWNER_DEFAULTS = {
         "service_tier": "default",
         "selection_reason": "owner-default:complex-worker",
     },
-}
-LEGACY_MODEL_PROFILES = tuple(
-    LEGACY_MODEL_POLICY_OWNER_DEFAULTS[owner]
-    for owner in ("complex_worker",)
-)
-PROJECT_MODEL_PROFILE_OPTIONS = {
-    "owner-default:master": (
-        MODEL_OWNER_DEFAULTS["master"],
-        {
-            "model": "gpt-5.6-luna",
-            "reasoning_effort": "max",
-            "service_tier": "priority",
-            "selection_reason": "owner-default:master",
-        },
-    ),
-    "owner-default:ordinary-worker": (
-        MODEL_OWNER_DEFAULTS["ordinary_worker"],
-    ),
-    "owner-default:complex-worker": (
-        MODEL_OWNER_DEFAULTS["complex_worker"],
-    ),
 }
 READ_ONLY_TASK_CLASS_RE = re.compile(r"^independent-read-only(?:-|$)")
 RELEASE_TASK_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
@@ -474,12 +454,10 @@ def validate_model_profile(value: Any, schema: dict[str, Any], label: str = "mod
     for field in ("model", "reasoning_effort", "service_tier", "selection_reason"):
         if not isinstance(value[field], str) or not value[field]:
             raise ContractError(f"{label}.{field} must be a non-empty string")
-    reason = value["selection_reason"]
-    if any(value == profile for profile in PROJECT_MODEL_PROFILE_OPTIONS.get(reason, ())):
-        return
-    if allow_legacy and any(value == profile for profile in LEGACY_MODEL_PROFILES):
-        return
-    raise ContractError(f"{label} uses an unsupported model/reasoning/service-tier combination")
+    if value["selection_reason"] not in {
+        "owner-default:master", "owner-default:ordinary-worker", "owner-default:complex-worker",
+    }:
+        raise ContractError(f"{label} has an unknown owner selection_reason")
 
 
 def validate_model_policy(value: Any, schema: dict[str, Any], plan_revision: int) -> None:
@@ -497,14 +475,15 @@ def validate_model_policy(value: Any, schema: dict[str, Any], plan_revision: int
         raise ContractError("model_policy.owner_defaults must be an object")
     require_exact_fields(defaults, schema_required(schema, "model_owner_defaults"),
                          "model_policy.owner_defaults")
-    for owner in MODEL_OWNER_DEFAULTS:
-        validate_model_profile(
-            defaults[owner], schema, f"model_policy.owner_defaults.{owner}", allow_legacy=True,
-        )
+    for owner in ("master", "ordinary_worker", "complex_worker"):
+        validate_model_profile(defaults[owner], schema, f"model_policy.owner_defaults.{owner}")
+        expected_reason = "owner-default:" + owner.replace("_", "-")
+        if defaults[owner]["selection_reason"] != expected_reason:
+            raise ContractError(f"model_policy.owner_defaults.{owner} has a mismatched owner selection_reason")
 
 
 def legacy_model_profile_allowed(entry: dict[str, Any], historical: bool = False) -> bool:
-    """Allow the prior complex profile only on immutable historical assignments."""
+    """Preserved historical profiles need not equal a later project policy."""
     return historical or entry["dispatch_status"] in TERMINAL_DISPATCH_STATES
 
 
@@ -1147,8 +1126,7 @@ def validate_dispatch_graph_and_model_routing(plan: dict[str, Any], specs: dict[
                 )
                 if entry["model_profile"] != spec["model_profile"]:
                     raise ContractError(f"Dispatch/Task Spec model_profile mismatch for {task_id}")
-                if (entry["model_profile"] not in policy["owner_defaults"].values()
-                        and not (allow_legacy and entry["model_profile"] in LEGACY_MODEL_PROFILES)):
+                if entry["model_profile"] not in policy["owner_defaults"].values() and not allow_legacy:
                     raise ContractError(f"{task_id}.model_profile is not an owner-policy default")
 
     static_dependencies = {
@@ -3097,27 +3075,9 @@ def validate_documented_contracts(repo_root: Path, schema: dict[str, Any]) -> No
         missing_history_terms = [term for term in required_history_terms if term not in contents]
         if missing_history_terms:
             raise ContractError(f"historical CLI contract missing from {relative}: {missing_history_terms}")
-        model_terms = (
-            "gpt-5.6-sol", "gpt-5.6-luna", "service_tier", "owner-default:master",
-            "owner-default:ordinary-worker", "owner-default:complex-worker", "max", "priority",
-            "persisted model `service_tier`", "requested scheduler profile", "unobservable effective tier",
-            "launcher can prove it cannot honor priority", "compatibility-only",
-        )
-        missing_model_terms = [term for term in model_terms if term not in contents]
-        if missing_model_terms:
-            raise ContractError(f"model-routing contract missing from {relative}: {missing_model_terms}")
-        model_profile_patterns = {
-            "master": r"gpt-5\.6-sol.{0,240}?high.{0,240}?default.{0,240}?owner-default:master",
-            "ordinary_worker": r"gpt-5\.6-luna.{0,240}?max.{0,240}?priority.{0,240}?owner-default:ordinary-worker",
-            "complex_worker": r"gpt-5\.6-luna.{0,240}?max.{0,240}?priority.{0,240}?owner-default:complex-worker",
-        }
-        missing_profiles = [
-            owner for owner, pattern in model_profile_patterns.items()
-            if re.search(pattern, contents, re.DOTALL) is None
-        ]
-        if missing_profiles:
-            raise ContractError(f"model-routing profile mapping drifted from current defaults in {relative}: "
-                                f"{missing_profiles}")
+        model_terms = ("model_policy.owner_defaults", "service_tier", "selection_reason")
+        if any(term not in contents for term in model_terms):
+            raise ContractError(f"project model policy missing from {relative}")
         audit_hardening_terms = (
             "repository-relative POSIX", "independent-read-only", "metadata-only empty commit",
             "tree-equivalence", "execution_ref_required", "empty v2",
@@ -4423,7 +4383,7 @@ class ContractScenarios(unittest.TestCase):
             self.assertEqual(attested.returncode, 0, attested.stderr)
 
     def test_model_routing_policy_fence_and_exact_profiles(self) -> None:
-        self.assertEqual(MODEL_OWNER_DEFAULTS, {
+        self.assertEqual(EXAMPLE_MODEL_OWNER_DEFAULTS, {
             "master": {"model": "gpt-5.6-sol", "reasoning_effort": "high", "service_tier": "default",
                        "selection_reason": "owner-default:master"},
             "ordinary_worker": {"model": "gpt-5.6-luna", "reasoning_effort": "max",
@@ -4442,8 +4402,7 @@ class ContractScenarios(unittest.TestCase):
             make_model_profile("complex_worker")["selection_reason"],
         )
         legacy_complex = copy.deepcopy(LEGACY_MODEL_POLICY_OWNER_DEFAULTS["complex_worker"])
-        with self.assertRaisesRegex(ContractError, "unsupported model/reasoning/service-tier combination"):
-            validate_model_profile(legacy_complex, self.schema)
+        validate_model_profile(legacy_complex, self.schema)
         validate_model_profile(legacy_complex, self.schema, allow_legacy=True)
         project_master = {
             "model": "gpt-5.6-luna",
@@ -4455,14 +4414,17 @@ class ContractScenarios(unittest.TestCase):
         project_policy = make_model_policy()
         project_policy["owner_defaults"] = {
             "master": copy.deepcopy(project_master),
-            "ordinary_worker": copy.deepcopy(MODEL_OWNER_DEFAULTS["ordinary_worker"]),
-            "complex_worker": copy.deepcopy(MODEL_OWNER_DEFAULTS["complex_worker"]),
+            "ordinary_worker": copy.deepcopy(EXAMPLE_MODEL_OWNER_DEFAULTS["ordinary_worker"]),
+            "complex_worker": copy.deepcopy(EXAMPLE_MODEL_OWNER_DEFAULTS["complex_worker"]),
         }
         validate_model_policy(project_policy, self.schema, plan_revision=1)
-        wrong_owner = copy.deepcopy(MODEL_OWNER_DEFAULTS["master"])
+        wrong_owner = copy.deepcopy(EXAMPLE_MODEL_OWNER_DEFAULTS["master"])
         wrong_owner["selection_reason"] = "owner-default:ordinary-worker"
-        with self.assertRaisesRegex(ContractError, "unsupported model/reasoning/service-tier combination"):
-            validate_model_profile(wrong_owner, self.schema)
+        validate_model_profile(wrong_owner, self.schema)
+        wrong_policy = make_model_policy()
+        wrong_policy["owner_defaults"]["master"] = wrong_owner
+        with self.assertRaisesRegex(ContractError, "mismatched owner"):
+            validate_model_policy(wrong_policy, self.schema, plan_revision=1)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             legacy_root = root / "legacy"
@@ -4506,7 +4468,7 @@ class ContractScenarios(unittest.TestCase):
                 "--plan", str(write_graph_bundle(legacy_new_root, legacy_new_plan, legacy_new_specs)),
             )
             self.assertEqual(legacy_new.returncode, 1)
-            self.assertIn("unsupported model/reasoning/service-tier combination", legacy_new.stderr)
+            self.assertIn("owner-policy default", legacy_new.stderr)
 
             fenced_root = root / "fenced"
             fenced_plan, fenced_specs = make_graph_bundle(fenced_root, {"A": {"model_owner": "complex_worker"}})
@@ -4535,7 +4497,7 @@ class ContractScenarios(unittest.TestCase):
                 "--plan", str(write_graph_bundle(unsupported_root, unsupported_plan, unsupported_specs)),
             )
             self.assertEqual(unsupported.returncode, 1)
-            self.assertIn("unsupported model/reasoning/service-tier combination", unsupported.stderr)
+            self.assertIn("owner-policy default", unsupported.stderr)
 
     def test_model_profile_is_not_authorization_and_changes_require_revision(self) -> None:
         profile = make_model_profile("ordinary_worker")
@@ -5741,14 +5703,14 @@ def make_task_spec() -> dict[str, Any]:
 
 
 def make_model_profile(owner: str) -> dict[str, Any]:
-    return copy.deepcopy(MODEL_OWNER_DEFAULTS[owner])
+    return copy.deepcopy(EXAMPLE_MODEL_OWNER_DEFAULTS[owner])
 
 
 def make_model_policy(enforced_from_plan_revision: int = 1) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "enforced_from_plan_revision": enforced_from_plan_revision,
-        "owner_defaults": copy.deepcopy(MODEL_OWNER_DEFAULTS),
+        "owner_defaults": copy.deepcopy(EXAMPLE_MODEL_OWNER_DEFAULTS),
     }
 
 

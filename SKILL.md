@@ -15,12 +15,14 @@ Classify **FAST** before creating a Dispatch Plan or starting Master/Worker setu
 
 - One current task and work directory can complete the change, without an independent parallel
   responsibility or extra worktree.
-- The relevant Card is absent or `IDLE`; there is no active Dispatch assignment or competing durable
-  role binding for the current worktree/role. Any non-IDLE Card makes FAST ineligible.
-- Every modified path is clearly owned by the current role. Master must not edit Worker-owned business
-  paths from its worktree. Unknown or ambiguous ownership requires STRICT.
-- No governance, protocol, Schema, state-machine, authorization, security, persistence, release,
-  irreversible migration, production or long-recovery impact.
+- The relevant Worker Card is absent or `IDLE`; there is no active Dispatch assignment or competing
+  writer for the current worktree/role. A non-IDLE Worker Card requires reconciliation first.
+- Every modified path has one current writer. Master may take over after stopping the prior Worker,
+  checking its HEAD, dirty material and handoff, and transferring ownership explicitly. Unresolved
+  concurrent ownership stops mutation.
+- No irreversible migration, permission-boundary change, production operation, formal release
+  certification or complex recovery. Schema, persistence and governance file names alone do not
+  require STRICT; assess the actual effect and local verification.
 - Verification is clear and bounded locally; every external write has separate explicit authorization.
 
 FAST stays in the current task/worktree: preserve user material, inspect the baseline, make the scoped
@@ -30,7 +32,8 @@ record or Operation Receipt. These instructions suffice for eligible FAST work; 
 release material merely to perform it.
 
 Enter existing **ISOLATED / STRICT** before risky action for parallel work, any excluded impact,
-material scope expansion, more than one local correction after failed acceptance, or uncertainty.
+material scope/risk expansion, new dependencies or unresolved ownership. Local debugging may use
+multiple corrections while scope, risk and verification remain bounded.
 Do not create records as a workaround for failed FAST eligibility; follow STRICT or stop.
 
 ## Read only the applicable procedure
@@ -88,8 +91,12 @@ Progressive loading changes reading cost, not prerequisites, validation or stop 
   conversations/worktrees. Deletion always needs separate explicit authority.
 - Handed-off commits are immutable; rework uses successor commits. Master reviews the full patch and
   records Worker-to-integrated SHA mappings. Regenerate final evidence from the integrated tree;
-  semantic conflicts return to their owner. Only Master declares a release candidate.
-- Preserve `integration → fresh Candidate/Gates → separate publication decision → closeout → rollover`.
+  semantic conflicts return to their owner or a verified Master takeover. Only Master declares a release candidate.
+- Ordinary delivery uses `change → checks → diff review → commit → authorized normal push`.
+  A normal code push needs explicit target/ref authorization, clean reviewed commits and remote checks,
+  but no Candidate or closeout. An ACTIVE Master release lock does not block unrelated bounded work;
+  active Worker assignments still require legal reconciliation before their work is taken over.
+- For formal release certification preserve `integration → fresh Candidate/Gates → separate publication decision → closeout → rollover`.
   Changed integrated HEAD invalidates Gate evidence; tests or closeout never grant publication.
   Use existing writers and the state-root lock for cooperative writes, including Master Plan/Card
   updates. Never bypass checks or replace receipt-backed forward recovery with rollback.
@@ -99,7 +106,8 @@ Progressive loading changes reading cost, not prerequisites, validation or stop 
 
 v1 remains authoritative. Authorization envelope v2 and Candidate evidence schema v2 are formal parts
 of current STRICT behavior; protocol v2 adoption/binding prototypes remain experimental and unrouted.
-This entrypoint changes neither protocol nor model configuration.
+Model, effort and service tier are project choices. When a project persists a model policy, validate
+assignment equality and launcher support; this Skill does not prescribe model names.
 
 ## Validation and delivery
 
