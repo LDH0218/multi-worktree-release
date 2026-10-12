@@ -305,9 +305,11 @@ Workers and auditors collect/report evidence only. Conversation lifecycle remain
 runbook:
 
 For conversation setup, use the [binding procedure](conversation-rotation-sop.md#conversation-creation-and-worktree-binding):
-select `local` versus a newly created `worktree`, wait for a real thread ID, and verify default cwd/Git
-identity before executable dispatch. A missing list entry is not permission to create a duplicate;
-blank rotation into a retained worktree requires a supported exact-directory capability, not a new checkout.
+default rotation uses a blank `local` conversation in the same project, then explicit command `workdir`
+and absolute file paths to reuse the retained worktree. Wait for a real thread ID; record application cwd
+separately and verify target Git identity through independent directory calls before dispatch. Keep
+explicit targeting on later turns. No native cwd rebind is required. New `worktree` mode is for an
+authorized new checkout, not rotation. A missing list entry is not permission to create a duplicate.
 
 | Condition | Existing route | Continue evidence | Stop condition |
 | --- | --- | --- | --- |

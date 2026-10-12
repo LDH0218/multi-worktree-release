@@ -69,7 +69,7 @@ Status and preserved material: <CLEAN_OR_DETAILS>
 Existing Plan/Task/Card/handoff identities: <IDS_OR_NONE>
 
 Master preflight
-- Exactly one current visible conversation claims this role: <PASS/FAIL>
+- Exactly one current execution owner; inactive predecessor permitted during bootstrap or deferred archive: <PASS/FAIL>
 - Exactly one role claims this retained worktree/branch pair: <PASS/FAIL>
 - Worktree, branch, HEAD, status, and preserved material verified: <PASS/FAIL>
 - Existing Plan, Task Spec, Worker/Master Card, and live binding reconciled: <PASS/FAIL>
@@ -82,7 +82,13 @@ For `ROTATE`, create a blank successor by default with the same role, retained w
 when the predecessor history is genuinely short and forking is demonstrably necessary may Master use a fork, and the handoff or
 decision must record that reason. In either case, complete the predecessor's structured handoff and require the successor's
 read-only bootstrap and explicit confirmation before archiving the predecessor. Keep the predecessor visible until that
-confirmation passes; then archive only the predecessor conversation. Rotation is triggered only by context becoming too long, an
+confirmation passes. Master then confirms the successor as sole execution owner and may continue authorized work.
+Archive only the predecessor conversation when worktree preservation is proven; otherwise defer archive and retain it inactive.
+The default uses same-project `local` mode, explicit `workdir` on every command and absolute file paths.
+Record application cwd separately; native rebinding is not required. Confirm the predecessor has stopped;
+the declared stopped-predecessor/read-only-successor interval, and inactive predecessor awaiting archive after handover,
+are not competing bindings.
+Rotation is triggered only by context becoming too long, an
 explicit user request, or persistent risk; task completion, convenience, and an ordinary pause alone are not triggers.
 Conversation archive is history management, not worktree or branch retirement. For `DUPLICATE_RECONCILIATION`,
 stop dispatch immediately; archive an unassigned duplicate only after proving it has no Task Spec, Card, changed or untracked
@@ -106,6 +112,9 @@ Role: <ROLE>
 Predecessor conversation: <TASK/TITLE/OLD_GENERATION>
 Successor conversation: <TASK/TITLE/NEW_GENERATION_OR_TARGET>
 Retained worktree: <ABSOLUTE_PATH>
+Application default cwd: <OBSERVED_PATH; MAY_DIFFER_FROM_TARGET>
+Execution targeting: same-project Local; explicit workdir every command; absolute file paths
+Predecessor stopped and no competing writer: <EVIDENCE / NOT_PROVEN>
 Branch: <BRANCH>
 HEAD and status: <FULL_SHA / CLEAN_OR_PRESERVED_DETAILS>
 Dispatch Plan: <PATH / RELEASE_TASK_ID / PLAN_REVISION / RECORD_REVISION / PLAN_DIGEST>
@@ -121,6 +130,8 @@ Same role, retained worktree, branch, and incremented generation: <PASS/FAIL>
 Successor read-only bootstrap and explicit confirmation required: true
 Predecessor remains visible until confirmation: true
 Archive target after confirmation: predecessor conversation only
+Archive disposition: SAFE_TO_ARCHIVE | DEFERRED_WITH_REASON
+Authorized successor work may continue after confirmed handover while archive is deferred: true
 Master decision: <PROCEED_TO_SUCCESSOR_BOOTSTRAP / STOP_AND_PRESERVE>
 ```
 
@@ -132,13 +143,18 @@ Role and generation: <ROLE / NEW_GENERATION>
 Predecessor remains visible: <PASS/FAIL>
 Blank successor with no inherited chat context: <PASS/FAIL>
 Absolute worktree and branch: <PATH / BRANCH>
+Application default cwd: <OBSERVED_PATH; MAY_DIFFER_FROM_TARGET>
+Independent explicit-directory calls match retained target: <PASS/FAIL / EVIDENCE>
+All later target commands/files explicitly select this directory: true
+Native application rebinding: NOT_CLAIMED
 HEAD and status: <FULL_SHA / CLEAN_OR_PRESERVED_DETAILS>
 One-to-one role/worktree binding: <PASS/FAIL>
 Plan, Task Spec, Card, and handoff identities/digests: <PASS/FAIL / DETAILS>
 Preserved dirty or untracked material: <PATHS_OR_NONE>
 No copied files, synchronization, reset, archive, or scope expansion performed: <PASS/FAIL>
 
-Confirmation: <EXPLICIT PASS — MASTER MAY ARCHIVE PREDECESSOR / STOP_AND_PRESERVE>
+Confirmation: <EXPLICIT PASS — MASTER MAY CONFIRM HANDOVER / STOP_AND_PRESERVE>
+Archive: <SEPARATE_SAFETY_CHECK / DEFERRED_WITH_REASON>
 Unresolved mismatch or blocker: <NONE_OR_DETAILS>
 ```
 
@@ -253,7 +269,11 @@ ownership comparison, so `src/x` and `src/x/` conflict rather than becoming alia
 fence remain untouched. Projects choose `model_policy.owner_defaults`; this Skill prescribes no model names or routing combinations.
 Plan/Task profiles must match project policy and role `selection_reason`. Existing profiles remain valid
 historical evidence. The persisted model `service_tier` is the
-requested scheduler profile, not a claim about the unobservable effective tier; dispatch stops when the launcher can prove it cannot honor the requested profile. It is not an authorization route/provider and grants no external call, run, publication, destructive operation,
+requested scheduler profile, not a claim about the unobservable effective tier. Defaults are preferences;
+unobserved preferences are disclosed without blocking dispatch, while unmet or unverified explicit hard requirements stop it.
+Historical assignment requirements remain binding until legally revised; see the
+[Task Lifecycle model-profile check](task-lifecycle-sop.md#model-profile).
+It is not an authorization route/provider and grants no external call, run, publication, destructive operation,
 synchronization, or scope.
 
 A `GRANDFATHER` entry preserves the existing task spec, digest, and its original `task_spec_plan_revision`; do not rewrite the
@@ -483,16 +503,24 @@ forking is demonstrably necessary may Master document a fork exception and its r
 Recover all facts from the persisted records and read-only Git/worktree checks.
 You are the <ROLE>-<GENERATION> task in project context <PROJECT>.
 Use only the absolute worktree <ABSOLUTE_WORKTREE> on branch <BRANCH>; expected HEAD is <FULL_SHA>.
+This blank Local conversation remains in the same project. Record the application default cwd once;
+it may remain Master. Set workdir=<ABSOLUTE_WORKTREE> on every target command (including later turns),
+and use absolute file paths. A prior cd is not persistent. Verify the target in two independent calls.
+Use explicitly targeted Git commands for authorized work; do not assume application Git buttons moved.
+If a tool cannot select the verified target, stop that operation. This is execution-directory reuse,
+not native rebinding or filesystem isolation. Recheck target identity/state before writing on a new turn.
 
-Read the repository governance, architecture index if present, WORKTREE_SCOPE.md, and WORKTREE_TASK.md completely.
-Read the persisted Dispatch Plan and complete task specification from the repository-defined paths or the default
-`.codex/multi-worktree-release/` state directory when they exist.
+Read the target's repository governance, architecture index and WORKTREE_SCOPE.md when present,
+canonical WORKTREE_TASK.json when present, and WORKTREE_TASK.md as a human projection only.
+Read the persisted Dispatch Plan and complete Task Spec from the handoff's absolute Master/state paths;
+do not infer them from the application's default cwd. Missing records are reported, not created for rotation.
 Then report the absolute path, branch, HEAD, status, preserved untracked material, and task-card state. If the card is not IDLE,
 verify its task ID, task revision, task-spec digest, plan revision, dispatch wave, frozen baseline, issuer, Worker SHA, and
 waiting condition against this handoff. Verify card and plan `record_revision` values and the Worker/Dispatch state mapping.
 
-Also verify that exactly one current visible conversation claims the role and retained worktree/branch pair. A rotation successor
-must pass this bootstrap before Master archives its predecessor. If another visible conversation claims the same role or retained
+Also verify one current execution owner for the role/worktree and evidence that the predecessor has stopped.
+The declared stopped predecessor may remain visible during this read-only bootstrap. A rotation successor
+must pass this bootstrap before Master archives its predecessor. If an undeclared competing conversation claims the same role or retained
 pair, stop dispatch and report `DUPLICATE_RECONCILIATION`; do not archive or delete a worktree automatically.
 
 Do not switch branches, synchronize, merge, rebase, reset, delete historical material, run external services, create a run,
@@ -537,7 +565,10 @@ Model routing profile
 - Reasoning effort: <PROJECT_EFFORT>
 - Service tier: <PROJECT_TIER>
 - Selection reason: <owner-default:master-or-owner-default:ordinary-worker-or-owner-default:complex-worker>
-- If the launcher cannot honor this exact profile, stop and report; do not substitute it.
+- Explicit hard runtime requirements: <REQUIREMENTS_OR_NONE; preserve existing assignment requirements>.
+- Defaults are preferences; report unobserved settings as NOT_PROVEN without claiming they applied.
+- Unmet/unverified hard requirements stop execution; a rejected launch needs an authorized resolution.
+- Do not silently substitute the model or change persisted profile/digest evidence.
 - This profile grants no authority and is separate from authorization route/provider.
 
 Required behavior
@@ -814,6 +845,9 @@ This is the read-only handoff from <ROLE>-<OLD_GENERATION> to <ROLE>-<NEW_GENERA
 
 Identity and worktree
 - Role: <ROLE>; absolute worktree: <PATH>; branch: <BRANCH>.
+- Application default cwd: <PATH; MAY_DIFFER_FROM_TARGET>; same-project Local successor.
+- Every target command uses explicit workdir; every file path is absolute; native rebinding is not claimed.
+- Predecessor stopped; no competing writer: <EVIDENCE>.
 - Current visible conversation: <TASK/TITLE/GENERATION>; binding action: ROTATE.
 - HEAD: <FULL_SHA>; expected status: <STATUS INCLUDING PRESERVED PATHS>.
 - Dispatch Plan: <ABSOLUTE_PATH / PLAN_REVISION / RECORD_REVISION / DIGEST>.

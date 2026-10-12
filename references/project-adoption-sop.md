@@ -105,8 +105,9 @@ Before a pilot, prove for every selected role:
 Choose the project's model policy before creating pilot conversations. With no explicit user/project
 choice, new roles default to `gpt-6.1-sol`; effort/tier remain project choices. Follow the
 [Task Lifecycle model-profile check](task-lifecycle-sop.md#model-profile): explicitly pass model/effort,
-verify observable settings, and report unverified required tier configuration as `NOT_PROVEN` before
-executable dispatch. Do not mistake a persisted profile for applied runtime settings.
+report requested, submitted and observed settings separately. Unobserved preferences are `NOT_PROVEN`
+but nonblocking; unmet or unverified explicit hard requirements block executable dispatch. Preserve
+existing assignment requirements. Do not mistake a persisted profile for applied runtime settings.
 
 ## 3. Choose FAST or STRICT
 

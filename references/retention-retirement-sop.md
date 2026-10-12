@@ -90,8 +90,10 @@ an absent conversation, or a clean status. A missing or ambiguous fact is `NOT_P
 
 1. Complete the applicable Task, Release, Exception, or Conversation Rotation checks. Accepted Worker
    work returns the Card to `IDLE`; it does not archive the conversation or retire the role.
-2. For conversation rotation, keep the predecessor visible until explicit successor confirmation, then
-   archive only the predecessor through the Master-owned Rotation procedure.
+2. For conversation rotation, keep the predecessor visible until explicit successor confirmation and
+   Master-confirmed handover. Authorized successor work may then continue. Archive only the predecessor
+   through the Master-owned Rotation procedure when preservation is verified; otherwise defer archive
+   and retain the predecessor inactive without blocking already authorized successor work.
 3. For release closeout, require a terminal Plan and handoffs, all Worker Cards `IDLE`, fresh v2
    `PASSED` evidence for the exact final HEAD, and the Release SOP's exact three-file no-overwrite
    archive. A partial archive is not completion.

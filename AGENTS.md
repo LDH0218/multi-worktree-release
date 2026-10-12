@@ -13,7 +13,9 @@ procedure needed for the current task; fully read selected instructions before a
 - Keep live coordination under `.codex/multi-worktree-release/` local and ignored. Preserve user changes.
 - New Master and Worker tasks/conversations default to `gpt-6.1-sol`. Keep the existing role effort/tier
   choices unless explicitly changed: Master `high/default`, Workers `max/priority`. Pass model and effort
-  explicitly at creation or authorized follow-up; verify requested runtime settings before dispatch.
+  explicitly at creation or authorized follow-up. These defaults are preferences; report unavailable
+  controls or unobserved runtime settings without claiming success. Only explicit hard requirements
+  block dispatch for missing runtime-setting evidence; preserve existing assignment requirements.
   Historical assignments retain their profiles/digests; apply the new default through normal versioned
   publication, not by rewriting old evidence. An unavailable tier control is not proof of acceleration.
 - Workers cannot merge, rebase, reset, synchronize, push, publish or widen scope unless their current
@@ -21,8 +23,9 @@ procedure needed for the current task; fully read selected instructions before a
 - Use `<responsibility-role>-<conversation-generation>` titles, without project prefixes by default.
   Master owns all durable role bindings; completion retains the current conversation/worktree.
   Creation, rotation and archive follow [Conversation Rotation](references/conversation-rotation-sop.md).
-  Verify new conversations' actual default cwd/Git identity before dispatch. Distinguish new-worktree
-  creation from exact retained-directory reuse; missing listings never authorize duplicate creation.
+  Default rotation creates a blank Local conversation in this project and reuses the old worktree with
+  explicit command `workdir` and absolute file paths. Verify target Git identity; record application cwd
+  separately. Missing listings never authorize duplicate creation. Do not assume UI Git actions target the old worktree.
 - Use [Task Lifecycle](references/task-lifecycle-sop.md) for STRICT delivery,
   [Release](references/release-sop.md) for certification/closeout/rollover, and
   [Exception and Recovery](references/exception-recovery-sop.md) for mismatches. Never bypass recovery stops.

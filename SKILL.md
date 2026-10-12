@@ -85,8 +85,10 @@ Progressive loading changes reading cost, not prerequisites, validation or stop 
   owns binding and lifecycle decisions. Use available task tools to inspect/message existing tasks;
   create, fork, move or archive only when the user requests that lifecycle action. Without coordination
   tools provide a copyable message; transport never grants authority.
-  Creation must verify the actual default execution directory before dispatch. New-worktree creation
-  does not prove retained-worktree reuse; follow the Conversation Rotation binding and pending-ID checks.
+  Rotation defaults to a blank `local` conversation in the same project, reusing the retained worktree
+  through an explicit `workdir` on every command and absolute file paths. Record the application's
+  default cwd separately; it need not equal the retained worktree. Verify actual target Git identity
+  before dispatch and follow the Conversation Rotation execution-directory and pending-ID checks.
 - Name conversations `<responsibility-role>-<conversation-generation>` (for example `Master-1.0`),
   without a project prefix by default. Rotation preserves task and Git identity; require successor
   verification and explicit confirmation before predecessor archive. Task completion does not retire
@@ -111,8 +113,10 @@ of current STRICT behavior; protocol v2 adoption/binding prototypes remain exper
 For new tasks and conversations, default every role to `gpt-6.1-sol` unless the user or project explicitly
 selects another model. This is a default, not a whitelist; preserve existing assignment profiles and
 digests until legally revised. Effort and service tier remain project choices. When a project persists
-a model policy, validate assignment equality and launcher support. Creation must explicitly pass the
-selected model and effort rather than silently inherit application defaults; follow the model-profile
+a model policy, validate assignment equality. Defaults are preferences: record unverified settings
+without claiming they applied; missing evidence blocks execution only for explicit hard requirements.
+Existing hard requirements remain binding. Creation must explicitly pass the
+selected model and effort through supported controls; follow the model-profile
 check in [Task Lifecycle](references/task-lifecycle-sop.md#model-profile) before executable dispatch.
 
 ## Validation and delivery

@@ -164,19 +164,27 @@ model profile 或 authorization；标题仅是人类可读的界面投影，持�
 
 持久对话轮换遵循[《Conversation Rotation SOP》](references/conversation-rotation-sop.md)，由 Master 独立负责角色绑定、创建、轮换和归档决策。
 首次创建时，`local` 使用所选项目的目录；`worktree` 在同一项目下创建新的独立工作树，不要求每个工作树另建项目。
-创建后先只读核对对话实际目录、Git 顶层、共享仓库、HEAD 和分支，再派工；提示词中的路径不构成绑定。
+轮换时默认在同一个项目创建空白 `local` 对话，通过每次命令显式指定旧工作树目录（`workdir`）和绝对文件路径复用旧工作树。
+创建后分别记录应用默认目录和实际操作目录，只读核对目标 Git 顶层、共享仓库、HEAD 和分支，再派工。
+应用默认目录可以仍是 Master；这不妨碍接手，但每次命令必须明确指定目标，不能依赖一次 `cd` 或提示词自动改变绑定。
 默认流程是“空白 successor + 结构化 handoff”：空白 successor 是强制默认；只有 predecessor history genuinely short 且 fork
-demonstrably necessary 时，Master 才可使用 fork，并在 handoff 或决策中记录理由。Master 先核对持久状态，再创建同一角色、worktree 和
-branch 的下一代 successor，完成 predecessor handoff，等待 successor 完成只读核对并明确确认，最后只归档 predecessor。默认的 blank
+demonstrably necessary 时，Master 才可使用 fork，并在 handoff 或决策中记录理由。Master 先核对持久状态并确认 predecessor 已停止执行，
+再创建同一角色、worktree 和 branch 的下一代 successor，完成 handoff，等待 successor 完成只读核对并明确确认，
+Master 确认接班后，successor 即可继续已授权工作。核实归档不会清理旧工作树后才归档 predecessor；
+暂时无法核实时只延期归档，保留旧对话但不让它继续执行。默认的 blank
 successor 不继承聊天上下文，必须从持久化记录恢复事实；fork 例外也不继承任何新的实现、发布、破坏性、同步或扩展范围授权；Worker
 可以报告需要轮换，但不能自行创建、绑定或归档对话。
 
 轮换保持 Task ID、Task Spec revision/digest、Plan 身份以及 Git worktree/branch/HEAD 身份，不复制未提交文件，不删除 worktree、branch、
 Task Spec、Card、commit 或其他历史。轮换触发仅限 context too long、explicit user request 或 persistent risk；task completion、convenience
-和 ordinary pause 都不是触发条件。错误 HEAD、错误 worktree、重复可见对话、未确认 successor 或 Worker 自归档请求都必须停止并保留
+和 ordinary pause 都不是触发条件。错误 HEAD、错误目标 worktree、竞争执行者、未确认 successor 或 Worker 自归档请求都必须停止并保留
 predecessor 与工作树。
 
-空白后继必须能复用原目录；当前接口不支持直接指定任意已有工作树时，停止并保留旧对话，不用新工作树冒充轮换。
+不需要新建工作树、单独添加项目或切换项目主文件夹。接手前用至少两次独立命令验证旧目录；后续每一轮都延续显式目录规则。
+Codex 界面的 Git、提交或工作树按钮仍可能作用于 Master；Git 操作使用明确指定目录的命令，除非已另行验证按钮目标。
+停止的旧对话和只读核对中的新对话可以暂时同时可见；接班后等待归档的旧对话也可保留，但不能恢复写入。
+模型、推理强度和加速默认是偏好；设置未能观察到时如实记录，不声称已生效。
+只有明确要求“必须满足”的配置才因无法满足或核实而停止；既有任务中的硬性要求不会被自动降级。
 对话列表缺失不等于创建失败：保存创建结果，核实正式 ID 后读取/等待，不重复创建。详见
 [创建、绑定与 pending 处理](references/conversation-rotation-sop.md#conversation-creation-and-worktree-binding)。
 

@@ -53,7 +53,10 @@ Master completes these checks before publishing implementation work:
    path stops that assignment.
    For a newly created conversation, first complete the
    [conversation/worktree binding check](conversation-rotation-sop.md#conversation-creation-and-worktree-binding).
-   A read-only bootstrap may establish its actual directory before assignment; publish no executable
+   For retained-worktree rotation, bootstrap verifies explicit target-directory calls separately from
+   application default cwd; their difference is permitted. Every later target command/file operation
+   must keep the explicit directory/absolute-path discipline. A read-only bootstrap establishes the
+   actual target before assignment; publish no executable
    Task Spec or message based only on a title, prompt path, pending client ID or assumed worktree location.
 3. Build the dependency and ownership view. Reject unknown, cyclic, redundant, stale, or asymmetric
    edges; semantic file/contract overlap; unavailable worktrees; and assignments whose current Card or
@@ -79,10 +82,10 @@ The minimum strict assignment evidence is:
 
 ### Model profile
 
-Projects choose model, effort and service tier; use the persisted profile exactly when a policy exists.
-The Skill imposes no model whitelist. Plan/Task profiles must equal project `model_policy.owner_defaults`,
-and the launcher must support the requested values. `service_tier` grants no external authority.
-Existing assignments retain their recorded profiles until legally revised.
+Projects choose model, effort and service tier. Plan/Task profiles must equal project
+`model_policy.owner_defaults`; they record requested settings, not observed runtime facts.
+The Skill imposes no model whitelist. `service_tier` grants no external authority.
+Existing assignments retain their recorded profiles and acceptance requirements until legally revised.
 
 For new tasks/conversations without an explicit user/project model choice, all roles default to
 `gpt-6.1-sol`. A default is not a whitelist and does not rewrite historical profiles. If an existing
@@ -91,15 +94,24 @@ policy/task update before new executable dispatch; never change old digests in p
 
 Before creating or resuming a conversation for executable work:
 
-1. Resolve model, effort and service tier from the applicable project policy. Pass the model and effort
-   explicitly through supported launcher parameters (for Codex task tools, `model` and `thinking`), not
-   just in the prompt. Do not rely on application defaults or silently substitute unsupported values.
-2. Before dispatch, verify model/effort from launcher acknowledgement or observable conversation settings.
-   A Task Spec, requested argument, title or Worker self-report alone is not proof of runtime settings.
-3. Set/verify the requested tier through a supported control or observable runtime setting. If the tool
-   has no tier parameter, do not invent one or claim `priority` was applied. Unverified required settings
-   are `NOT_PROVEN`: stop executable dispatch for that binding and report the missing control/evidence.
-   This checks requested settings, not an unobservable backend effective scheduling tier.
+1. Resolve model, effort and service tier from project policy, and distinguish defaults/preferences
+   from explicit hard requirements. Defaults are preferences unless the user/project or current
+   assignment says execution must stop without that setting. Record hard requirements in existing
+   assignment instructions/acceptance/stop conditions; add no Schema field or registry. Do not
+   downgrade an existing assignment's hard requirements to bypass a stop.
+2. Pass model and effort explicitly through supported launcher parameters (`model` and `thinking`
+   for Codex task tools). Use supported tier controls when available. Record requested, submitted
+   and observed values separately. An absent control or rejected value is not successful application;
+   do not silently substitute a model or invent a tier parameter.
+3. Check launcher acknowledgement or observable settings when available. A Task Spec, requested
+   argument, title or Worker self-report alone is not proof of runtime settings. Missing evidence
+   for a preference is `NOT_PROVEN` for that setting only; disclose it and continue when execution
+   is otherwise available and authorized. An unavailable `priority` control does not block work
+   when acceleration is only a preference, and never proves acceleration.
+4. An unmet or unverified hard requirement stops affected execution until met or explicitly revised.
+   A launcher rejection preventing execution also needs a supported, authorized resolution.
+   Authorization, identity, ownership and acceptance gates remain mandatory. This checks requested
+   settings, not unobservable backend scheduling.
 
 Reuse existing conversations only after the same configuration check. Do not create replacements,
 archive conversations or alter worktree bindings merely to correct model settings without lifecycle authority.
@@ -189,10 +201,11 @@ report to Master for any of the following:
 - wrong assignment, worktree, branch, baseline, role binding, or Plan/task fence;
 - dirty or untracked material that is unexpected, overlapping, or not clearly owned;
 - duplicate visible conversation or competing role/worktree binding;
-- missing, conflicting, stale, malformed, or noncanonical Card, Plan, Task Spec, handoff, digest, model,
+- missing, conflicting, stale, malformed, or noncanonical Card, Plan, Task Spec, handoff, digest,
   or authorization evidence;
 - unexpected dependency, ownership ambiguity, semantic overlap, or scope expansion;
-- unsupported model profile or any attempted external, execution, publication, destructive, synchronization,
+- an unmet/unverified hard runtime requirement or a persisted model-profile mismatch (an unobserved
+  preference alone is not a stop); or any attempted external, execution, publication, destructive, synchronization,
   or push action without a current explicit grant; or
 - a change in risk, scope, dependencies or authorization that the current assignment does not cover,
   need to modify a forbidden path, or missing required evidence. Rework count alone is not a stop condition;

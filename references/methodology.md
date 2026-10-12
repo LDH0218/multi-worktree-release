@@ -101,8 +101,9 @@ does not add a command wrapper, machine state, authority, or record.
 ## Durable role bindings
 
 A durable role binding is one governance tuple: `responsibility role → current visible conversation → retained worktree →
-branch`. Each long-lived role has exactly one current visible conversation and one retained worktree/branch pair; a retained
-pair cannot be concurrently claimed by another role or conversation. This is a derived v1 invariant, not a new machine record:
+branch`. Each long-lived role has exactly one current execution owner and one retained worktree/branch pair; a retained
+pair cannot have concurrent writers. A declared stopped predecessor may remain visible while its
+read-only successor verifies the handoff. This is a derived v1 invariant, not a new machine record:
 Master proves it from the task list, existing Dispatch Plan/Task Specs/Cards, and read-only Git/worktree inventory.
 
 Master is the sole lifecycle owner for persistent role bindings and conversation create, rotate, and archive decisions. It records
@@ -114,14 +115,18 @@ evidence in the existing discovery, task, handoff, or rotation projections. The 
   conversation generation, absolute worktree, branch, baseline, and relevant Plan/Task/Card identities before publishing work.
   Creating a worktree or branch follows its own explicit repository authority.
 - **Rotate:** create a blank successor first by default, with the same role, retained worktree, branch, and incremented generation;
-  only when the predecessor history is genuinely short and forking is demonstrably necessary may Master use a fork, and Master
+  confirm the predecessor has stopped executing before creation. Use same-project `local` mode with
+  explicit target `workdir` on every command and absolute file paths, following the Conversation
+  Rotation SOP. Record application cwd separately; native rebinding is not required.
+  Only when the predecessor history is genuinely short and forking is demonstrably necessary may Master use a fork, and Master
   must record that reason. In either case, complete the predecessor's structured handoff and require the successor's read-only
-  bootstrap plus explicit confirmation. Keep the predecessor visible until that confirmation passes; only then archive the
-  predecessor. The blank default inherits no chat context, the fork exception inherits no authority, this archive is history
+  bootstrap plus explicit confirmation. Keep the predecessor visible until that confirmation passes. Master then confirms the
+  successor as sole execution owner; authorized work may continue while safe archive of the inactive predecessor is deferred.
+  Archive only when worktree preservation is verified. The blank default inherits no chat context, the fork exception inherits no authority, this archive is history
   management rather than worktree or branch retirement, and rotation never copies uncommitted files.
   Rotation is triggered only by context becoming too long, an explicit user request, or persistent risk; task completion,
   convenience, or an ordinary pause alone are not triggers.
-- **Duplicate:** if two visible conversations claim one role or retained pair, stop dispatch immediately and keep it stopped
+- **Duplicate:** if undeclared competing conversations claim one role or retained pair, stop dispatch immediately and keep it stopped
   until Master reconciles the binding. Archive an unassigned duplicate only after proving it has no Task Spec, Card, changed or
   untracked material, or live binding. Mark its worktree as awaiting an explicit cleanup decision; never delete it
   automatically.
@@ -273,16 +278,18 @@ legacy record and may not contain per-task profiles. Once Master adds a policy, 
 fence: every `NEW` or `REVISE` Task Spec bound at or after that fence, and its matching Dispatch entry, must persist the same
 exact profile. Older digest-preserved `GRANDFATHER` and terminal evidence below the fence may omit it and must not be rewritten.
 Adding the policy or changing a profile is executable semantic content: increment `plan_revision`; a changed task profile also
-requires a higher `task_spec_revision` and a new digest. Unsupported model/reasoning/tier combinations or a Plan/Task Spec
-profile mismatch stop dispatch.
+requires a higher `task_spec_revision` and a new digest. A Plan/Task Spec profile mismatch stops dispatch;
+runtime preferences and explicit hard requirements follow the Task Lifecycle model-profile check.
 
 Projects choose model, reasoning effort and service tier in `model_policy.owner_defaults`.
 The Skill has no model whitelist. Each `selection_reason` remains bound to its owning role, and
-Plan/Task profiles must match project policy. Validate launcher support at dispatch time; do not
+Plan/Task profiles must match project policy. Check available launcher controls at dispatch time; do not
 substitute profiles silently. Existing assignments preserve their profiles and digests until legally revised.
 
-The persisted model `service_tier` is the requested scheduler profile, not a claim about the unobservable effective tier. Dispatch stops
-when the launcher can prove it cannot honor the requested profile. It is never authorization `route` or `provider`, and it grants no external
+The persisted model `service_tier` is the requested scheduler profile, not a claim about the unobservable effective tier.
+Defaults are preferences: disclose unavailable controls or unobserved settings without claiming they applied; these alone do not
+block dispatch. Unmet or unverified explicit hard requirements stop dispatch. Historical assignment requirements remain binding
+until legally revised; a rejected launch cannot be treated as execution. It is never authorization `route` or `provider`, and it grants no external
 call, execution creation, publication, destructive operation, synchronization, or scope expansion. Those capabilities remain
 governed solely by the complete default-deny authorization envelope and its independent digest.
 
@@ -339,7 +346,8 @@ Separate three completion states:
 
 ## Core invariants
 
-1. One long-lived role has one current visible conversation and one explicit retained worktree/branch pair.
+1. One long-lived role has one current execution owner and one explicit retained worktree/branch pair.
+   A declared stopped predecessor may remain visible during successor confirmation and inactive while safe archive is deferred.
 2. Rotation creates and verifies the successor before archiving the predecessor; it reuses the worktree and branch and does not
    copy uncommitted files.
 3. Every task freezes a full commit SHA.
@@ -1025,6 +1033,11 @@ the predecessor history is genuinely short and forking is demonstrably necessary
 Master verifies current durable state, creates the successor with the same role, retained worktree, branch, and incremented
 generation, completes the predecessor's structured handoff, and waits for explicit successor confirmation before archiving only
 the predecessor.
+Default creation uses same-project `local` mode after the predecessor stops. The successor reuses the
+retained directory through explicit `workdir` on every command and absolute file paths; application cwd
+may remain Master. The Conversation Rotation SOP defines target checks, later-turn discipline and UI limits.
+Confirmed handover enables authorized successor work independently of archive. If archive safety is unknown,
+preserve the inactive predecessor and defer only archive; record the reason in the existing handoff.
 The successor recovers facts from persisted records, not chat memory. Rotation preserves Task ID, Task Spec revision/digest, Plan
 identity, and Git worktree/branch/HEAD identity; it never copies uncommitted files, deletes history, or lets task completion alone
 trigger archive. The blank successor is mandatory by default; only when the predecessor history is genuinely short and forking is
@@ -1048,7 +1061,8 @@ If an old conversation disappears:
 - For `AWAITING_INTEGRATION`, verify the commit remains reachable and wait for Master.
 - For `BLOCKED`, preserve the blocker kind, evidence, `blocked_since`, and recovery owner.
 - Only Master may invalidate the old task, assign a takeover, or publish a superseding task.
-- If duplicate visible conversations are discovered, stop dispatch and reconcile the role/worktree binding before any archive or
+- If undeclared competing conversations are discovered (not declared handover or an inactive predecessor awaiting archive),
+  stop dispatch and reconcile the role/worktree binding before any archive or
   reassignment. Archive only an unassigned duplicate with no Task Spec, Card, changed/untracked material, or live binding; leave
   its worktree awaiting an explicit cleanup decision.
 - A role-binding retirement requires an explicit topology, role-retirement, or major-migration decision and preserved evidence;
