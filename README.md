@@ -69,10 +69,11 @@ flowchart LR
 
 完整方法见 [references/methodology.md](references/methodology.md)。
 
-Master 提交或集成后，要检查哪些保留的 Worker 需要更新。按
-[任务间同步流程](references/task-lifecycle-sop.md#between-task-worktree-synchronization)，
-先确认 Worker 空闲且已停止，再在明确授权下更新原工作树；Worker 核对新 HEAD 并重读变更规则后才派下一项任务。
-正在执行的任务不换基线；暂不能更新时必须说明目标版本、原因、负责人和下次触发条件。同步不要求先推送。
+用户指定同步目标后，Master 每次提交或集成，都按
+[提交后同步流程](references/task-lifecycle-sop.md#between-task-worktree-synchronization)
+在本次收尾中更新指定的 Worker 原工作树，不等下一次派工，也不重复询问已授予的同步权限。
+指定两个就只处理这两个，不扩展到历史工作树。先确认空闲且执行已停止，再同步、核对 HEAD 并让 Worker 重读变更规则。
+有活动任务、未处理改动或冲突就停止对应同步并立即报告；不能覆盖成果，也不能把部分完成说成全部完成。同步不要求先推送。
 
 面向实际操作的八个 SOP：
 

@@ -45,7 +45,7 @@ Progressive loading changes reading cost, not prerequisites, validation or stop 
 | Current operation | Required procedure |
 | --- | --- |
 | STRICT publication, execution, handoff, integration or Worker return to IDLE | [Task Lifecycle](references/task-lifecycle-sop.md) |
-| Prepare retained Workers after Master changes or before the next assignment | [Between-task synchronization](references/task-lifecycle-sop.md#between-task-worktree-synchronization); Master-owned, separately authorized, never changes an active baseline |
+| Master commits/integrates with designated retained Workers | [Post-commit synchronization](references/task-lifecycle-sop.md#between-task-worktree-synchronization); same-delivery default under standing user authority; active tasks/conflicts stop and are reported |
 | Candidate/Gate certification, publication, closeout or rollover | [Release](references/release-sop.md) |
 | Assignment mismatch, blocker, rework, cancellation or supersession | [Exception and Recovery](references/exception-recovery-sop.md) |
 | Create, rotate, recover or archive a persistent conversation | [Conversation Rotation](references/conversation-rotation-sop.md), sole conversation lifecycle authority |
@@ -98,6 +98,9 @@ Progressive loading changes reading cost, not prerequisites, validation or stop 
   records Worker-to-integrated SHA mappings. Regenerate final evidence from the integrated tree;
   semantic conflicts return to their owner or a verified Master takeover. Only Master declares a release candidate.
 - Ordinary delivery uses `change → checks → diff review → commit → authorized normal push`.
+  With standing user authority, synchronize designated retained Workers after the Master commit as
+  delivery closeout; do not wait for the next assignment or request the same permission again.
+  Active tasks, conflicting state or ambiguous targets stop affected synchronization and are reported.
   A normal code push needs explicit target/ref authorization, clean reviewed commits and remote checks,
   but no Candidate or closeout. An ACTIVE Master release lock does not block unrelated bounded work;
   active Worker assignments still require legal reconciliation before their work is taken over.

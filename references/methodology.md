@@ -392,8 +392,10 @@ Read-only bootstrap
 Explicit branches:
 
 - Worker-owned defect: publish a rework revision or reconcile a Master takeover; preserve the original handoff commit.
-- Between completed tasks: Master prepares the retained worktree and obtains Worker confirmation under
-  [between-task synchronization](task-lifecycle-sop.md#between-task-worktree-synchronization), before freezing a new assignment.
+- After a Master commit/integration: under standing user authority, Master synchronizes the designated
+  retained Workers and obtains confirmation in the same delivery, following
+  [post-commit synchronization](task-lifecycle-sop.md#between-task-worktree-synchronization).
+  Do not wait for the next assignment; activity/conflicts stop affected updates and require a report.
 - Changed baseline or scope of a published task: use the existing superseding-task rules; idle worktree
   preparation is not permission to revise an active frozen baseline in place.
 - Mechanical generated-output conflict: Master integrates sources and regenerates the derived output.

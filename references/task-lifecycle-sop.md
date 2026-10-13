@@ -198,24 +198,30 @@ and Master review remain separate. An automatic Card command does not stop a run
 
 ## Between-task worktree synchronization
 
-**Owner and timing.** Master owns baseline preparation, not Worker self-synchronization. After a
-Master commit or accepted integration, assess which retained Workers need the change, including shared
-collaboration rules. Prepare affected idle Workers as part of delivery coordination when authorized
-and safe. Otherwise record the exact target SHA, deferral reason, owner and next trigger; do not merely
-say "not synchronized". Unaffected Workers may wait, but every new assignment must check its baseline.
-This assessment creates no STRICT records for otherwise eligible FAST work.
+**Owner and timing.** Master owns synchronization, not Worker self-synchronization. When the user has
+designated retained Workers for post-commit synchronization, every completed Master commit or accepted
+integration triggers synchronization of that entire set as part of the same delivery. Do not defer to
+the next assignment or omit a designated Worker because a change appears unrelated. For a user-designated
+pair, synchronize those two, not all historical worktrees. Already-current targets need verification only.
+The user's standing synchronization instruction remains authority within its scope until changed or
+revoked; do not ask for the same permission again after each commit. Without such an instruction, assess
+affected Workers and resolve authority normally. No new STRICT records are needed for an eligible FAST task.
 
-The order is **accepted integration and checks → legal Worker IDLE and stopped execution → authorized
-baseline preparation → Worker confirmation → new assignment**. Master-only changes start with the
-committed, checked Master result. An `IDLE` Card alone does not prove execution has stopped.
+The order is **Master commit/integration and checks → verify Worker IDLE and stopped execution →
+synchronize now → Worker confirmation → delivery closeout**. A later assignment rechecks the baseline
+but is not the synchronization trigger. An `IDLE` Card alone does not prove execution has stopped.
 
-1. **Select and authorize.** Pin a locally available, committed and checked full Master SHA. Identify
-   exact Worker directories and permitted operations. Explicit synchronization authority must cover
-   the operation, including branch creation when needed; a prior bounded grant may cover it, but
-   commit/push authority alone does not. Same-repository worktrees share Git objects: using that local
-   commit needs no push, fetch or pull. This SOP itself grants no mutation authority.
+1. **Resolve targets and existing authority.** Pin the committed, checked full Master SHA. Resolve the
+   designated roles to exact retained directories using existing governance/bindings; retain the user
+   instruction and target scope there or in the existing handoff, not a new registry. Unknown or conflicting
+   target mappings stop with `NOT_PROVEN`; never guess two directories from inventory order. Apply the
+   standing grant without requesting it again. It covers bounded local synchronization, not destructive
+   operations, external publication or unrelated worktrees; branch creation must be within its scope.
+   A generic commit/push request without standing synchronization authority is not such a grant.
+   Same-repository worktrees share Git objects: no push, fetch or pull is needed for this local update.
 2. **Check and preserve.** Verify no active assignment or running/background writer, and a canonical
-   Card absent or legally `IDLE`. Finish pending integration/rework/recovery first. Inspect branch/HEAD,
+   Card absent or legally `IDLE`. An active task or pending integration/rework/recovery stops that target;
+   report immediately rather than silently postponing to the next assignment. Inspect branch/HEAD,
    index, tracked changes, untracked/ignored material and local-only commits. Stop for dirty tracked/index
    state, unresolved work or possible file collisions. Preserve nonconflicting local state/history in
    place; never stash, clean, reset or delete automatically.
@@ -232,12 +238,14 @@ committed, checked Master result. An `IDLE` Card alone does not prove execution 
    rewrite handed-off commits as a synchronization shortcut.
 4. **Verify and acknowledge.** Master checks actual path, branch, exact target HEAD and preserved
    material. Before executable dispatch, Worker independently checks those facts and fully reads changed
-   applicable governance. Git success or message delivery is not acknowledgement; missing confirmation
-   is `NOT_PROVEN` and blocks the next assignment, not independent Workers.
+   applicable governance. Request this confirmation in the same delivery when authorized conversation
+   coordination is available. Git success or message delivery is not acknowledgement; missing confirmation
+   is `NOT_PROVEN`. Report "checkout synchronized; Worker confirmation pending", not complete readiness;
+   it blocks the next assignment, not independent Workers.
 5. **Freeze the next task.** Only after confirmation publish against the verified baseline. Update
    current binding facts, not old Task Specs, digests, handoffs or `last_task` evidence. Rotation alone
-   preserves branch/HEAD; this separately authorized between-task operation may prepare a new branch
-   without rotating the conversation or replacing the retained directory.
+   preserves branch/HEAD; this Git operation may prepare a new branch when covered by the standing
+   grant or another applicable grant, without rotating the conversation or replacing the retained directory.
 
 Active, blocked or awaiting-integration Workers retain their frozen baseline and governing rules.
 Urgent adoption requires stopping affected execution and reconciling/superseding the old assignment
@@ -245,9 +253,11 @@ before preparing a replacement; do not silently change an active baseline. Indep
 
 In the existing coordination/handoff report retain: Worker/path, old branch/SHA, target and resulting
 branch/SHA, authority, preservation check, rule-reading acknowledgement and `PASS / FAIL / NOT_PROVEN`,
-or deferral reason/owner/trigger. These are human evidence, not new machine states or a registry.
-Report delivery and Worker readiness separately when preparation is deferred. Failure stops that
-operation while preserving all records and material.
+or the exact blocker, owner and recovery step. These are human evidence, not new machine states or a
+registry. Activity, dirty state, conflicts or missing evidence stop the affected target and must be
+reported in the current delivery; "wait until next dispatch" and repeated requests for the same granted
+authority are not valid default outcomes. Safe independent targets may complete, but report each result
+separately and never claim the pair synchronized when only one succeeded. Preserve all records/material.
 
 ## Stop-and-preserve checklist
 

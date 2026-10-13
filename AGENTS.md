@@ -11,6 +11,10 @@ procedure needed for the current task; fully read selected instructions before a
   formal release certification or complex recovery. Freeze strict assignments to full SHAs and retain
   Task Specs, grants, acceptance and handoff evidence.
 - Keep live coordination under `.codex/multi-worktree-release/` local and ignored. Preserve user changes.
+- After each Master commit/integration, synchronize the user-designated retained Worker set in the same
+  delivery under their standing instruction; do not wait for the next task or ask again within that scope.
+  Resolve the designated pair through verified bindings, never by selecting arbitrary historical worktrees.
+  Active tasks, conflicts or ambiguous targets stop affected synchronization and require an immediate report.
 - New Master and Worker tasks/conversations default to `gpt-6.1-sol`. Keep the existing role effort/tier
   choices unless explicitly changed: Master `high/default`, Workers `max/priority`. Pass model and effort
   explicitly at creation or authorized follow-up. These defaults are preferences; report unavailable

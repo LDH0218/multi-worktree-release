@@ -185,9 +185,10 @@ release readiness. The Worker owns only its assigned paths and evidence.
 6. Master records the Worker-to-integrated SHA mapping and, after acceptance evidence is complete,
    the Worker returns its Card to `IDLE` through the legal sidecar transition. A Worker-only rework
    does not change the existing candidate evidence.
-7. Assess retained Worker readiness after Master commits/integration. For affected idle Workers,
-   perform authorized between-task preparation or record target SHA, deferral reason, owner and next
-   trigger. Never alter active baselines or treat commit/push authority as synchronization authority.
+7. After each Master commit/integration, synchronize the user-designated Worker set in the same delivery
+   under its standing grant, without waiting for dispatch or asking the same permission again. Verify
+   targets and stopped/idle state first; activity or conflicts stop affected synchronization and must
+   be reported now. Keep per-target results; never change active baselines or widen the grant.
 
 **Continue condition.** Every assignment, handoff, integration, projection, and validation check is
 current and independently evidenced; the integrated Master tree is the only source for release gates.
@@ -208,6 +209,9 @@ For reviewed commits under explicit user authorization, verify clean Git state, 
 required local checks and remote ancestry; perform a normal push and verify the resulting remote SHA.
 No Candidate, release envelope record or closeout is required for an ordinary code push. Preserve
 active strict assignments and invalidate formal release evidence when its integrated HEAD changes.
+Post-commit synchronization under a standing user instruction remains part of delivery closeout;
+calling the operation "commit/push only" does not cancel that instruction. Report synchronization blockers
+separately from the push result; neither permission grants the other when no standing instruction exists.
 
 ## Conditional release route — integrated tree first
 
