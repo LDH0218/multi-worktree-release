@@ -166,7 +166,9 @@ release readiness. The Worker owns only its assigned paths and evidence.
 **Ordered steps.**
 
 1. Master performs read-only discovery of role/conversation/worktree bindings, dependencies, current
-   Git truth, preserved material, and authority. Master persists the complete Task Spec and Plan with
+   Git truth, preserved material, and authority. Complete required
+   [between-task baseline preparation](task-lifecycle-sop.md#between-task-worktree-synchronization)
+   and Worker confirmation before freezing the new assignment. Master persists the complete Task Spec and Plan with
    exact digests and fences before publishing the assignment.
 2. Validate the persisted Task Spec/Plan/Master Card and the target worktree before mutation. Activate
    the canonical Worker Card through `worker_card_sidecar.py` only after identity, baseline, scope,
@@ -183,6 +185,9 @@ release readiness. The Worker owns only its assigned paths and evidence.
 6. Master records the Worker-to-integrated SHA mapping and, after acceptance evidence is complete,
    the Worker returns its Card to `IDLE` through the legal sidecar transition. A Worker-only rework
    does not change the existing candidate evidence.
+7. Assess retained Worker readiness after Master commits/integration. For affected idle Workers,
+   perform authorized between-task preparation or record target SHA, deferral reason, owner and next
+   trigger. Never alter active baselines or treat commit/push authority as synchronization authority.
 
 **Continue condition.** Every assignment, handoff, integration, projection, and validation check is
 current and independently evidenced; the integrated Master tree is the only source for release gates.

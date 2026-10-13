@@ -45,6 +45,7 @@ Progressive loading changes reading cost, not prerequisites, validation or stop 
 | Current operation | Required procedure |
 | --- | --- |
 | STRICT publication, execution, handoff, integration or Worker return to IDLE | [Task Lifecycle](references/task-lifecycle-sop.md) |
+| Prepare retained Workers after Master changes or before the next assignment | [Between-task synchronization](references/task-lifecycle-sop.md#between-task-worktree-synchronization); Master-owned, separately authorized, never changes an active baseline |
 | Candidate/Gate certification, publication, closeout or rollover | [Release](references/release-sop.md) |
 | Assignment mismatch, blocker, rework, cancellation or supersession | [Exception and Recovery](references/exception-recovery-sop.md) |
 | Create, rotate, recover or archive a persistent conversation | [Conversation Rotation](references/conversation-rotation-sop.md), sole conversation lifecycle authority |

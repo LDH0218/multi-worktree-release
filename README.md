@@ -69,9 +69,14 @@ flowchart LR
 
 完整方法见 [references/methodology.md](references/methodology.md)。
 
+Master 提交或集成后，要检查哪些保留的 Worker 需要更新。按
+[任务间同步流程](references/task-lifecycle-sop.md#between-task-worktree-synchronization)，
+先确认 Worker 空闲且已停止，再在明确授权下更新原工作树；Worker 核对新 HEAD 并重读变更规则后才派下一项任务。
+正在执行的任务不换基线；暂不能更新时必须说明目标版本、原因、负责人和下次触发条件。同步不要求先推送。
+
 面向实际操作的八个 SOP：
 
-- [Task Lifecycle SOP](references/task-lifecycle-sop.md)：从 FAST/STRICT 判断、派工和 Worker 执行，到 handoff、集成与 `IDLE` closeout；
+- [Task Lifecycle SOP](references/task-lifecycle-sop.md)：从 FAST/STRICT 判断、派工和 Worker 执行，到 handoff、集成、`IDLE` 与下一任务的基线准备；
 - [Release SOP](references/release-sop.md)：从集成树和 Candidate/Gate 重新认证，到显式发布、push、closeout 与 rollover；
 - [Exception and Recovery SOP](references/exception-recovery-sop.md)：错误基线、Card/digest、范围、阻塞、修订、替代、取消与恢复决策。
 - [SOP Compliance Audit](references/sop-compliance-audit-sop.md)：审计 FAST、STRICT、release、recovery、adoption、变更、保留和对话轮换的实际执行证据；

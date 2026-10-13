@@ -43,6 +43,9 @@ and scope remain bounded.
 
 ## 2. STRICT preflight and publication
 
+Complete required [between-task baseline preparation](#between-task-worktree-synchronization)
+before publishing a new assignment. Never freeze a desired SHA while the Worker checkout is still older.
+
 Master completes these checks before publishing implementation work:
 
 1. Read repository instructions and the routed methodology, templates, Schema, validator, and SOPs that
@@ -192,6 +195,59 @@ Generated normal transitions use the same state-root lock, identity/digest valid
 write as explicit `--transition --card-json`. Repeated identical transitions are idempotent.
 Blocker details and exceptional recovery still use the complete explicit Card; Plan/Task publication
 and Master review remain separate. An automatic Card command does not stop a running conversation.
+
+## Between-task worktree synchronization
+
+**Owner and timing.** Master owns baseline preparation, not Worker self-synchronization. After a
+Master commit or accepted integration, assess which retained Workers need the change, including shared
+collaboration rules. Prepare affected idle Workers as part of delivery coordination when authorized
+and safe. Otherwise record the exact target SHA, deferral reason, owner and next trigger; do not merely
+say "not synchronized". Unaffected Workers may wait, but every new assignment must check its baseline.
+This assessment creates no STRICT records for otherwise eligible FAST work.
+
+The order is **accepted integration and checks → legal Worker IDLE and stopped execution → authorized
+baseline preparation → Worker confirmation → new assignment**. Master-only changes start with the
+committed, checked Master result. An `IDLE` Card alone does not prove execution has stopped.
+
+1. **Select and authorize.** Pin a locally available, committed and checked full Master SHA. Identify
+   exact Worker directories and permitted operations. Explicit synchronization authority must cover
+   the operation, including branch creation when needed; a prior bounded grant may cover it, but
+   commit/push authority alone does not. Same-repository worktrees share Git objects: using that local
+   commit needs no push, fetch or pull. This SOP itself grants no mutation authority.
+2. **Check and preserve.** Verify no active assignment or running/background writer, and a canonical
+   Card absent or legally `IDLE`. Finish pending integration/rework/recovery first. Inspect branch/HEAD,
+   index, tracked changes, untracked/ignored material and local-only commits. Stop for dirty tracked/index
+   state, unresolved work or possible file collisions. Preserve nonconflicting local state/history in
+   place; never stash, clean, reset or delete automatically.
+3. **Update the existing directory**, with explicit command `workdir` and full SHAs:
+   - Already at target: verify; no Git mutation.
+   - Current named branch is an ancestor of target: authorized `git merge --ff-only <FULL_TARGET_SHA>`.
+   - Diverged history, or detached checkout needing a task branch: reconcile local work and retain old
+     branches/commits first; with explicit authority, use
+     `git switch -c <NEW_TASK_BRANCH> <FULL_TARGET_SHA>` in the same directory. An existing branch name
+     stops the operation. Preserve otherwise detached-only history under a durable Git ref, with
+     applicable ref-creation authority, before moving HEAD.
+   Recheck branch/HEAD immediately before writing. Never switch onto Master's checked-out branch,
+   create replacement worktrees/conversations, merge divergent histories, rebase, force-reset or
+   rewrite handed-off commits as a synchronization shortcut.
+4. **Verify and acknowledge.** Master checks actual path, branch, exact target HEAD and preserved
+   material. Before executable dispatch, Worker independently checks those facts and fully reads changed
+   applicable governance. Git success or message delivery is not acknowledgement; missing confirmation
+   is `NOT_PROVEN` and blocks the next assignment, not independent Workers.
+5. **Freeze the next task.** Only after confirmation publish against the verified baseline. Update
+   current binding facts, not old Task Specs, digests, handoffs or `last_task` evidence. Rotation alone
+   preserves branch/HEAD; this separately authorized between-task operation may prepare a new branch
+   without rotating the conversation or replacing the retained directory.
+
+Active, blocked or awaiting-integration Workers retain their frozen baseline and governing rules.
+Urgent adoption requires stopping affected execution and reconciling/superseding the old assignment
+before preparing a replacement; do not silently change an active baseline. Independent work continues.
+
+In the existing coordination/handoff report retain: Worker/path, old branch/SHA, target and resulting
+branch/SHA, authority, preservation check, rule-reading acknowledgement and `PASS / FAIL / NOT_PROVEN`,
+or deferral reason/owner/trigger. These are human evidence, not new machine states or a registry.
+Report delivery and Worker readiness separately when preparation is deferred. Failure stops that
+operation while preserving all records and material.
 
 ## Stop-and-preserve checklist
 

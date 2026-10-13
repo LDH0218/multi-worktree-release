@@ -392,7 +392,10 @@ Read-only bootstrap
 Explicit branches:
 
 - Worker-owned defect: publish a rework revision or reconcile a Master takeover; preserve the original handoff commit.
-- Stale baseline or changed scope: publish a synchronization task or a replacement with `supersedes_task_id`.
+- Between completed tasks: Master prepares the retained worktree and obtains Worker confirmation under
+  [between-task synchronization](task-lifecycle-sop.md#between-task-worktree-synchronization), before freezing a new assignment.
+- Changed baseline or scope of a published task: use the existing superseding-task rules; idle worktree
+  preparation is not permission to revise an active frozen baseline in place.
 - Mechanical generated-output conflict: Master integrates sources and regenerates the derived output.
 - Ambiguous ownership or correct value: mark `BLOCKED`, preserve evidence, and request a decision.
 - Cancellation: stop new work, inspect current state, preserve user changes, record the outcome, then release the lock.
